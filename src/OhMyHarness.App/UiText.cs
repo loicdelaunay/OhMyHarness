@@ -5,6 +5,10 @@ public static class UiText
     public static string Language { get; set; } = "fr";
     public static readonly Dictionary<string, string> English = new()
     {
+        ["Touche invalide. Appelez keyboard_keys pour lister les touches et exemples acceptés."] = "Invalid key. Call keyboard_keys to list supported keys and examples.",
+        ["Arrêtez les conversations en cours avant de supprimer leur projet."] = "Stop the running conversations before deleting their project.",
+        ["Arrêtez cette conversation avant de la supprimer."] = "Stop this conversation before deleting it.",
+        ["Ce fournisseur est utilisé par une conversation en cours."] = "This provider is used by a running conversation.",
         ["Outils"] = "Tools",
         ["Écrire hors du périmètre du projet"] = "Write outside the project scope",
         ["Créer ou remplacer le contenu intégral de ce fichier :"] = "Create or replace the entire content of this file:",

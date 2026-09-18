@@ -1,6 +1,8 @@
 # OhMyHarness
 
-Application Windows native **WinUI 3 / .NET 10**, pour discuter avec OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1.
+Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1. La version Windows native reste en **WinUI 3 / .NET 10**. Une nouvelle interface **Electron + service .NET partagé** ajoute macOS Apple Silicon et Intel, et peut aussi être utilisée sous Windows.
+
+**macOS :** voir [le guide de compilation, les adaptations et les validations restantes](docs/macos.md). WinUI 3 lui-même ne fonctionne pas sur Mac. Le service compile pour les deux architectures Mac ; les permissions système et les interactions natives restent à valider sur un Mac réel. Les sections ci-dessous décrivent principalement la version WinUI Windows.
 
 ## Démarrer
 
@@ -27,6 +29,8 @@ Le bouton **+ OpenCode** crée une connexion dédiée au serveur local OpenCode.
 - **Réglages → Autorisations → Comportement des demandes d’autorisation** applique une règle globale avant les popups : **Refuser tout**, **Demander** (mode par défaut) ou **Acceptation automatique**. Refuser tout et Acceptation automatique ont priorité sur les autorisations permanentes enregistrées. Les protections de chemins et les exclusions de secrets restent actives dans les trois modes.
 
 - Projets avec conversations indépendantes ; création, renommage et suppression.
+- Plusieurs conversations peuvent générer une réponse simultanément (OpenAI compatible, DeepSeek et OpenCode), y compris dans des projets différents. Une barre animée apparaît sous chaque conversation en cours dans la liste. La navigation, les réglages et les brouillons restent disponibles ; **Arrêter** ne coupe que la conversation affichée. Chaque envoi conserve son fournisseur, son modèle, ses sources et ses images. Les brouillons et pièces jointes restent associés au chat pendant la session de l’application. Les outils du navigateur et du bureau partagés sont exécutés successivement pour éviter les collisions ; leurs demandes d’autorisation attendent la fermeture du dialogue précédent.
+- Le skill **Contrôle du clavier** expose aussi `keyboard_keys`, qui liste les touches, alias et exemples utilisables. `Alt`, `Ctrl`, `Shift` et `Win` fonctionnent seuls, ainsi que les raccourcis tels que `Ctrl+S` et `Alt+Tab`. `Entrée` et `Enter` sont acceptés. Un appui relâche la touche immédiatement ; il ne maintient pas un modificateur entre deux appels.
 - Historique persistant, restauration du dernier projet, de la conversation et du fournisseur.
 - Streaming SSE, arrêt de génération et conservation des réponses interrompues (exclues des requêtes suivantes).
 - Le bloc **Raisonnement du modèle** s’ouvre pendant le flux et fait défiler son propre contenu vers le bas à chaque mise à jour, indépendamment du défilement principal de la conversation.
@@ -78,6 +82,9 @@ dotnet ef migrations add NomMigration --project src/OhMyHarness.Core --output-di
 | --- | --- |
 | `src/OhMyHarness.Core` | EF Core, entités, migrations, DPAPI, client HTTP/SSE, accès aux sources |
 | `src/OhMyHarness.App` | Application WinUI 3, interface, WebView2, orchestration des outils |
+| `src/OhMyHarness.Service` | Service portable : conversations parallèles, fournisseurs, outils, permissions, entrées natives Windows/macOS |
+| `desktop` | Interface Electron Windows/macOS, navigateur isolé, Keychain, capture avec curseur, packaging et tests d’intégration |
+| `OhMyHarness.Desktop.slnx` | Solution portable sans dépendance WinUI, à utiliser sur macOS |
 | `tests/OhMyHarness.Tests` | Exécutable de tests hors ligne, sans clé API |
 
 ## Validation et limites

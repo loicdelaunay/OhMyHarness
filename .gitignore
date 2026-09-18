@@ -5,4 +5,9 @@
 artifacts/
 *.db*
 *.user
-
+*.sqlite*
+**/node_modules/
+desktop/sidecar/
+desktop/dist/
+desktop/.smoke/
+desktop/.data/

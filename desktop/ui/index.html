@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'">
+<title>OhMyHarness</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<aside id="sidebar"><header><strong>◈ OhMyHarness</strong><small id="platform"></small></header>
+  <div class="project-row"><select id="projects" aria-label="Projet"></select><button id="new-project" title="Ajouter un projet">+</button><button id="manage-project">⋯</button></div>
+  <button id="new-chat" class="wide accent">＋ Nouvelle conversation</button><div id="chats"></div>
+  <button id="settings-open" class="wide">⚙ Réglages</button>
+</aside>
+<main id="chat"><header class="chat-header"><h1 id="chat-title">OhMyHarness</h1><button id="rename-chat" title="Renommer">✎</button><button id="delete-chat" title="Supprimer">⌫</button><button id="tools-toggle">▤ Outils</button></header>
+  <div id="messages" aria-live="polite"></div>
+  <footer><div class="metrics"><select id="providers" aria-label="Fournisseur"></select><select id="thinking" aria-label="Thinking"><option>auto</option><option>low</option><option>medium</option><option>high</option></select><span id="speed">— tok/s</span><span id="context">— tokens</span><progress id="context-progress" max="100" value="0"></progress></div>
+    <div id="assets"></div><div class="composer"><textarea id="composer" placeholder="Posez une question…" rows="3"></textarea><div class="composer-actions"><button id="plus" aria-label="Pièces jointes et skills">＋</button><span id="shortcut">Entrée ↵ · Ctrl+Entrée : nouvelle ligne</span><button id="stop" title="Arrêter">■</button><button id="send" class="accent" title="Envoyer">↑</button></div></div>
+    <div id="composer-menu" class="popover" hidden></div><div id="status" role="status"></div>
+  </footer>
+</main>
+<section id="tools" hidden><header><strong id="tools-title">Outils</strong><button id="tools-full" title="Agrandir">⛶</button><button id="tools-close" title="Fermer">×</button></header>
+  <nav id="tool-tabs"><button data-tab="web" class="selected">Web</button><button data-tab="terminal">Terminal</button><button data-tab="git">Git</button><button data-tab="files">Fichiers</button></nav>
+  <div id="web-tool" class="tool-content"><div class="browser-controls"><button id="web-back">←</button><input id="address" placeholder="https://…"><button id="web-go">↵</button><button id="web-file">📁</button></div><div class="checks"><label><input type="checkbox" id="browser-access"> Accès IA</label><label><input type="checkbox" id="dom-access"> DOM & interactions</label></div><div id="browser-surface"></div></div>
+  <div id="terminal-tool" class="tool-content" hidden><p id="shell-info"></p><textarea id="command" rows="4" spellcheck="false"></textarea><button id="terminal-run">Exécuter</button><pre id="terminal-output"></pre></div>
+  <div id="git-tool" class="tool-content" hidden><button id="git-refresh">Actualiser</button><pre id="git-output"></pre></div>
+  <div id="files-tool" class="tool-content" hidden><div class="browser-controls"><button id="files-root">⌂</button><input id="file-path" value="."><button id="files-go">↵</button></div><div id="file-list"></div><button id="file-preview" hidden>Ouvrir dans Web</button><pre id="file-content"></pre></div>
+</section>
+<dialog id="settings"><header><h2>Réglages / Settings</h2><button data-close="settings">×</button></header>
+  <nav id="setting-tabs"><button data-settings="general">Général</button><button data-settings="providers">Fournisseurs</button><button data-settings="skills">Skills</button><button data-settings="permissions">Autorisations</button><button data-settings="templates">Templates</button></nav>
+  <div id="settings-content"></div>
+</dialog>
+<dialog id="project-dialog"><form id="project-form"><h2>Projet / Project</h2><label>Nom / Name<input id="project-name" required></label><button type="button" id="project-folders">＋ Dossiers sources / Source folders</button><div id="project-sources"></div><div class="form-actions"><button type="button" id="project-delete">Supprimer / Delete</button><button type="button" data-close="project-dialog">Annuler / Cancel</button><button class="accent">Enregistrer / Save</button></div></form></dialog>
+<dialog id="name-dialog"><form id="name-form"><label>Nom / Name<input id="new-name" required maxlength="120"></label><div class="form-actions"><button type="button" data-close="name-dialog">Annuler / Cancel</button><button class="accent">Enregistrer / Save</button></div></form></dialog>
+<script src="app.js"></script></body></html>

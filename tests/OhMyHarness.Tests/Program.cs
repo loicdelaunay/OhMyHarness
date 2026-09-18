@@ -39,6 +39,15 @@ Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Racc
 var aliasChord = KeyboardInput.ParseChord("control+return");
 Check(aliasChord.Modifiers.SequenceEqual(["CTRL"]) && aliasChord.Key == "ENTER", "Alias clavier normalisés");
 Check(KeyboardInput.ParseChord("ALT+TAB").Key == "TAB" && KeyboardInput.ParseChord("WIN+D").Key == "D" && KeyboardInput.ParseChord("F12").Key == "F12", "Touches spéciales clavier acceptées");
+Check(new[] { "ALT", "CTRL", "SHIFT", "WIN" }.All(key => KeyboardInput.ParseChord(key) is { Modifiers.Count: 0 } chord && chord.Key == key), "Appui isolé sur Alt, Ctrl, Shift et Win accepté");
+Check(KeyboardInput.ParseChord("Entrée").Key == "ENTER" && KeyboardInput.ParseChord(" windows ").Key == "WIN", "Alias français et modificateurs seuls normalisés");
+Check(KeyboardInput.ParseChord("Command+Option+S").Modifiers.SequenceEqual(["WIN", "ALT"]), "Raccourci macOS Command/Option normalisé");
+Check(!KeyboardInput.KeysForPlatform(true).Contains("PRINTSCREEN") && !KeyboardInput.KeysForPlatform(true).Contains("F24") && KeyboardInput.KeysForPlatform(true).Contains("F20"), "Catalogue macOS limité aux touches natives prises en charge");
+var keyboardCatalog = JsonNode.Parse(KeyboardInput.DescribeKeys())!;
+Check(keyboardCatalog["keys"]!.AsArray().All(key => KeyboardInput.ParseChord(key!.GetValue<string>()).Key == key.GetValue<string>()), "Toutes les touches du catalogue sont exécutables par le parseur");
+Check(keyboardCatalog["examples"]!.AsArray().All(example => KeyboardInput.ParseChord(example!.GetValue<string>()) != null), "Exemples de keyboard_keys valides");
+await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("CTRL+")), "Raccourci incomplet refusé");
+await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("CTRL+CTRL+S")), "Modificateur répété refusé");
 await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("CTRL+S+Q")), "Raccourci avec plusieurs touches principales refusé");
 await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("")), "Raccourci clavier vide refusé");
 var contextSample = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = new JsonArray(
@@ -128,11 +137,19 @@ try
     var proj = new Project();
     Check(proj.GetSourceFolders().Count == 0, "Dossiers sources initialement vides");
     proj.SetSourceFolders(["  C:\\Projects\\Front  ", "C:\\Projects\\Back", "c:\\projects\\front"]);
-    Check(proj.GetSourceFolders().Count == 2 && proj.SourceFolder == "C:\\Projects\\Front|C:\\Projects\\Back", "SetSourceFolders normalise et déduplique");
+    Check(proj.GetSourceFolders().Count == (OperatingSystem.IsWindows() ? 2 : 3), "SetSourceFolders déduplique selon la sensibilité de casse du système");
     proj.SourceFolder = "C:\\A;C:\\B\nD:\\C";
     Check(proj.GetSourceFolders().Count == 3 && proj.GetSourceFolders()[2] == "D:\\C", "GetSourceFolders gère séparateurs multiples");
 
     var front = Path.Combine(workspace, "frontend"); Directory.CreateDirectory(front);
+    var shellResult = await WorkspaceTools.ShellAsync(OperatingSystem.IsWindows() ? "Write-Output 'portable-shell-ok'" : "printf portable-shell-ok", workspace, default);
+    Check(shellResult.Contains("portable-shell-ok") && shellResult.Contains("Exit code: 0"), "Terminal adapté au système Windows/macOS");
+    if (!OperatingSystem.IsWindows())
+    {
+        var upper = Path.Combine(workspace, "CaseRoot"); var lower = Path.Combine(workspace, "caseroot");
+        Directory.CreateDirectory(upper);
+        await Throws<UnauthorizedAccessException>(() => Task.FromResult(new SourceAccess(upper).Resolve(Path.Combine(lower, "escape.txt"))), "Chemins sensibles à la casse : aucune évasion vers un dossier homonyme");
+    }
     var back = Path.Combine(workspace, "backend"); Directory.CreateDirectory(back);
     await File.WriteAllTextAsync(Path.Combine(front, "index.html"), "<h1>Frontend</h1>");
     await File.WriteAllTextAsync(Path.Combine(front, "common.json"), "{\"app\":\"front\"}");
@@ -155,6 +172,69 @@ try
     await Throws<InvalidOperationException>(() => multiAccess.WriteAsync("ambiguous.txt", "content", default), "Écriture sans préfixe d'alias en multi-racines refusée");
 
     var path = Path.Combine(workspace, "state.db");
+    var parallelPath = Path.Combine(workspace, "parallel.sqlite");
+    await using (var setup = new HarnessDb(parallelPath))
+    {
+        await setup.InitializeAsync();
+        var projectA = new Project { Name = "A", SourceFolder = front, Chats = [new Chat { Title = "A" }] };
+        var projectB = new Project { Name = "B", SourceFolder = back, Chats = [new Chat { Title = "B" }] };
+        setup.Projects.AddRange(projectA, projectB); await setup.SaveChangesAsync();
+        var settings = new AppState { Language = "fr", ThinkingLevel = "high", EnabledSkills = "sources" };
+        var selected = new Provider { BaseUrl = "https://example.com/v1", Model = "model-A", ProtectedKey = [1, 2] };
+        var attached = new Attachment { Name = "a.png", Data = [1, 2, 3] };
+        using var runA = new ConversationSession(projectA.Chats[0], projectA, selected, settings, "Question A", [attached], parallelPath);
+        selected.Model = "model-B";
+        using var runB = new ConversationSession(projectB.Chats[0], projectB, selected, settings, "Question B", [], parallelPath);
+        selected.Model = "model-C"; selected.ProtectedKey[0] = 9; settings.ThinkingLevel = "low";
+        projectA.SourceFolder = back; attached.Data[0] = 9;
+        Check(runA.Provider.Model == "model-A" && runB.Provider.Model == "model-B" && runA.Provider.ProtectedKey[0] == 1,
+            "Modèle et clé capturés indépendamment des changements du fournisseur actif");
+        Check(runA.Project.SourceFolder == front && runA.Options.ThinkingLevel == "high" && runA.Images[0].Data[0] == 1,
+            "Sources, thinking et images isolés des modifications pendant la génération");
+
+        var continueA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueB = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstB = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var parallelClient = new HttpClient(new FakeHandler(async request =>
+        {
+            var payload = JsonNode.Parse(await request.Content!.ReadAsStringAsync())!;
+            var name = payload["model"]!.GetValue<string>() == "model-A" ? "A" : "B";
+            var prefix = Event(new { choices = new[] { new { delta = new { content = name + " partiel" } } } });
+            var suffix = Event(new { choices = new[] { new { delta = new { content = " terminé" } } } }) + "data: [DONE]\n\n";
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new PausingStream(prefix, suffix, name == "A" ? continueA.Task : continueB.Task))
+            };
+        }));
+        var parallelEngine = new ChatEngine(parallelClient);
+        async Task Generate(ConversationSession run, TaskCompletionSource firstDelta)
+        {
+            var answer = new Message { ChatId = run.Chat.Id, Role = "assistant", State = "interrupted" };
+            run.Db.Messages.Add(answer); await run.Db.SaveChangesAsync();
+            try
+            {
+                var completion = await parallelEngine.StreamAsync(run.Provider, "test-key",
+                    new JsonArray(new JsonObject { ["role"] = "user", ["content"] = run.Prompt }), [],
+                    update => { answer.Content = update.Text; firstDelta.TrySetResult(); }, run.Cancellation.Token);
+                answer.Content = completion.Message["content"]!.GetValue<string>(); answer.State = "complete";
+            }
+            finally { await run.Db.SaveChangesAsync(); }
+        }
+        var taskA = Generate(runA, firstA);
+        var taskB = Generate(runB, firstB);
+        await Task.WhenAll(firstA.Task, firstB.Task).WaitAsync(TimeSpan.FromSeconds(10));
+        Check(!taskA.IsCompleted && !taskB.IsCompleted, "Deux conversations reçoivent leur flux simultanément");
+        runA.Cancellation.Cancel();
+        await Throws<OperationCanceledException>(() => taskA, "Arrêt ciblé de la première conversation");
+        Check(!runB.Cancellation.IsCancellationRequested && !taskB.IsCompleted, "L’arrêt du premier chat ne coupe pas le second");
+        continueB.SetResult(); await taskB.WaitAsync(TimeSpan.FromSeconds(10));
+        await using var restored = new HarnessDb(parallelPath);
+        var savedA = await restored.Messages.SingleAsync(x => x.ChatId == runA.Chat.Id);
+        var savedB = await restored.Messages.SingleAsync(x => x.ChatId == runB.Chat.Id);
+        Check(savedA.Content == "A partiel" && savedA.State == "interrupted" && savedB.Content == "B partiel terminé" && savedB.State == "complete",
+            "Historiques distincts restaurés : réponse partielle A et réponse terminée B");
+    }
     await using (var upgrade = new HarnessDb(Path.Combine(workspace, "upgrade.db")))
     {
         var first = upgrade.Database.GetMigrations().First();
@@ -330,4 +410,32 @@ Console.WriteLine($"\n{passed} contrôles réussis.");
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => action(request);
+}
+
+sealed class PausingStream(string prefix, string suffix, Task resume) : Stream
+{
+    readonly byte[] first = System.Text.Encoding.UTF8.GetBytes(prefix);
+    readonly byte[] last = System.Text.Encoding.UTF8.GetBytes(suffix);
+    int offset;
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => first.Length + last.Length;
+    public override long Position { get => offset; set => throw new NotSupportedException(); }
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (offset >= first.Length) await resume.WaitAsync(ct);
+        var bytes = offset < first.Length ? first : last;
+        var localOffset = offset < first.Length ? offset : offset - first.Length;
+        var count = Math.Min(buffer.Length, bytes.Length - localOffset);
+        bytes.AsMemory(localOffset, count).CopyTo(buffer); offset += count;
+        return count;
+    }
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct) => ReadAsync(buffer.AsMemory(offset, count), ct).AsTask();
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override void Flush() => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }

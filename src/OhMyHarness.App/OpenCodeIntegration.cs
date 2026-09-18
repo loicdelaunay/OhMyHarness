@@ -98,7 +98,16 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         return runnerPath;
     }
 
-    async Task EnsureOpenCodeServerAsync(Provider target, string password, CancellationToken ct)
+    readonly SemaphoreSlim openCodeStartupQueue = new(1, 1);
+
+    async Task EnsureOpenCodeServerAsync(Provider target, string password, CancellationToken ct, Project? targetProject = null)
+    {
+        await openCodeStartupQueue.WaitAsync(ct);
+        try { await StartOpenCodeServerAsync(target, password, ct, targetProject); }
+        finally { openCodeStartupQueue.Release(); }
+    }
+
+    async Task StartOpenCodeServerAsync(Provider target, string password, CancellationToken ct, Project? targetProject)
     {
         try { await openCodeEngine.HealthAsync(target, password, ct); return; }
         catch when (target.AutoStart) { }
@@ -112,7 +121,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             FileName = executable,
             UseShellExecute = false,
             CreateNoWindow = true,
-            WorkingDirectory = OpenCodeDirectory()
+            WorkingDirectory = OpenCodeDirectory(targetProject)
         };
         if (!string.IsNullOrEmpty(password)) start.Environment["OPENCODE_SERVER_PASSWORD"] = password;
         var user = string.IsNullOrWhiteSpace(target.Username) ? "opencode" : target.Username.Trim();
@@ -150,8 +159,9 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         throw new IOException(T("Le serveur OpenCode n’a pas répondu dans le délai prévu."), last);
     }
 
-    string OpenCodeDirectory()
+    string OpenCodeDirectory(Project? targetProject = null)
     {
+        var project = targetProject ?? this.project;
         var source = project?.GetSourceFolders().FirstOrDefault(Directory.Exists);
         if (!string.IsNullOrWhiteSpace(source)) return source;
         var fallback = Path.Combine(HarnessDb.DataDirectory, "OpenCodeWorkspaces", "project-" + (project?.Id ?? 0));
@@ -169,31 +179,27 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         openCodeProcesses.Clear();
     }
 
-    async Task SendOpenCodeAsync(string password)
+    async Task SendOpenCodeAsync(ConversationRun run, string password)
     {
-        if (generation != null || chat == null || provider == null || project == null) return;
-        if (string.IsNullOrWhiteSpace(provider.Model)) { await Settings(); return; }
-        var prompt = composer.Text.Trim();
-        var images = pendingImages.Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList();
+        var db = run.Db; var chat = run.Chat; var provider = run.Provider; var state = run.Options;
+        var ct = run.Cancellation.Token;
+        var prompt = run.Prompt;
+        var images = run.Images.Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList();
         var history = await db.Messages.Where(x => x.ChatId == chat.Id && x.State == "complete").OrderBy(x => x.Id).ToListAsync();
         var priorHistory = history.ToList();
-        var user = new Message { ChatId = chat.Id, Content = prompt, Attachments = [.. pendingImages] };
+        var user = new Message { ChatId = chat.Id, Content = prompt, Attachments = run.Images };
         db.Messages.Add(user);
         if (history.Count == 0) chat.Title = prompt.Length > 0 ? prompt[..Math.Min(50, prompt.Length)] : T("Discussion autour d’une image");
         await db.SaveChangesAsync();
-        if (history.Count == 0) messages.Children.Clear();
-        title.Text = chat.Title;
-        AddMessage("user", prompt + (images.Count > 0 ? "\n📎 " + string.Join(", ", images.Select(x => x.Name)) : ""));
-        composer.Text = ""; pendingImages.Clear(); UpdateAttachments(); ScrollToBottom();
-
-        generation = new CancellationTokenSource(TimeSpan.FromMinutes(30)); var ct = generation.Token;
-        foreach (var control in idleOnly) control.IsEnabled = false;
-        composer.IsEnabled = false; send.IsEnabled = false; stop.IsEnabled = true;
+        MarkRunSubmitted(run);
+        if (history.Count == 0) run.Messages.Children.Clear();
+        AddMessage("user", prompt, user.Attachments, run.Messages);
+        ScrollRunToBottom(run);
         Message? active = null; AssistantMessageUi? assistantUi = null;
         try
         {
-            await EnsureOpenCodeServerAsync(provider, password, ct);
-            var directory = OpenCodeDirectory();
+            await EnsureOpenCodeServerAsync(provider, password, ct, run.Project);
+            var directory = OpenCodeDirectory(run.Project);
             var link = await db.ExternalChatSessions.SingleOrDefaultAsync(x => x.ChatId == chat.Id && x.ProviderId == provider.Id, ct);
             var isNewSession = link == null;
             if (link == null)
@@ -223,58 +229,52 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
 
             active = new Message { ChatId = chat.Id, Role = "assistant", State = "interrupted" };
             db.Messages.Add(active); await db.SaveChangesAsync(ct);
-            assistantUi = AddAssistantMessage("…"); ScrollToBottom();
-            status.Text = T("OpenCode réfléchit…");
+            assistantUi = AddAssistantMessage("…", target: run.Messages); ScrollRunToBottom(run);
+            SetRunStatus(run, T("OpenCode réfléchit…"));
             var inputEstimate = ContextWindow.EstimateText(system + prompt);
             inputEstimate += priorHistory.Sum(x => ContextWindow.EstimateText(x.Content));
-            ShowContextUsage(inputEstimate, estimated: true);
-            currentSpeedTracker = new GenerationSpeedTracker();
+            ShowContextUsage(run, inputEstimate, estimated: true);
+            run.Tracker = new GenerationSpeedTracker();
             var completion = await openCodeEngine.PromptAsync(provider, password, directory, link.SessionId, prompt, system, images, update =>
             {
                 active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
                 var tokens = update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning);
-                currentSpeedTracker?.AddSample(update.Seconds, tokens);
+                run.Tracker?.AddSample(update.Seconds, tokens);
                 if (update.Reasoning.Length > 0) assistantUi.UpdateThinking(update.Reasoning, update.Text.Length > 0);
                 assistantUi.UpdateContent(update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…");
-                UpdateMetrics(update, inputEstimate);
-                if (scroll.ScrollableHeight - scroll.VerticalOffset < 300) scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
+                UpdateMetrics(run, update, inputEstimate);
+                if (IsVisible(run) && scroll.ScrollableHeight - scroll.VerticalOffset < 300) scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
             }, ct, (permission, token) => AuthorizeOpenCodePermissionAsync(provider, directory, permission, token));
             active.Content = completion.Message["content"]?.GetValue<string>() ?? "";
             active.InputTokens = completion.InputTokens; active.OutputTokens = completion.OutputTokens; active.Seconds = completion.Seconds;
             active.WireJson = completion.Message.ToJsonString(); active.State = "complete";
-            currentSpeedTracker?.Complete(completion.Seconds, completion.OutputTokens ?? ContextWindow.EstimateText(active.Content));
-            if (currentSpeedTracker != null) messageTrackers[active.Id] = currentSpeedTracker;
-            currentSpeedTracker = null;
+            run.Tracker?.Complete(completion.Seconds, completion.OutputTokens ?? ContextWindow.EstimateText(active.Content));
+            if (run.Tracker != null) messageTrackers[active.Id] = run.Tracker;
+            run.Tracker = null;
             assistantUi.UpdateContent(active.Content);
             var reasoning = completion.Message["reasoning_content"]?.GetValue<string>();
             if (!string.IsNullOrEmpty(reasoning)) assistantUi.UpdateThinking(reasoning, true);
-            UpdateMetrics(new(active.Content, reasoning ?? "", completion.InputTokens, completion.OutputTokens, completion.Seconds), inputEstimate);
+            UpdateMetrics(run, new(active.Content, reasoning ?? "", completion.InputTokens, completion.OutputTokens, completion.Seconds), inputEstimate);
             await db.SaveChangesAsync(ct);
             var contextTokens = (completion.InputTokens ?? inputEstimate) +
                                 (completion.OutputTokens ?? ContextWindow.EstimateText(active.Content + reasoning));
             if (ContextWindow.ShouldCompact(contextTokens, provider.ContextLimit))
-                await CompactOpenCodeSessionAsync(provider, password, directory, link, ct);
-            else status.Text = T("Réponse OpenCode terminée · historique enregistré.");
+                await CompactOpenCodeSessionAsync(run, provider, password, directory, link, ct);
+            else SetRunStatus(run, T("Réponse OpenCode terminée · historique enregistré."));
             active = null;
         }
         catch (Exception ex)
         {
-            currentSpeedTracker = null;
-            status.Text = ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message;
+            run.Tracker = null;
+            SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message);
             if (active != null && assistantUi != null) assistantUi.UpdateContent(active.Content + T("\n[Réponse interrompue]"));
-        }
-        finally
-        {
-            generation.Dispose(); generation = null;
-            foreach (var control in idleOnly) control.IsEnabled = true;
-            composer.IsEnabled = true; send.IsEnabled = true; stop.IsEnabled = false;
-            await db.SaveChangesAsync();
         }
     }
 
-    async Task CompactOpenCodeSessionAsync(Provider target, string password, string directory, ExternalChatSession link, CancellationToken ct)
+    async Task CompactOpenCodeSessionAsync(ConversationRun run, Provider target, string password, string directory, ExternalChatSession link, CancellationToken ct)
     {
-        status.Text = T("Compaction automatique du contexte…");
+        var db = run.Db; var chat = run.Chat; var state = run.Options;
+        SetRunStatus(run, T("Compaction automatique du contexte…"));
         var summaryProvider = new Provider
         {
             Name = target.Name,
@@ -301,8 +301,8 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         db.Messages.Add(new Message { ChatId = chat!.Id, Role = "compaction", Content = summary.Trim(), WireJson = summaryWire.ToJsonString(), State = "complete" });
         db.ExternalChatSessions.Remove(link);
         await db.SaveChangesAsync(ct);
-        ShowContextUsage(ContextWindow.EstimateText(summary), estimated: true);
-        status.Text = T("Contexte compacté automatiquement.");
+        ShowContextUsage(run, ContextWindow.EstimateText(summary), estimated: true);
+        SetRunStatus(run, T("Contexte compacté automatiquement."));
     }
 
     async Task<string> AuthorizeOpenCodePermissionAsync(Provider target, string directory, OpenCodePermission permission, CancellationToken ct)

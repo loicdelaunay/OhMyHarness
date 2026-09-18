@@ -72,6 +72,9 @@ public static class WorkspaceTools
             try { await Task.WhenAll(stdout, stderr); } catch (OperationCanceledException) { }
         }
     }
+    public static Task<string> ShellAsync(string command, string directory, CancellationToken ct) => OperatingSystem.IsWindows()
+        ? PowerShellAsync(command, directory, ct)
+        : ExecuteAsync(OperatingSystem.IsMacOS() ? "/bin/zsh" : "/bin/sh", ["-c", command], directory, ct);
     public static Task<string> PowerShellAsync(string command, string directory, CancellationToken ct) => ExecuteAsync("powershell.exe",
         ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); " + command], directory, ct);
     public static Task<string> GitAsync(string directory, IEnumerable<string> args, CancellationToken ct) => ExecuteAsync("git", args, directory, ct);

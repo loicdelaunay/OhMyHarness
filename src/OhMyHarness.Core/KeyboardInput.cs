@@ -10,11 +10,30 @@ public static class KeyboardInput
         "PAGEUP", "PAGEDOWN", "LEFT", "RIGHT", "UP", "DOWN", "PRINTSCREEN", "CAPSLOCK", "PLUS", "MINUS"
     ];
 
+    public static IReadOnlyList<string> SupportedKeys { get; } =
+        Modifiers.Concat(NamedKeys).Concat(Enumerable.Range('A', 26).Select(x => ((char)x).ToString()))
+            .Concat(Enumerable.Range(0, 10).Select(x => x.ToString()))
+            .Concat(Enumerable.Range(1, 24).Select(x => "F" + x)).ToArray();
+
+    public static IEnumerable<string> KeysForPlatform(bool macOS) => macOS
+        ? SupportedKeys.Where(x => x is not ("INSERT" or "PRINTSCREEN" or "F21" or "F22" or "F23" or "F24")) : SupportedKeys;
+
+    public static string DescribeKeys() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName,
+        commandKey = OperatingSystem.IsMacOS() ? "CMD (normalized to WIN)" : "WIN",
+        actions = new[] { "press", "type" }, keys = KeysForPlatform(OperatingSystem.IsMacOS()),
+        aliases = new[] { "CONTROL=CTRL", "WINDOWS/META/CMD=WIN", "ESC=ESCAPE", "RETURN/ENTRÉE=ENTER", "DEL=DELETE", "INS=INSERT", "PGUP=PAGEUP", "PGDN=PAGEDOWN" },
+        examples = new[] { "ALT", "CTRL", "SHIFT", "WIN", "ENTER", "CTRL+S", "ALT+TAB", "CTRL+SHIFT+S", "CTRL+PLUS" },
+        usage = "press sends a complete key down/up, including a standalone modifier. Use type for arbitrary text. Keys are case-insensitive; separate modifiers with +. Keys are never left held down."
+    });
+
     public static KeyboardChord ParseChord(string? chord)
     {
         if (string.IsNullOrWhiteSpace(chord)) throw new ArgumentException("A keyboard shortcut is required.");
-        var parts = chord.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        var parts = chord.Split('+', StringSplitOptions.TrimEntries)
             .Select(Normalize).ToList();
+        if (parts.Count == 1 && Modifiers.Contains(parts[0])) return new KeyboardChord([], parts[0]);
         var modifiers = parts.Where(Modifiers.Contains).Distinct(StringComparer.Ordinal).ToList();
         var keys = parts.Where(x => !Modifiers.Contains(x)).ToList();
         if (keys.Count != 1 || parts.Count != modifiers.Count + 1 || !IsKey(keys[0]))
@@ -24,8 +43,8 @@ public static class KeyboardInput
 
     static string Normalize(string value) => value.Trim().ToUpperInvariant() switch
     {
-        "CONTROL" => "CTRL", "WINDOWS" or "META" or "CMD" => "WIN", "ESC" => "ESCAPE",
-        "RETURN" => "ENTER", "DEL" => "DELETE", "INS" => "INSERT", "PGUP" => "PAGEUP", "PGDN" => "PAGEDOWN",
+        "CONTROL" => "CTRL", "WINDOWS" or "META" or "CMD" or "COMMAND" => "WIN", "OPTION" or "OPT" => "ALT", "ESC" => "ESCAPE",
+        "RETURN" or "ENTRÉE" or "ENTREE" => "ENTER", "DEL" => "DELETE", "INS" => "INSERT", "PGUP" => "PAGEUP", "PGDN" => "PAGEDOWN",
         var normalized => normalized
     };
 

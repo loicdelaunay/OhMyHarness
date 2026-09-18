@@ -3,7 +3,7 @@ namespace OhMyHarness.Core;
 public sealed class SourceAccess
 {
     static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".cs", ".csproj", ".sln", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml" };
+    { ".cs", ".csproj", ".sln", ".slnx", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml", ".swift", ".m", ".mm", ".sh", ".zsh", ".plist", ".entitlements", ".xcconfig", ".ps1", ".bat" };
     static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", "bin", "obj", "node_modules", ".env", "secrets.json", "appsettings.Production.json", "dist", "build" };
 
@@ -14,7 +14,7 @@ public sealed class SourceAccess
 
     public SourceAccess(IEnumerable<string> roots)
     {
-        var rawList = roots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => Path.GetFullPath(r.Trim())).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var rawList = roots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => Path.GetFullPath(r.Trim())).Distinct(PlatformSupport.PathComparer).ToList();
         var aliasCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in rawList)
         {
@@ -49,7 +49,7 @@ public sealed class SourceAccess
     {
         var basePath = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var full = Path.GetFullPath(Path.Combine(basePath, subpath));
-        if (!full.StartsWith(basePath, StringComparison.OrdinalIgnoreCase) && full + Path.DirectorySeparatorChar != basePath)
+        if (!full.StartsWith(basePath, PlatformSupport.PathComparison) && full + Path.DirectorySeparatorChar != basePath)
             throw new UnauthorizedAccessException("Chemin hors du projet.");
         var current = basePath.TrimEnd(Path.DirectorySeparatorChar);
         if (Path.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
@@ -75,7 +75,7 @@ public sealed class SourceAccess
             var match = _roots.FirstOrDefault(r =>
             {
                 var bp = r.FullPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                return fullReq.StartsWith(bp, StringComparison.OrdinalIgnoreCase) || string.Equals(fullReq, r.FullPath, StringComparison.OrdinalIgnoreCase);
+                return fullReq.StartsWith(bp, PlatformSupport.PathComparison) || string.Equals(fullReq, r.FullPath, PlatformSupport.PathComparison);
             });
             if (match != null)
             {

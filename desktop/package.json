@@ -1,0 +1,40 @@
+{
+  "name": "ohmyharness-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "OhMyHarness desktop host for macOS and Windows",
+  "author": "OhMyHarness",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "test:service": "node --test tests/service.test.cjs",
+    "build:service": "node scripts/publish-service.cjs",
+    "pack:mac": "electron-builder --mac --dir",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "pack:win": "electron-builder --win --dir"
+  },
+  "devDependencies": { "electron": "44.4.2", "electron-builder": "26.15.3" },
+  "build": {
+    "appId": "com.ohmyharness.desktop",
+    "productName": "OhMyHarness",
+    "asar": true,
+    "files": ["main.cjs", "preload.cjs", "browser.cjs", "policy.cjs", "ui/**", "package.json"],
+    "extraResources": [{ "from": "sidecar/${os}-${arch}", "to": "service" }],
+    "directories": { "output": "dist" },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "binaries": ["Contents/Resources/service/OhMyHarness.Service"],
+      "extendInfo": {
+        "NSHighResolutionCapable": true,
+        "NSAppleEventsUsageDescription": "OhMyHarness uses desktop tools only after your approval.",
+        "NSScreenCaptureUsageDescription": "Share screenshots with your AI provider only after approval."
+      }
+    },
+    "win": { "target": "dir" }
+  }
+}

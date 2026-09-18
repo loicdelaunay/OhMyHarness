@@ -18,12 +18,12 @@ public sealed class Project
         string.IsNullOrWhiteSpace(SourceFolder)
             ? []
             : SourceFolder.Split(['|', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Distinct(PlatformSupport.PathComparer)
                 .ToList();
 
     public void SetSourceFolders(IEnumerable<string> folders)
     {
-        SourceFolder = string.Join('|', folders.Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+        SourceFolder = string.Join('|', folders.Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim()).Distinct(PlatformSupport.PathComparer));
     }
 }
 public sealed class Chat

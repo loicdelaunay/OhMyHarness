@@ -80,7 +80,6 @@ public sealed partial class MainWindow
             var toggle = new ToggleMenuFlyoutItem { Text = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsChecked = Skills.Enabled(state.EnabledSkills, skill.Id) };
             toggle.Click += async (_, _) => await Guard(async () =>
             {
-                if (generation != null) return;
                 var enabled = state.EnabledSkills.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
                 if (toggle.IsChecked) enabled.Add(skill.Id); else enabled.Remove(skill.Id);
                 state.EnabledSkills = string.Join(',', enabled); await db.SaveChangesAsync();
@@ -97,7 +96,7 @@ public sealed partial class MainWindow
                 if (!string.IsNullOrWhiteSpace(composer.Text))
                 {
                     var confirm = new ContentDialog { XamlRoot = root.XamlRoot, Title = T("Remplacer le brouillon ?"), Content = T("Le template remplacera le texte actuel. Les pièces jointes sont conservées."), PrimaryButtonText = T("Remplacer"), CloseButtonText = T("Annuler") };
-                    if (await confirm.ShowAsync() != ContentDialogResult.Primary) return;
+                    if (await ShowDialogAsync(confirm) != ContentDialogResult.Primary) return;
                 }
                 composer.Text = captured.Content; composer.Focus(FocusState.Programmatic); composer.Select(composer.Text.Length, 0);
             }));
@@ -223,16 +222,17 @@ public sealed partial class MainWindow
     }
     void ResetWorkspaceTools()
     {
-        terminalRun?.Cancel(); fileRevision++;
-        fileDirectory = null; selectedFile = null; previewFolder = null; previewHost = null;
+        fileRevision++;
+        fileDirectory = null; selectedFile = null;
+        if (conversationRuns.Count == 0) { previewFolder = null; previewHost = null; }
         fileList.ItemsSource = null; fileContent.Text = ""; gitOutput.Text = "";
         var dirs = project?.GetSourceFolders() ?? [];
-        terminalOutput.Text = ""; terminalDirectory.Text = dirs.Count > 0 ? dirs[0] : "";
-        if (browserReady && browser.CoreWebView2.Source.Contains(".preview.invalid")) browser.CoreWebView2.Navigate("about:blank");
+        if (terminalRun == null) { terminalOutput.Text = ""; terminalDirectory.Text = dirs.Count > 0 ? dirs[0] : ""; }
+        if (conversationRuns.Count == 0 && browserReady && browser.CoreWebView2.Source.Contains(".preview.invalid")) browser.CoreWebView2.Navigate("about:blank");
     }
-    string RequireDirectory()
+    string RequireDirectory(Project? targetProject = null)
     {
-        var dirs = project?.GetSourceFolders() ?? [];
+        var dirs = (targetProject ?? project)?.GetSourceFolders() ?? [];
         var valid = dirs.FirstOrDefault(Directory.Exists);
         if (valid == null) throw new InvalidOperationException(T("Associez un dossier source via le bouton +."));
         return LocalPreview.ValidatePath(valid);
@@ -283,9 +283,9 @@ public sealed partial class MainWindow
         if (revision2 != fileRevision) return;
         fileDirectory = path; fileLocation.Text = path; fileList.ItemsSource = entries; selectedFile = null; fileContent.Text = "";
     }
-    async Task<string> RefreshGitAsync(CancellationToken ct)
+    async Task<string> RefreshGitAsync(CancellationToken ct, Project? targetProject = null)
     {
-        var folders = project?.GetSourceFolders() ?? [];
+        var folders = (targetProject ?? project)?.GetSourceFolders() ?? [];
         if (folders.Count == 0) return gitOutput.Text = T("Associez un dossier source via le bouton +.");
         var repos = folders.Where(WorkspaceTools.HasGitRepository).ToList();
         if (repos.Count == 0) return gitOutput.Text = T("Aucun dépôt Git : .git absent du dossier du projet.");
@@ -310,13 +310,14 @@ public sealed partial class MainWindow
             return combined;
         }
     }
-    async Task<string> RunTerminalAsync(string command, bool fromAi, CancellationToken ct)
+    async Task<string> RunTerminalAsync(string command, bool fromAi, CancellationToken ct, Project? targetProject = null)
     {
         if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException(T("Commande requise."));
         if (terminalRun != null) return T("Une commande est déjà en cours.");
-        var directory = fileDirectory != null && Directory.Exists(fileDirectory) ? fileDirectory : RequireDirectory();
+        var directory = targetProject != null ? RequireDirectory(targetProject) : fileDirectory != null && Directory.Exists(fileDirectory) ? fileDirectory : RequireDirectory();
         if (fromAi && !await RequestAccessAsync(PermissionScope("terminal", directory), T("Exécuter une commande terminal"), directory + "\n\n" + command + "\n\n" + T("Cette commande peut modifier des fichiers et accéder au réseau avec les droits de votre compte Windows."), T("Commandes terminal dans : ") + directory, ct)) return T("Accès refusé par l’utilisateur.");
         ct.ThrowIfCancellationRequested();
+        if (terminalRun != null) return T("Une commande est déjà en cours.");
         using var running = CancellationTokenSource.CreateLinkedTokenSource(ct); terminalRun = running;
         try
         {
@@ -339,6 +340,7 @@ public sealed partial class MainWindow
         try
         {
             ct.ThrowIfCancellationRequested();
+            if (PermissionModes.AutomaticDecision(state.PermissionMode) is bool queuedDecision) return queuedDecision;
             if (await db.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
             var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = T("Autorisation supplémentaire"),
                 Content = new ScrollViewer { MaxHeight = 400, Content = new TextBlock { Text = action + "\n\n" + details, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } },
@@ -355,22 +357,22 @@ public sealed partial class MainWindow
         }
         finally { approvalQueue.Release(); }
     }
-    string ResolveRequestedLocalPath(string requested)
+    string ResolveRequestedLocalPath(string requested, Project? targetProject = null)
     {
         if (string.IsNullOrWhiteSpace(requested)) throw new ArgumentException(T("Chemin requis."));
         if (Uri.TryCreate(requested, UriKind.Absolute, out var uri) && uri.IsFile) requested = uri.LocalPath;
-        return LocalPreview.ValidatePath(Path.IsPathFullyQualified(requested) ? requested : Path.Combine(RequireDirectory(), requested));
+        return LocalPreview.ValidatePath(Path.IsPathFullyQualified(requested) ? requested : Path.Combine(RequireDirectory(targetProject), requested));
     }
-    async Task<string> ReadWithApprovalAsync(string requested, CancellationToken ct)
+    async Task<string> ReadWithApprovalAsync(string requested, CancellationToken ct, Project? targetProject = null)
     {
-        var path = ResolveRequestedLocalPath(requested);
+        var path = ResolveRequestedLocalPath(requested, targetProject);
         new SourceAccess(Path.GetDirectoryName(path)!).Resolve(Path.GetFileName(path));
         if (!await RequestAccessAsync(PermissionScope("read-local", path), T("Lire un fichier hors du périmètre du projet"), path + "\n\n" + T("Le contenu sera transmis au fournisseur IA pour cette demande."), T("Lecture et transmission de : ") + path, ct)) return T("Accès refusé par l’utilisateur.");
         return await new SourceAccess(Path.GetDirectoryName(path)!).ReadAsync(Path.GetFileName(path), ct);
     }
-    async Task<string> WriteWithApprovalAsync(string requested, string content, string? oldText, CancellationToken ct)
+    async Task<string> WriteWithApprovalAsync(string requested, string content, string? oldText, CancellationToken ct, Project? targetProject = null)
     {
-        var path = ResolveRequestedLocalPath(requested);
+        var path = ResolveRequestedLocalPath(requested, targetProject);
         var folder = Path.GetDirectoryName(path)!;
         var access = new SourceAccess(folder);
         access.Resolve(Path.GetFileName(path));
@@ -383,9 +385,9 @@ public sealed partial class MainWindow
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync(); if (file != null) await OpenLocalPreviewAsync(file.Path, CancellationToken.None);
     }
-    async Task<string> OpenLocalPreviewAsync(string requested, CancellationToken ct)
+    async Task<string> OpenLocalPreviewAsync(string requested, CancellationToken ct, Project? targetProject = null)
     {
-        var path = ResolveRequestedLocalPath(requested);
+        var path = ResolveRequestedLocalPath(requested, targetProject);
         var folder = Path.GetDirectoryName(path)!;
         LocalPreview.ResolveResource(folder, Uri.EscapeDataString(Path.GetFileName(path)));
         if (!await RequestAccessAsync(PermissionScope("preview-local", folder), T("Ouvrir un fichier local dans le navigateur"), path + "\n\n" + T("Dossier de ressources autorisé : ") + folder + "\n\n" + T("Le fichier et ses ressources locales pourront être lus par la page. Son JavaScript pourra s’exécuter et accéder au réseau. L’IA pourra lire la page et transmettre son contenu au fournisseur."), T("Aperçus locaux dans : ") + folder, ct)) return T("Accès refusé par l’utilisateur.");
@@ -597,7 +599,8 @@ public sealed partial class MainWindow
         static Input VirtualKeyInput(ushort virtualKey, bool released = false) => new()
         {
             Type = InputKeyboard,
-            Union = new InputUnion { Keyboard = new KeyboardInputNative { VirtualKey = virtualKey, Flags = released ? KeyUp : 0 } }
+            Union = new InputUnion { Keyboard = new KeyboardInputNative { VirtualKey = virtualKey,
+                Flags = (released ? KeyUp : 0) | (virtualKey is >= 0x21 and <= 0x28 or 0x2C or 0x2D or 0x2E or 0x5B ? 0x0001u : 0) } }
         };
         static Input UnicodeInput(char value, bool released = false) => new()
         {
@@ -820,9 +823,9 @@ public sealed partial class MainWindow
         int? x, int? y, int? width, int? height,
         int? maxWidth, int? maxHeight,
         int? quality,
-        CancellationToken ct)
+        CancellationToken ct, Provider? targetProvider = null)
     {
-        if (provider?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
+        if ((targetProvider ?? provider)?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
 
         var screens = DesktopInterop.GetScreens();
         var vx = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX);
@@ -997,7 +1000,8 @@ public sealed partial class MainWindow
         {
             ["type"] = "keyDown", ["key"] = key.Key, ["code"] = key.Code,
             ["windowsVirtualKeyCode"] = key.VirtualKey, ["nativeVirtualKeyCode"] = key.VirtualKey,
-            ["modifiers"] = modifiers
+            ["modifiers"] = modifiers | (chord.Key switch { "ALT" => 1, "CTRL" => 2, "WIN" => 4, "SHIFT" => 8, _ => 0 }),
+            ["isSystemKey"] = chord.Key == "ALT" || chord.Modifiers.Contains("ALT")
         };
         if (key.Text.Length > 0 && !chord.Modifiers.Any(value => value is "CTRL" or "ALT" or "WIN")) down["text"] = key.Text;
         await browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", down.ToJsonString());
@@ -1022,6 +1026,8 @@ public sealed partial class MainWindow
         if (key[0] == 'F' && int.TryParse(key[1..], out var function)) return (key, key, 0x70 + function - 1, "");
         return key switch
         {
+            "CTRL" => ("Control", "ControlLeft", 0x11, ""), "ALT" => ("Alt", "AltLeft", 0x12, ""),
+            "SHIFT" => ("Shift", "ShiftLeft", 0x10, ""), "WIN" => ("Meta", "MetaLeft", 0x5B, ""),
             "ENTER" => ("Enter", "Enter", 0x0D, "\r"), "TAB" => ("Tab", "Tab", 0x09, "\t"),
             "ESCAPE" => ("Escape", "Escape", 0x1B, ""), "SPACE" => (" ", "Space", 0x20, " "),
             "BACKSPACE" => ("Backspace", "Backspace", 0x08, ""), "DELETE" => ("Delete", "Delete", 0x2E, ""),
@@ -1039,11 +1045,11 @@ public sealed partial class MainWindow
     {
         if (string.IsNullOrWhiteSpace(keys)) throw new ArgumentException(T("Raccourci clavier requis."));
         try { return KeyboardInput.ParseChord(keys); }
-        catch (ArgumentException) { throw new ArgumentException(T("Format de raccourci invalide. Utilisez par exemple Ctrl+S, Alt+Tab ou Entrée.")); }
+        catch (ArgumentException) { throw new ArgumentException(T("Touche invalide. Appelez keyboard_keys pour lister les touches et exemples acceptés.")); }
     }
-    async Task<string> CaptureBrowserScreenshotAsync(CancellationToken ct)
+    async Task<string> CaptureBrowserScreenshotAsync(CancellationToken ct, Provider? targetProvider = null)
     {
-        if (provider?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
+        if ((targetProvider ?? provider)?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
         await EnsureBrowser();
         var permission = BrowserPermissionTarget();
         if (!await RequestAccessAsync(permission.Key + "|screenshot", T("Capturer et transmettre la page"), T("Une image de la zone visible du navigateur sera transmise au fournisseur IA.") + "\n\n" + permission.Description, T("Captures du navigateur · ") + permission.Description, ct)) return T("Accès refusé par l’utilisateur.");
@@ -1111,8 +1117,9 @@ public sealed partial class MainWindow
         pendingToolScreenshotHeight = 0;
         return screenshot == null ? null : (screenshot, label, mime, width, height);
     }
-    void AddWorkspaceToolDefinitions(JsonArray definitions)
+    void AddWorkspaceToolDefinitions(JsonArray definitions, ConversationRun run)
     {
+        var state = run.Options; var project = run.Project;
         void Add(string name, string description, JsonObject properties, params string[] requiredNames)
         {
             var required = new JsonArray(); foreach (var item in requiredNames) required.Add(item);
@@ -1120,6 +1127,8 @@ public sealed partial class MainWindow
                 ["parameters"] = new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = required, ["additionalProperties"] = false } } });
         }
         JsonObject StringProperty(string description = "") => new() { ["type"] = "string", ["description"] = description };
+        if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))
+            Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute Windows path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a PowerShell command in the attached project folder. Each invocation is a new session, 60 second timeout. The command runs with the user's Windows privileges.", new() { ["command"] = StringProperty() }, "command");
         if (Skills.Enabled(state.EnabledSkills, "sources") && (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false)) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
