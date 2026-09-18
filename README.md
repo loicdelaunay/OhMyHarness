@@ -1,6 +1,6 @@
 # OhMyHarness
 
-Application Windows native **WinUI 3 / .NET 10**, pour discuter avec OpenAI, DeepSeek ou un serveur compatible avec l’API OpenAI Chat Completions v1.
+Application Windows native **WinUI 3 / .NET 10**, pour discuter avec OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1.
 
 ## Démarrer
 
@@ -11,6 +11,8 @@ Lancer `artifacts\release\win-x64\OhMyHarness.App.exe`, puis **Réglages → Fou
 **Réglages → Skills** propose les skills exploration et édition des sources, recherche web, terminal, contrôle de la souris, contrôle du clavier, captures d’écran, revue de code, planification et synthèse. Exploration et Web sont actifs par défaut. Désactiver un skill retire ses outils ; l’édition des sources inclut leur lecture. La navigation distante nécessite « Accès IA au navigateur » et l’inspection/interaction nécessite aussi « Accès DOM et interaction IA ». Les choix sont globaux et sauvegardés en SQLite.
 
 Les préréglages sont OpenAI (`https://api.openai.com/v1`, `gpt-4.1-mini`) et DeepSeek (`https://api.deepseek.com`, `deepseek-flash`). La capacité image et la fenêtre de contexte sont configurables : ajuster la limite à celle publiée pour le modèle choisi. La valeur initiale de 128 000 tokens est une configuration utilisateur, pas une détection automatique.
+
+Le bouton **+ OpenCode** crée une connexion dédiée au serveur local OpenCode. L’application peut se connecter à un `opencode serve` déjà lancé ou démarrer automatiquement l’exécutable configuré, importe les modèles accessibles et conserve une session OpenCode distincte par conversation. Le mot de passe du serveur utilise le même stockage DPAPI que les clés API. Les outils agent OpenCode sont désactivables par connexion ; lorsqu’ils sont actifs, leurs demandes passent par le popup Autoriser une fois / Toujours autoriser / Refuser et les autorisations permanentes restent révocables dans Réglages.
 
 ## Fonctionnalités
 
@@ -28,7 +30,7 @@ Les préréglages sont OpenAI (`https://api.openai.com/v1`, `gpt-4.1-mini`) et D
 - Streaming SSE, arrêt de génération et conservation des réponses interrompues (exclues des requêtes suivantes).
 - Le bloc **Raisonnement du modèle** s’ouvre pendant le flux et fait défiler son propre contenu vers le bas à chaque mise à jour, indépendamment du défilement principal de la conversation.
 - Jusqu’à quatre images PNG/JPEG/WebP par message, de 8 Mo maximum chacune ; images conservées en SQLite et envoyées en contenu multimodal.
-- Un dossier source partagé par toutes les conversations d’un projet. L’IA peut lister les sous-dossiers et lire les fichiers texte à la demande. Aucun index complet ni envoi systématique du dossier.
+- Plusieurs dossiers sources peuvent être associés au même projet et sont partagés par toutes ses conversations. Chaque dossier apparaît comme une puce détachable et comme une racine distincte dans Fichiers ; l’IA peut lister les sous-dossiers et lire les fichiers texte à la demande. Aucun index complet ni envoi systématique des dossiers.
 - Navigateur WebView2 intégré. Activer **Accès IA au navigateur** pour ouvrir des URL et lire la page. Activer aussi **Accès DOM et interaction IA** pour exposer au modèle un DOM assaini avec les éléments interactifs, puis autoriser les clics, la saisie, les sélections et le défilement. Le skill **Contrôle de la souris** accepte explicitement les clics gauche et droit, le déplacement et la molette dans le navigateur comme sur le bureau Windows multi-écran. Le skill **Contrôle du clavier** saisit du texte dans le contrôle actif et exécute une touche ou un raccourci (`Ctrl+S`, `Alt+Tab`, `Entrée`, touches de fonction) dans le navigateur ou Windows ; la cible doit être mise au focus avant l’action. **Captures d’écran** ajoute l’analyse visuelle ; chaque interaction clavier, souris ou transmission d’image demande une autorisation selon sa portée.
 - Boucle d’outils jusqu’à douze appels au modèle par envoi, journal visible et historique des résultats persisté.
 - Débit tokens/s : estimation `≈` pendant le streaming, remplacée par le nombre de tokens de sortie déclaré par l’API divisé par la durée du flux. La latence avant le premier delta n’est pas incluse. Les tokens de raisonnement sont inclus si le fournisseur les compte dans `completion_tokens`.

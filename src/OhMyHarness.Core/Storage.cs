@@ -141,6 +141,12 @@ public sealed class HarnessDb : DbContext
             if (!await Projects.AnyAsync()) Projects.Add(new Project { Name = "Espace personnel", Chats = [new Chat()] });
             await SaveChangesAsync();
         }
+        var legacyProviders = await Providers.Where(x => x.Kind == "").ToListAsync();
+        if (legacyProviders.Count > 0)
+        {
+            foreach (var item in legacyProviders) item.Kind = "openai";
+            await SaveChangesAsync();
+        }
     }
 }
 public sealed class DesignFactory : IDesignTimeDbContextFactory<HarnessDb>

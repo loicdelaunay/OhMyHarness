@@ -29,7 +29,7 @@ namespace OhMyHarness.Core.Migrations
                 table: "Providers",
                 type: "TEXT",
                 nullable: false,
-                defaultValue: "");
+                defaultValue: "openai");
 
             migrationBuilder.AddColumn<bool>(
                 name: "OpenCodeTools",

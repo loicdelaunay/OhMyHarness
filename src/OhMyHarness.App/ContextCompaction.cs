@@ -29,7 +29,24 @@ public sealed partial class MainWindow
     static JsonArray ComposeWire(string systemPrompt, IEnumerable<Message> history)
     {
         var wire = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = systemPrompt } };
-        foreach (var item in history) wire.Add(ChatEngine.ToWire(item));
+        foreach (var item in history)
+        {
+            wire.Add(ChatEngine.ToWire(item));
+            if (item.Role == "tool" && item.Attachments.Count > 0)
+            {
+                var image = item.Attachments[0];
+                var toolName = item.Content.Split('\n')[0];
+                wire.Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject { ["type"] = "text", ["text"] = $"[Image issue de l’outil {toolName}]" },
+                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{image.Mime};base64,{Convert.ToBase64String(image.Data)}" } }
+                    }
+                });
+            }
+        }
         return wire;
     }
 

@@ -373,14 +373,21 @@ public sealed partial class MainWindow : Window
             try
             {
                 var secret = KeyVault.Decrypt(provider.ProtectedKey);
-                if (string.IsNullOrEmpty(secret))
+                if (string.IsNullOrEmpty(secret) && !provider.IsOpenCode)
                 {
                     status.Text = T("Renseignez votre clé API dans les Réglages pour charger la liste.");
                     return;
                 }
                 status.Text = T("Chargement des modèles depuis l’API…");
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
-                var remoteModels = await engine.ModelsAsync(provider, secret, timeout.Token);
+                List<string> remoteModels;
+                if (provider.IsOpenCode)
+                {
+                    await EnsureOpenCodeServerAsync(provider, secret, timeout.Token);
+                    remoteModels = (await openCodeEngine.ModelsAsync(provider, secret, project?.GetSourceFolders().FirstOrDefault(), timeout.Token))
+                        .Select(x => x.Reference).ToList();
+                }
+                else remoteModels = await engine.ModelsAsync(provider, secret, timeout.Token);
                 PopulateModelSelector(remoteModels);
                 status.Text = state.Language == "en"
                     ? $"{remoteModels.Count} models loaded from API."
@@ -446,19 +453,24 @@ public sealed partial class MainWindow : Window
     void UpdateFloatingAssets()
     {
         assetsBar.Children.Clear();
-        if (project != null && !string.IsNullOrWhiteSpace(project.SourceFolder))
+        if (project != null)
         {
-            var folderName = Path.GetFileName(project.SourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            if (string.IsNullOrWhiteSpace(folderName)) folderName = project.SourceFolder;
-            var sourceChip = CreateChip("📁 " + folderName, project.SourceFolder, async () =>
+            foreach (var folder in project.GetSourceFolders())
             {
-                project.SourceFolder = "";
-                await db.SaveChangesAsync();
-                sourceLabel.Text = T("Aucun dossier source · Associez un dossier pour l’explorer avec l’IA");
-                UpdateFloatingAssets();
-                status.Text = T("Dossier source détaché.");
-            }, isSource: true);
-            assetsBar.Children.Add(sourceChip);
+                var capturedFolder = folder;
+                var folderName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                if (string.IsNullOrWhiteSpace(folderName)) folderName = folder;
+                var sourceChip = CreateChip("📁 " + folderName, folder, async () =>
+                {
+                    project.SetSourceFolders(project.GetSourceFolders().Where(x => !string.Equals(x, capturedFolder, StringComparison.OrdinalIgnoreCase)));
+                    await db.SaveChangesAsync();
+                    UpdateSourceLabel();
+                    ResetWorkspaceTools();
+                    UpdateFloatingAssets();
+                    status.Text = T("Dossier source détaché.");
+                }, isSource: true);
+                assetsBar.Children.Add(sourceChip);
+            }
         }
 
         foreach (var img in pendingImages.ToList())
@@ -474,6 +486,13 @@ public sealed partial class MainWindow : Window
         }
 
         assetsScroll.Visibility = assetsBar.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+    void UpdateSourceLabel()
+    {
+        var folders = project?.GetSourceFolders() ?? [];
+        sourceLabel.Text = folders.Count == 0
+            ? T("Aucun dossier source · Associez un dossier pour l’explorer avec l’IA")
+            : T("Sources partagées avec l’IA : ") + string.Join(" · ", folders);
     }
     Border MakeSeparator() => new()
     {
@@ -527,7 +546,7 @@ public sealed partial class MainWindow : Window
         RefreshToolLanguage();
         browserAccess.Header = T("Accès IA au navigateur");
         browserAccess.OnContent = T("Autorisé"); browserAccess.OffContent = T("Désactivé");
-        sourceLabel.Text = string.IsNullOrEmpty(project?.SourceFolder) ? T("Aucun dossier source · Associez un dossier pour l’explorer avec l’IA") : T("Sources partagées avec l’IA : ") + project.SourceFolder;
+        UpdateSourceLabel();
         title.Text = chat?.Title ?? T("Nouvelle conversation");
         ToolTipService.SetToolTip(title, title.Text);
         PopulateThinkingSelector();
@@ -543,7 +562,7 @@ public sealed partial class MainWindow : Window
         UiText.Language = state.Language;
         ApplyLanguage();
         var providerList = await db.Providers.OrderBy(x => x.Id).ToListAsync();
-        providers.ItemsSource = providerList; provider = providerList.FirstOrDefault(x => x.Id == state.ProviderId) ?? providerList[0]; providers.SelectedItem = provider;
+        providers.ItemsSource = providerList; provider = providerList.FirstOrDefault(x => x.Id == state.ProviderId) ?? providerList.FirstOrDefault(); providers.SelectedItem = provider;
         var list = await db.Projects.OrderBy(x => x.Id).ToListAsync();
         projects.ItemsSource = list; projects.SelectedItem = list.FirstOrDefault(x => x.Id == state.ProjectId) ?? list.FirstOrDefault();
         address.Text = state.BrowserUrl;
@@ -595,7 +614,7 @@ public sealed partial class MainWindow : Window
         var list = project == null ? [] : await db.Chats.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.Id).ToListAsync();
         chats.ItemsSource = list; chats.SelectedItem = list.FirstOrDefault(x => x.Id == state.ChatId) ?? list.FirstOrDefault();
         loading = false;
-        sourceLabel.Text = string.IsNullOrEmpty(project?.SourceFolder) ? T("Aucun dossier source · Associez un dossier pour l’explorer avec l’IA") : T("Sources partagées avec l’IA : ") + project.SourceFolder;
+        UpdateSourceLabel();
         UpdateFloatingAssets();
         await SelectChat();
     }
@@ -719,6 +738,13 @@ public sealed partial class MainWindow : Window
                 IsThinkingExpanded = true;
                 ThinkingScroll.Visibility = Visibility.Visible;
                 ThinkingHeaderLabel.Text = $"🧠 {prefix} ({reasoning.Length:N0} {T("car.")})  ▼";
+            }
+            if (!isComplete && IsThinkingExpanded)
+            {
+                ThinkingScroll.UpdateLayout();
+                ThinkingScroll.ChangeView(null, ThinkingScroll.ScrollableHeight, null, true);
+                ThinkingScroll.DispatcherQueue.TryEnqueue(() =>
+                    ThinkingScroll.ChangeView(null, ThinkingScroll.ScrollableHeight, null, true));
             }
         }
     }
@@ -1220,9 +1246,11 @@ public sealed partial class MainWindow : Window
         if (project == null) return;
         var picker = new FolderPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var folder = await picker.PickSingleFolderAsync(); if (folder == null) return;
-        project.SourceFolder = folder.Path; await db.SaveChangesAsync();
+        var folders = project.GetSourceFolders();
+        if (!folders.Contains(folder.Path, StringComparer.OrdinalIgnoreCase)) folders.Add(folder.Path);
+        project.SetSourceFolders(folders); await db.SaveChangesAsync();
         ResetWorkspaceTools();
-        sourceLabel.Text = T("Sources partagées avec l’IA : ") + project.SourceFolder;
+        UpdateSourceLabel();
         UpdateFloatingAssets();
         status.Text = T("Dossier associé au projet. L’IA pourra en lister et lire les fichiers texte à votre demande.");
     }
@@ -1245,6 +1273,110 @@ public sealed partial class MainWindow : Window
         UpdateFloatingAssets();
     }
     async Task Settings()
+    {
+        var providerEditor = BuildProviderEditor(provider?.Id ?? state.ProviderId);
+        var language = new ComboBox
+        {
+            Header = T("Langue de l’application"),
+            ItemsSource = new[] { "Français", "English" },
+            SelectedIndex = state.Language == "en" ? 1 : 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var general = new StackPanel { Spacing = 14 };
+        general.Children.Add(language);
+        general.Children.Add(Label(T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"), 13));
+
+        var skillPanel = new StackPanel { Spacing = 16 };
+        skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
+        var skillToggles = new Dictionary<string, ToggleSwitch>();
+        foreach (var skill in Skills.All)
+        {
+            var toggle = new ToggleSwitch
+            {
+                Header = state.Language == "en" ? skill.EnglishName : skill.FrenchName,
+                IsOn = Skills.Enabled(state.EnabledSkills, skill.Id),
+                OnContent = T("Activé"),
+                OffContent = T("Désactivé")
+            };
+            skillToggles.Add(skill.Id, toggle);
+            skillPanel.Children.Add(toggle);
+            skillPanel.Children.Add(Label(state.Language == "en" ? skill.EnglishDescription : skill.FrenchDescription, 12));
+        }
+
+        var permissionPanel = new StackPanel { Spacing = 12 };
+        var grants = await db.PermissionGrants.OrderByDescending(x => x.GrantedAtUtc).ToListAsync();
+        var revoke = new Dictionary<PermissionGrant, CheckBox>();
+        permissionPanel.Children.Add(Label(T("Les autorisations permanentes sont limitées à la portée affichée. Cochez celles à révoquer puis enregistrez."), 13));
+        if (grants.Count == 0) permissionPanel.Children.Add(Label(T("Aucune autorisation permanente enregistrée."), 13));
+        foreach (var grant in grants)
+        {
+            var check = new CheckBox
+            {
+                Content = $"{grant.Name}\n{grant.Details}",
+                Tag = null,
+                HorizontalAlignment = HorizontalAlignment.Stretch
+            };
+            revoke[grant] = check;
+            permissionPanel.Children.Add(check);
+        }
+
+        var templateEditor = BuildTemplateEditor();
+        var tabs = new Pivot();
+        tabs.Items.Add(new PivotItem { Header = T("Général"), Content = general });
+        tabs.Items.Add(new PivotItem { Header = T("Fournisseurs"), Content = providerEditor.Panel });
+        tabs.Items.Add(new PivotItem { Header = "Skills", Content = skillPanel });
+        tabs.Items.Add(new PivotItem { Header = "Templates", Content = templateEditor.Panel });
+        tabs.Items.Add(new PivotItem { Header = T("Autorisations"), Content = permissionPanel });
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = root.XamlRoot,
+            Title = T("Réglages"),
+            Content = new ScrollViewer { Content = tabs, MaxHeight = 620, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
+            PrimaryButtonText = T("Enregistrer"),
+            CloseButtonText = T("Annuler")
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var providerError = ValidateProviderDrafts(providerEditor);
+            if (providerError != null)
+            {
+                providerEditor.Error.Text = providerError;
+                tabs.SelectedIndex = 1;
+                args.Cancel = true;
+            }
+            if (templateEditor.Drafts.Any(x => string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Content)))
+            {
+                templateEditor.Error.Text = T("Nom et contenu du template requis.");
+                tabs.SelectedIndex = 3;
+                args.Cancel = true;
+            }
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        state.Language = language.SelectedIndex == 1 ? "en" : "fr";
+        state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
+        SaveTemplateDrafts(templateEditor.Drafts);
+        foreach (var item in revoke.Where(x => x.Value.IsChecked == true).Select(x => x.Key)) db.PermissionGrants.Remove(item);
+        var selectedProvider = await SaveProviderDraftsAsync(providerEditor);
+        state.ProviderId = selectedProvider?.Id ?? 0;
+        await db.SaveChangesAsync();
+
+        var providerList = await db.Providers.OrderBy(x => x.Id).ToListAsync();
+        provider = providerList.FirstOrDefault(x => x.Id == state.ProviderId) ?? providerList.FirstOrDefault();
+        if (provider != null) state.ProviderId = provider.Id;
+        loading = true;
+        providers.ItemsSource = providerList;
+        providers.SelectedItem = provider;
+        loading = false;
+        UiText.Language = state.Language;
+        ApplyLanguage();
+        UpdateProvider();
+        PopulateModelSelector();
+        status.Text = T("Configuration enregistrée.");
+    }
+
+    async Task LegacySettingsUnused()
     {
         if (provider == null) return;
         var target = provider;
@@ -1394,14 +1526,14 @@ public sealed partial class MainWindow : Window
                 await ShowToolAsync(2);
                 return await RefreshGitAsync(ct);
             case "list_sources":
-                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || string.IsNullOrEmpty(project?.SourceFolder))
+                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'sources' est inactif. Veuillez associer un dossier via le bouton 'Sources'.");
                 var listPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(listPath)) listPath = ".";
                 return await Task.Run(() => source.List(listPath), ct);
 
             case "read_source":
-                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || string.IsNullOrEmpty(project?.SourceFolder))
+                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'sources' est inactif.");
                 var readPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(readPath))
@@ -1410,7 +1542,7 @@ public sealed partial class MainWindow : Window
                 catch (UnauthorizedAccessException) { return await ReadWithApprovalAsync(readPath, ct); }
 
             case "write_source":
-                if (!Skills.Enabled(state.EnabledSkills, "write_sources") || string.IsNullOrEmpty(project?.SourceFolder))
+                if (!Skills.Enabled(state.EnabledSkills, "write_sources") || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'write_sources' est inactif.");
                 var writePath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(writePath))
@@ -1420,7 +1552,7 @@ public sealed partial class MainWindow : Window
                 catch (UnauthorizedAccessException) { return await WriteWithApprovalAsync(writePath, writeContent, null, ct); }
 
             case "edit_source":
-                if (!Skills.Enabled(state.EnabledSkills, "write_sources") || string.IsNullOrEmpty(project?.SourceFolder))
+                if (!Skills.Enabled(state.EnabledSkills, "write_sources") || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'write_sources' est inactif.");
                 var editPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(editPath))
@@ -1666,9 +1798,10 @@ public sealed partial class MainWindow : Window
         var last = chat == null ? null : db.Messages.Local.LastOrDefault(x => x.ChatId == chat.Id && x.InputTokens.HasValue);
         if (last?.InputTokens is int inputTokens)
         {
-            var pct = Math.Min(100.0, inputTokens * 100.0 / limit);
+            var contextTokens = inputTokens + (last.OutputTokens ?? 0);
+            var pct = Math.Min(100.0, contextTokens * 100.0 / limit);
             contextPercentText.Text = $"{pct:F1} %";
-            contextValueText.Text = $"{inputTokens:N0} / {limit:N0} tokens";
+            contextValueText.Text = $"{contextTokens:N0} / {limit:N0} tokens";
             contextBar.Value = pct;
             var exact = last.OutputTokens.HasValue;
             speedValueText.Text = $"⚡ {(exact ? "" : "≈ ")}{(last.OutputTokens ?? 0) / Math.Max(0.1, last.Seconds):F1} tok/s";
@@ -1705,9 +1838,11 @@ public sealed partial class MainWindow : Window
         var inputTokens = update.InputTokens ?? fallbackInputTokens;
         if (inputTokens.HasValue)
         {
-            var pct = Math.Min(100.0, inputTokens.Value * 100.0 / limit);
+            var outputTokens = update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning);
+            var contextTokens = inputTokens.Value + outputTokens;
+            var pct = Math.Min(100.0, contextTokens * 100.0 / limit);
             contextPercentText.Text = $"{pct:F1} %{(update.InputTokens.HasValue ? "" : " ~")}";
-            contextValueText.Text = $"{inputTokens.Value:N0} / {limit:N0} tokens";
+            contextValueText.Text = $"{contextTokens:N0} / {limit:N0} tokens";
             contextBar.Value = pct;
         }
         else
@@ -1731,6 +1866,7 @@ public sealed partial class MainWindow : Window
         if (generation != null || chat == null || provider == null || project == null) return;
         if (string.IsNullOrWhiteSpace(composer.Text) && pendingImages.Count == 0) return;
         var secret = KeyVault.Decrypt(provider.ProtectedKey);
+        if (provider.IsOpenCode) { await SendOpenCodeAsync(secret); return; }
         if (secret.Length == 0) { await Settings(); return; }
         var history = await db.Messages.Include(x => x.Attachments).Where(x => x.ChatId == chat.Id && x.State == "complete").OrderBy(x => x.Id).ToListAsync();
         if (!provider.SupportsImages && (pendingImages.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException(T("Ce modèle n’est pas configuré pour les images. Choisissez un modèle vision ou une nouvelle conversation."));
@@ -1747,38 +1883,26 @@ public sealed partial class MainWindow : Window
         generation = new CancellationTokenSource(TimeSpan.FromMinutes(10)); var ct = generation.Token;
         foreach (var control in idleOnly) control.IsEnabled = false;
         composer.IsEnabled = false; send.IsEnabled = false; stop.IsEnabled = true;
-        var hasSources = !string.IsNullOrEmpty(project.SourceFolder) && (Skills.Enabled(state.EnabledSkills, "sources") || Skills.Enabled(state.EnabledSkills, "write_sources"));
-        var canWriteSources = !string.IsNullOrEmpty(project.SourceFolder) && Skills.Enabled(state.EnabledSkills, "write_sources");
+        var sourceFolders = project.GetSourceFolders();
+        var hasSources = sourceFolders.Count > 0 && (Skills.Enabled(state.EnabledSkills, "sources") || Skills.Enabled(state.EnabledSkills, "write_sources"));
+        var canWriteSources = sourceFolders.Count > 0 && Skills.Enabled(state.EnabledSkills, "write_sources");
         var hasBrowser = browserAccess.IsOn && Skills.Enabled(state.EnabledSkills, "web");
-        var wire = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = Skills.Prompt(state.EnabledSkills, state.Language, hasSources, hasBrowser, canWriteSources) } };
-        foreach (var item in history)
-        {
-            wire.Add(ChatEngine.ToWire(item));
-            if (item.Role == "tool" && item.Attachments.Count > 0)
-            {
-                var img = item.Attachments[0];
-                var toolName = item.Content.Split('\n')[0];
-                wire.Add(new JsonObject
-                {
-                    ["role"] = "user",
-                    ["content"] = new JsonArray
-                    {
-                        new JsonObject { ["type"] = "text", ["text"] = $"[Image issue de l’outil {toolName}]" },
-                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{img.Mime};base64,{Convert.ToBase64String(img.Data)}" } }
-                    }
-                });
-            }
-        }
+        var systemPrompt = Skills.Prompt(state.EnabledSkills, state.Language, hasSources, hasBrowser, canWriteSources) +
+            "\nAdditional tools may request one-time user approval for local previews, files outside the project and terminal commands. Never claim approval before the tool returns success. A denial is final for that action; explain it and do not retry to bypass it.";
         var definitions = ChatEngine.ToolDefinitions(hasSources, hasBrowser, canWriteSources);
         AddWorkspaceToolDefinitions(definitions);
-        wire[0]!["content"] = wire[0]!["content"]!.GetValue<string>() + "\nAdditional tools may request one-time user approval for local previews, files outside the project and terminal commands. Never claim approval before the tool returns success. A denial is final for that action; explain it and do not retry to bypass it.";
-        var source = new SourceAccess(project.SourceFolder);
+        history = await AutoCompactHistoryAsync(history, systemPrompt, definitions, secret, ct);
+        var wire = ComposeWire(systemPrompt, history);
+        var source = new SourceAccess(sourceFolders);
         Message? active = null; AssistantMessageUi? activeAssistantUi = null;
         try
         {
             for (var round = 0; round < 12; round++)
             {
                 ct.ThrowIfCancellationRequested();
+                var definitionsTokens = ContextWindow.Estimate(definitions);
+                var inputEstimate = ContextWindow.Estimate(wire) + definitionsTokens;
+                ShowContextUsage(inputEstimate, estimated: true);
                 active = new Message { ChatId = chat.Id, Role = "assistant", State = "interrupted" };
                 db.Messages.Add(active); await db.SaveChangesAsync();
                 var assistantUi = AddAssistantMessage("…");
@@ -1800,7 +1924,7 @@ public sealed partial class MainWindow : Window
                     }
                     var displayText = update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…";
                     assistantUi.UpdateContent(displayText);
-                    UpdateMetrics(update); lastPaint = DateTime.UtcNow;
+                    UpdateMetrics(update, inputEstimate); lastPaint = DateTime.UtcNow;
                     if (scroll.ScrollableHeight - scroll.VerticalOffset < 300) scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
                 }, ct, state.ThinkingLevel);
                 active.Content = completion.Message["content"]?.GetValue<string>() ?? "";
@@ -1809,7 +1933,7 @@ public sealed partial class MainWindow : Window
                 currentSpeedTracker?.Complete(completion.Seconds, finalTokens);
                 if (currentSpeedTracker != null) messageTrackers[active.Id] = currentSpeedTracker;
                 currentSpeedTracker = null;
-                assistantUi.UpdateContent(active.Content); UpdateMetrics(new(active.Content, "", completion.InputTokens, completion.OutputTokens, completion.Seconds));
+                assistantUi.UpdateContent(active.Content); UpdateMetrics(new(active.Content, "", completion.InputTokens, completion.OutputTokens, completion.Seconds), inputEstimate);
                 RefreshSpeedTooltip();
                 ScrollToBottom();
                 var finalReasoning = completion.Message["reasoning_content"]?.GetValue<string>();
@@ -1846,25 +1970,9 @@ public sealed partial class MainWindow : Window
                     }
                 active.State = "complete"; active.WireJson = completion.Message.ToJsonString();
                 db.Messages.AddRange(toolResults); await db.SaveChangesAsync();
-                wire.Add(completion.Message.DeepClone());
-                foreach (var result in toolResults)
-                {
-                    wire.Add(JsonNode.Parse(result.WireJson));
-                    if (result.Attachments.Count > 0)
-                    {
-                        var img = result.Attachments[0];
-                        var toolName = result.Content.Split('\n')[0];
-                        wire.Add(new JsonObject
-                        {
-                            ["role"] = "user",
-                            ["content"] = new JsonArray
-                            {
-                                new JsonObject { ["type"] = "text", ["text"] = $"[Image issue de l’outil {toolName}]" },
-                                new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{img.Mime};base64,{Convert.ToBase64String(img.Data)}" } }
-                            }
-                        });
-                    }
-                }
+                var persistedHistory = await LoadContextHistoryAsync(chat.Id, ct);
+                persistedHistory = await AutoCompactHistoryAsync(persistedHistory, systemPrompt, definitions, secret, ct);
+                wire = ComposeWire(systemPrompt, persistedHistory);
                 if (toolResults.Count == 0) { status.Text = T("Réponse terminée · historique enregistré."); active = null; break; }
                 if (string.IsNullOrEmpty(assistantUi.CurrentText)) assistantUi.UpdateContent(T("Consultation des outils…"));
                 active = null;

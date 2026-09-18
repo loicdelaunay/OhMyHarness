@@ -227,6 +227,8 @@ public static class UiText
         ["Réponse terminée · historique enregistré."] = "Response complete · history saved.",
         ["Compaction automatique du contexte…"] = "Automatically compacting context…",
         ["Contexte compacté automatiquement."] = "Context compacted automatically.",
+        ["Les autorisations permanentes sont limitées à la portée affichée. Cochez celles à révoquer puis enregistrez."] = "Permanent permissions are limited to the displayed scope. Check the ones to revoke, then save.",
+        ["Aucune autorisation permanente enregistrée."] = "No permanent permission is saved.",
         ["Le fournisseur n’a pas produit de résumé pour la compaction."] = "The provider did not produce a summary for compaction.",
         ["Consultation des outils…"] = "Using tools…",
         ["Limite de 12 étapes atteinte. Envoyez « continue » pour poursuivre."] = "12-step limit reached. Send 'continue' to proceed.",
