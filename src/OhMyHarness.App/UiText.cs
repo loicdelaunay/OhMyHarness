@@ -297,7 +297,13 @@ public static class UiText
         ["Parcourir…"] = "Browse…",
         ["Fichiers exécutables (*.exe)"] = "Executable files (*.exe)",
         ["Test de connexion en cours…"] = "Testing connection…",
-        ["Importation des modèles…"] = "Importing models…"
+        ["Importation des modèles…"] = "Importing models…",
+        ["Survoler pour prévisualiser · Cliquer pour agrandir"] = "Hover to preview · Click to enlarge",
+        ["Cliquer sur la miniature pour ouvrir en grand format"] = "Click thumbnail to open full size",
+        ["Capture d’écran bureau"] = "Desktop screenshot",
+        ["Capture navigateur"] = "Browser screenshot",
+        ["Erreur d’affichage de l’image : "] = "Image display error: ",
+        ["Capture d’écran Windows · "] = "Windows screenshot · "
     };
     public static string T(string text)
     {

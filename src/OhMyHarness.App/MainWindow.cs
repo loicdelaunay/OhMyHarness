@@ -3,12 +3,14 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using OhMyHarness.Core;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Windows.Storage.Pickers;
+using Windows.Storage.Streams;
 using WinRT.Interop;
 using static OhMyHarness.App.UiText;
 
@@ -613,7 +615,7 @@ public sealed partial class MainWindow : Window
                 var item = history[i];
                 if (item.Role == "user")
                 {
-                    AddMessage("user", item.Content + (item.Attachments.Count > 0 ? $"\n📎 {string.Join(", ", item.Attachments.Select(x => x.Name))}" : ""));
+                    AddMessage("user", item.Content, item.Attachments);
                 }
                 else if (item.Role == "assistant")
                 {
@@ -661,11 +663,12 @@ public sealed partial class MainWindow : Window
                         }
                         catch { }
                     }
-                    AddToolMessage(toolName, toolArgs, result);
+                    var attach = item.Attachments.FirstOrDefault();
+                    AddToolMessage(toolName, toolArgs, result, attach?.Data, attach?.Mime);
                 }
                 else
                 {
-                    AddMessage(item.Role, item.Content);
+                    AddMessage(item.Role, item.Content, item.Attachments);
                 }
             }
             var last = history.LastOrDefault(x => x.InputTokens.HasValue);
@@ -817,7 +820,164 @@ public sealed partial class MainWindow : Window
 
         return ui;
     }
-    void AddToolMessage(string toolName, string arguments, string result)
+    FrameworkElement CreateImageThumbnailWithPreview(byte[] imageBytes, string mime, string title, int maxWidth = 420, int maxHeight = 220)
+    {
+        try
+        {
+            var bitmap = new BitmapImage();
+            using (var ms = new MemoryStream(imageBytes))
+            using (var ras = ms.AsRandomAccessStream())
+            {
+                bitmap.SetSource(ras);
+            }
+
+            var container = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = Brush(55, 70, 95),
+                BorderThickness = new Thickness(1),
+                Background = Brush(14, 18, 26),
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 4, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+
+            var innerStack = new StackPanel { Spacing = 6 };
+
+            var thumbImage = new Image
+            {
+                Source = bitmap,
+                MaxWidth = maxWidth,
+                MaxHeight = maxHeight,
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            innerStack.Children.Add(thumbImage);
+
+            var metaBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+            var kb = (imageBytes.Length / 1024.0).ToString("F1") + " Ko";
+            var metaLabel = Label($"🖼️ {title} · {kb}", 11);
+            metaLabel.Foreground = Brush(160, 175, 200);
+            metaBar.Children.Add(metaLabel);
+
+            var previewHint = Label("🔍 " + T("Survoler pour prévisualiser · Cliquer pour agrandir"), 10);
+            previewHint.Foreground = Brush(120, 135, 160);
+            metaBar.Children.Add(previewHint);
+
+            innerStack.Children.Add(metaBar);
+            container.Child = innerStack;
+
+            // Hover preview popover (ToolTip)
+            var popoverPanel = new StackPanel { Spacing = 8, MaxWidth = 640 };
+            var popoverHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            popoverHeader.Children.Add(Label("📸", 13));
+            var popoverTitle = Label(title, 12);
+            popoverTitle.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+            popoverTitle.Foreground = Brush(210, 225, 250);
+            popoverHeader.Children.Add(popoverTitle);
+            var popoverMeta = Label($"({kb}, {mime})", 11);
+            popoverMeta.Foreground = Brush(140, 150, 170);
+            popoverHeader.Children.Add(popoverMeta);
+            popoverPanel.Children.Add(popoverHeader);
+
+            var popoverImage = new Image
+            {
+                Source = bitmap,
+                MaxWidth = 600,
+                MaxHeight = 420,
+                Stretch = Stretch.Uniform
+            };
+            var popoverImageBorder = new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                BorderBrush = Brush(45, 55, 75),
+                BorderThickness = new Thickness(1),
+                Background = Brush(10, 12, 18),
+                Padding = new Thickness(4),
+                Child = popoverImage
+            };
+            popoverPanel.Children.Add(popoverImageBorder);
+
+            var popoverFooter = Label(T("Cliquer sur la miniature pour ouvrir en grand format"), 10);
+            popoverFooter.Foreground = Brush(120, 135, 160);
+            popoverPanel.Children.Add(popoverFooter);
+
+            var tooltip = new ToolTip
+            {
+                Content = popoverPanel,
+                Background = Brush(20, 25, 36),
+                BorderBrush = Brush(65, 85, 120),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(12)
+            };
+            ToolTipService.SetToolTip(container, tooltip);
+
+            // Click to enlarge (Flyout)
+            var flyoutImage = new Image
+            {
+                Source = bitmap,
+                Stretch = Stretch.Uniform
+            };
+            var flyoutScroll = new ScrollViewer
+            {
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 720,
+                MaxWidth = 1080,
+                Content = flyoutImage
+            };
+            var flyout = new Flyout
+            {
+                Content = flyoutScroll
+            };
+            container.Tapped += (_, _) => flyout.ShowAt(container);
+
+            return container;
+        }
+        catch (Exception ex)
+        {
+            return Label(T("Erreur d’affichage de l’image : ") + ex.Message, 11);
+        }
+    }
+
+    FrameworkElement CreateAttachmentView(Attachment attachment)
+    {
+        if (attachment.Mime.StartsWith("image/"))
+        {
+            return CreateImageThumbnailWithPreview(attachment.Data, attachment.Mime, string.IsNullOrEmpty(attachment.Name) ? "image" : attachment.Name);
+        }
+        else
+        {
+            var badge = new Border
+            {
+                CornerRadius = new CornerRadius(6),
+                BorderBrush = Brush(50, 60, 80),
+                BorderThickness = new Thickness(1),
+                Background = Brush(24, 28, 38),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(0, 4, 0, 4),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            var kb = (attachment.Data.Length / 1024.0).ToString("F1") + " Ko";
+            var text = Label($"📎 {attachment.Name} ({kb})", 12);
+            text.Foreground = Brush(180, 200, 230);
+            badge.Child = text;
+
+            var tip = new ToolTip
+            {
+                Content = Label($"{attachment.Name}\n{attachment.Mime} · {kb}", 11),
+                Background = Brush(20, 25, 36),
+                BorderBrush = Brush(65, 85, 120),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(6)
+            };
+            ToolTipService.SetToolTip(badge, tip);
+            return badge;
+        }
+    }
+
+    void AddToolMessage(string toolName, string arguments, string result, byte[]? imageBytes = null, string? imageMime = null)
     {
         bool isError = result.StartsWith(T("Erreur")) || result.StartsWith("Error");
         var card = new Border
@@ -843,6 +1003,7 @@ public sealed partial class MainWindow : Window
             "edit_source" => "✏️",
             "browse" => "🌐",
             "read_page" => "📑",
+            "desktop_screens" => "🖥️",
             "desktop_screenshot" or "browser_screenshot" => "📸",
             "desktop_mouse" or "browser_mouse" => "🖱️",
             "desktop_keyboard" or "browser_keyboard" => "⌨️",
@@ -891,6 +1052,17 @@ public sealed partial class MainWindow : Window
         summaryText.MaxLines = 1;
         summaryText.TextTrimming = TextTrimming.CharacterEllipsis;
         stack.Children.Add(summaryText);
+
+        if (imageBytes != null && imageBytes.Length > 0)
+        {
+            var imagePreview = CreateImageThumbnailWithPreview(
+                imageBytes,
+                imageMime ?? "image/png",
+                toolName == "browser_screenshot" ? T("Capture navigateur") : T("Capture d’écran bureau"),
+                maxWidth: 440,
+                maxHeight: 240);
+            stack.Children.Add(imagePreview);
+        }
 
         var detailsPanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 0, 0) };
 
@@ -956,10 +1128,23 @@ public sealed partial class MainWindow : Window
         card.Child = stack;
         messages.Children.Add(card);
     }
-    void AddMessage(string role, string text)
+
+    void AddMessage(string role, string text, IReadOnlyList<Attachment>? attachments = null)
     {
         var bodyContainer = new StackPanel { Spacing = 4 };
-        MarkdownRenderer.RenderTo(bodyContainer, text);
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            MarkdownRenderer.RenderTo(bodyContainer, text);
+        }
+        if (attachments != null && attachments.Count > 0)
+        {
+            var attachmentsContainer = new StackPanel { Spacing = 6, Margin = new Thickness(0, 6, 0, 0) };
+            foreach (var att in attachments)
+            {
+                attachmentsContainer.Children.Add(CreateAttachmentView(att));
+            }
+            bodyContainer.Children.Add(attachmentsContainer);
+        }
         var stack = new StackPanel { Spacing = 10 };
         stack.Children.Add(Label(role switch { "user" => T("VOUS"), "tool" => T("OUTIL"), _ => T("ASSISTANT") }, 10));
         stack.Children.Add(bodyContainer);
@@ -1260,9 +1445,22 @@ public sealed partial class MainWindow : Window
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir le panneau 'Navigateur' et activer 'Accès IA au navigateur'.");
                 return await ReadPage(ct);
 
+            case "desktop_screens":
+                if (!Skills.Enabled(state.EnabledSkills, "screenshots")) return T("Outil non autorisé.");
+                return await GetDesktopScreensAsync(ct);
+
             case "desktop_screenshot":
                 if (!Skills.Enabled(state.EnabledSkills, "screenshots")) return T("Outil non autorisé.");
-                return await CaptureDesktopScreenshotAsync(ct);
+                return await CaptureDesktopScreenshotAsync(
+                    argsObj["screen"]?.GetValue<string>(),
+                    JsonNullableInt(argsObj["x"]),
+                    JsonNullableInt(argsObj["y"]),
+                    JsonNullableInt(argsObj["width"]),
+                    JsonNullableInt(argsObj["height"]),
+                    JsonNullableInt(argsObj["max_width"] ?? argsObj["maxWidth"]),
+                    JsonNullableInt(argsObj["max_height"] ?? argsObj["maxHeight"]),
+                    JsonNullableInt(argsObj["quality"]),
+                    ct);
 
             case "browser_screenshot":
                 if (!Skills.Enabled(state.EnabledSkills, "screenshots") || !browserAccess.IsOn)
@@ -1543,7 +1741,7 @@ public sealed partial class MainWindow : Window
         if (history.Count == 1) messages.Children.Clear();
         title.Text = chat.Title;
         ToolTipService.SetToolTip(title, title.Text);
-        AddMessage("user", user.Content + (user.Attachments.Count > 0 ? "\n📎 " + string.Join(", ", user.Attachments.Select(x => x.Name)) : ""));
+        AddMessage("user", user.Content, user.Attachments);
         composer.Text = ""; pendingImages.Clear(); UpdateAttachments();
         ScrollToBottom();
         generation = new CancellationTokenSource(TimeSpan.FromMinutes(10)); var ct = generation.Token;
@@ -1553,7 +1751,24 @@ public sealed partial class MainWindow : Window
         var canWriteSources = !string.IsNullOrEmpty(project.SourceFolder) && Skills.Enabled(state.EnabledSkills, "write_sources");
         var hasBrowser = browserAccess.IsOn && Skills.Enabled(state.EnabledSkills, "web");
         var wire = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = Skills.Prompt(state.EnabledSkills, state.Language, hasSources, hasBrowser, canWriteSources) } };
-        foreach (var item in history) wire.Add(ChatEngine.ToWire(item));
+        foreach (var item in history)
+        {
+            wire.Add(ChatEngine.ToWire(item));
+            if (item.Role == "tool" && item.Attachments.Count > 0)
+            {
+                var img = item.Attachments[0];
+                var toolName = item.Content.Split('\n')[0];
+                wire.Add(new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject { ["type"] = "text", ["text"] = $"[Image issue de l’outil {toolName}]" },
+                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{img.Mime};base64,{Convert.ToBase64String(img.Data)}" } }
+                    }
+                });
+            }
+        }
         var definitions = ChatEngine.ToolDefinitions(hasSources, hasBrowser, canWriteSources);
         AddWorkspaceToolDefinitions(definitions);
         wire[0]!["content"] = wire[0]!["content"]!.GetValue<string>() + "\nAdditional tools may request one-time user approval for local previews, files outside the project and terminal commands. Never claim approval before the tool returns success. A denial is final for that action; explain it and do not retry to bypass it.";
@@ -1613,28 +1828,42 @@ public sealed partial class MainWindow : Window
                         var toolName = call!["function"]!["name"]!.GetValue<string>();
                         var toolArgs = call["function"]?["arguments"]?.GetValue<string>() ?? "";
                         var toolWire = new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result };
-                        toolResults.Add(new Message { ChatId = chat.Id, Role = "tool", Content = toolName + "\n" + result, WireJson = toolWire.ToJsonString() });
-                        AddToolMessage(toolName, toolArgs, result);
+                        var toolMsg = new Message { ChatId = chat.Id, Role = "tool", Content = toolName + "\n" + result, WireJson = toolWire.ToJsonString() };
+                        var screenshot = TakePendingToolScreenshot();
+                        if (screenshot != null)
+                        {
+                            var ext = screenshot.Value.Mime.Contains("jpeg") || screenshot.Value.Mime.Contains("jpg") ? "jpg" : "png";
+                            toolMsg.Attachments.Add(new Attachment
+                            {
+                                Name = $"screenshot.{ext}",
+                                Mime = screenshot.Value.Mime,
+                                Data = screenshot.Value.Data
+                            });
+                        }
+                        toolResults.Add(toolMsg);
+                        AddToolMessage(toolName, toolArgs, result, screenshot?.Data, screenshot?.Mime);
                         ScrollToBottom();
                     }
                 active.State = "complete"; active.WireJson = completion.Message.ToJsonString();
                 db.Messages.AddRange(toolResults); await db.SaveChangesAsync();
-                wire.Add(completion.Message.DeepClone()); foreach (var result in toolResults) wire.Add(JsonNode.Parse(result.WireJson));
-                var screenshot = TakePendingToolScreenshot();
-                if (screenshot != null)
+                wire.Add(completion.Message.DeepClone());
+                foreach (var result in toolResults)
                 {
-                    var screenshotMsg = new Message
+                    wire.Add(JsonNode.Parse(result.WireJson));
+                    if (result.Attachments.Count > 0)
                     {
-                        ChatId = chat.Id,
-                        Role = "user",
-                        Content = screenshot.Value.Label,
-                        Attachments = [new Attachment { Name = "screenshot.png", Mime = "image/png", Data = screenshot.Value.Data }]
-                    };
-                    db.Messages.Add(screenshotMsg);
-                    await db.SaveChangesAsync();
-                    wire.Add(ChatEngine.ToWire(screenshotMsg));
-                    AddMessage("user", screenshotMsg.Content + "\n📎 screenshot.png");
-                    ScrollToBottom();
+                        var img = result.Attachments[0];
+                        var toolName = result.Content.Split('\n')[0];
+                        wire.Add(new JsonObject
+                        {
+                            ["role"] = "user",
+                            ["content"] = new JsonArray
+                            {
+                                new JsonObject { ["type"] = "text", ["text"] = $"[Image issue de l’outil {toolName}]" },
+                                new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{img.Mime};base64,{Convert.ToBase64String(img.Data)}" } }
+                            }
+                        });
+                    }
                 }
                 if (toolResults.Count == 0) { status.Text = T("Réponse terminée · historique enregistré."); active = null; break; }
                 if (string.IsNullOrEmpty(assistantUi.CurrentText)) assistantUi.UpdateContent(T("Consultation des outils…"));

@@ -202,6 +202,28 @@ try
         Check(promptWrite.Contains("write_source") && promptWrite.Contains("edit_source") && !promptWrite.Contains("Tools are read-only"), "Prompt dynamique avec permissions d'écriture et modification");
         Check(Skills.All.Any(s => s.Id == "write_sources"), "Skill write_sources disponible dans le catalogue");
         Check(Skills.All.Any(s => s.Id == "mouse_control") && Skills.All.Any(s => s.Id == "keyboard_control") && Skills.All.Any(s => s.Id == "screenshots"), "Skills souris, clavier et capture d’écran disponibles");
+        var (w1, h1) = ScreenGeometry.CalculateScaledDimensions(1920, 1080, 1280, null);
+        Check(w1 == 1280 && h1 == 720, "ScreenGeometry : réduction proportionnelle par maxWidth");
+        var (w2, h2) = ScreenGeometry.CalculateScaledDimensions(1920, 1080, null, 540);
+        Check(w2 == 960 && h2 == 540, "ScreenGeometry : réduction proportionnelle par maxHeight");
+        var (w3, h3) = ScreenGeometry.CalculateScaledDimensions(1920, 1080, 800, 600);
+        Check(w3 == 800 && h3 == 450, "ScreenGeometry : aspect ratio préservé avec double contrainte");
+        var testScreens = new List<ScreenInfo>
+        {
+            new(0, @"\\.\DISPLAY1", false, -1920, 0, 1920, 1080),
+            new(1, @"\\.\DISPLAY2", true, 0, 0, 2560, 1440),
+            new(2, @"\\.\DISPLAY_PORTRAIT", false, 2560, 0, 1080, 1920)
+        };
+        Check(ScreenGeometry.ResolveScreen(testScreens, "primary")?.Index == 1, "ScreenGeometry : résolution écran 'primary'");
+        Check(ScreenGeometry.ResolveScreen(testScreens, null)?.Index == 1, "ScreenGeometry : résolution par défaut écran principal");
+        Check(ScreenGeometry.ResolveScreen(testScreens, "0")?.Index == 0, "ScreenGeometry : résolution écran par index");
+        Check(ScreenGeometry.ResolveScreen(testScreens, "PORTRAIT")?.Index == 2, "ScreenGeometry : résolution écran par nom partiel");
+        var regCustom = ScreenGeometry.ResolveRegion(testScreens, null, 50, 100, 400, 300, -1920, 0, 5560, 1920);
+        Check(regCustom == (50, 100, 400, 300), "ScreenGeometry : résolution zone rectangulaire explicite");
+        var regAll = ScreenGeometry.ResolveRegion(testScreens, "all", null, null, null, null, -1920, 0, 5560, 1920);
+        Check(regAll == (-1920, 0, 5560, 1920), "ScreenGeometry : résolution bureau complet 'all'");
+        var regPrimary = ScreenGeometry.ResolveRegion(testScreens, "primary", null, null, null, null, -1920, 0, 5560, 1920);
+        Check(regPrimary == (0, 0, 2560, 1440), "ScreenGeometry : résolution écran ciblé");
         var restored = await db.Messages.Include(x => x.Attachments).SingleAsync();
         Check(restored.Attachments.Single().Data.SequenceEqual(new byte[] { 1, 2, 3 }), "Historique et images restaurés après réouverture");
         var wire = ChatEngine.ToWire(restored);

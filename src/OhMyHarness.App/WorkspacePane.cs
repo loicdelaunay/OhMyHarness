@@ -33,6 +33,9 @@ public sealed partial class MainWindow
     CancellationTokenSource? terminalRun;
     byte[]? pendingToolScreenshot;
     string pendingToolScreenshotLabel = "";
+    string pendingToolScreenshotMime = "image/png";
+    int pendingToolScreenshotWidth;
+    int pendingToolScreenshotHeight;
     string? fileDirectory, previewFolder, previewHost;
     string? selectedFile;
     bool toolsMaximized;
@@ -488,6 +491,14 @@ public sealed partial class MainWindow
         if (value.TryGetValue<int>(out var integer)) return integer;
         return fallback;
     }
+    static int? JsonNullableInt(JsonNode? node)
+    {
+        if (node is not JsonValue value) return null;
+        if (value.TryGetValue<int>(out var integer)) return integer;
+        if (value.TryGetValue<double>(out var number)) return (int)Math.Round(number);
+        if (int.TryParse(value.ToString(), out var parsed)) return parsed;
+        return null;
+    }
     static class DesktopInterop
     {
         internal const int VirtualX = 76, VirtualY = 77, VirtualWidth = 78, VirtualHeight = 79;
@@ -525,6 +536,20 @@ public sealed partial class MainWindow
         struct BitmapInfo { internal BitmapInfoHeader Header; internal uint Color; }
 
         [DllImport("user32.dll")] internal static extern int GetSystemMetrics(int index);
+        [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
+        delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData);
+        [StructLayout(LayoutKind.Sequential)] struct Rect { internal int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        struct MonitorInfoEx
+        {
+            internal int cbSize;
+            internal Rect rcMonitor;
+            internal Rect rcWork;
+            internal uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            internal string szDevice;
+        }
+        [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfoEx lpmi);
         [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extraInfo);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
@@ -606,11 +631,36 @@ public sealed partial class MainWindow
             };
         }
 
-        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureDesktop()
+        internal static List<ScreenInfo> GetScreens()
         {
-            var x = GetSystemMetrics(VirtualX); var y = GetSystemMetrics(VirtualY);
-            var width = GetSystemMetrics(VirtualWidth); var height = GetSystemMetrics(VirtualHeight);
-            if (width <= 0 || height <= 0) throw new InvalidOperationException("No desktop display is available.");
+            var list = new List<ScreenInfo>();
+            var index = 0;
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData) =>
+            {
+                var mi = new MonitorInfoEx();
+                mi.cbSize = Marshal.SizeOf<MonitorInfoEx>();
+                if (GetMonitorInfo(hMonitor, ref mi))
+                {
+                    var isPrimary = (mi.dwFlags & 1) != 0;
+                    var w = mi.rcMonitor.Right - mi.rcMonitor.Left;
+                    var h = mi.rcMonitor.Bottom - mi.rcMonitor.Top;
+                    var name = !string.IsNullOrEmpty(mi.szDevice) ? mi.szDevice : $"Screen {index}";
+                    list.Add(new ScreenInfo(index++, name, isPrimary, mi.rcMonitor.Left, mi.rcMonitor.Top, w, h));
+                }
+                return true;
+            }, IntPtr.Zero);
+            if (list.Count == 0)
+            {
+                var vx = GetSystemMetrics(VirtualX); var vy = GetSystemMetrics(VirtualY);
+                var vw = GetSystemMetrics(VirtualWidth); var vh = GetSystemMetrics(VirtualHeight);
+                list.Add(new ScreenInfo(0, "PRIMARY", true, vx, vy, Math.Max(1, vw), Math.Max(1, vh)));
+            }
+            return list;
+        }
+
+        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureRegion(int x, int y, int width, int height)
+        {
+            if (width <= 0 || height <= 0) throw new InvalidOperationException("Region dimensions must be greater than zero.");
             var screenDc = GetDC(IntPtr.Zero); var memoryDc = IntPtr.Zero; var bitmap = IntPtr.Zero; var previous = IntPtr.Zero;
             try
             {
@@ -632,6 +682,37 @@ public sealed partial class MainWindow
                 if (screenDc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screenDc);
             }
         }
+
+        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureDesktop()
+        {
+            var x = GetSystemMetrics(VirtualX); var y = GetSystemMetrics(VirtualY);
+            var width = GetSystemMetrics(VirtualWidth); var height = GetSystemMetrics(VirtualHeight);
+            return CaptureRegion(x, y, width, height);
+        }
+    }
+    Task<string> GetDesktopScreensAsync(CancellationToken ct)
+    {
+        var screens = DesktopInterop.GetScreens();
+        var vx = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX);
+        var vy = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualY);
+        var vw = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth);
+        var vh = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
+
+        var result = new
+        {
+            screens = screens.Select(s => new
+            {
+                index = s.Index,
+                name = s.Name,
+                is_primary = s.IsPrimary,
+                x = s.X,
+                y = s.Y,
+                width = s.Width,
+                height = s.Height
+            }),
+            virtual_desktop = new { x = vx, y = vy, width = vw, height = vh }
+        };
+        return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
     async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, CancellationToken ct)
     {
@@ -678,23 +759,115 @@ public sealed partial class MainWindow
             ? JsonSerializer.Serialize(new { ok = true, action, characters = text.Length })
             : JsonSerializer.Serialize(new { ok = true, action, keys = string.Join('+', chord!.Modifiers.Append(chord.Key)) });
     }
-    async Task<string> CaptureDesktopScreenshotAsync(CancellationToken ct)
+    async Task<string> CaptureDesktopScreenshotAsync(
+        string? screenTarget,
+        int? x, int? y, int? width, int? height,
+        int? maxWidth, int? maxHeight,
+        int? quality,
+        CancellationToken ct)
     {
         if (provider?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
-        if (!await RequestAccessAsync("desktop|screenshot", T("Capturer et transmettre le bureau Windows"), T("Une image de tous les écrans visibles sera transmise au fournisseur IA."), T("Capture de tous les écrans Windows"), ct)) return T("Accès refusé par l’utilisateur.");
+
+        var screens = DesktopInterop.GetScreens();
+        var vx = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX);
+        var vy = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualY);
+        var vw = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth);
+        var vh = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
+
+        var region = ScreenGeometry.ResolveRegion(screens, screenTarget, x, y, width, height, vx, vy, vw, vh);
+
+        string targetDesc;
+        if (x.HasValue && y.HasValue && width.HasValue && height.HasValue)
+            targetDesc = $"Zone personnalisée ({region.Width} × {region.Height}, position {region.X},{region.Y})";
+        else if (string.Equals(screenTarget, "all", StringComparison.OrdinalIgnoreCase))
+            targetDesc = $"Tous les écrans ({region.Width} × {region.Height})";
+        else
+        {
+            var scr = ScreenGeometry.ResolveScreen(screens, screenTarget);
+            targetDesc = scr != null
+                ? $"Écran {scr.Index} ({scr.Name}, {scr.Width} × {scr.Height})"
+                : $"Écran ({region.Width} × {region.Height})";
+        }
+
+        if (!await RequestAccessAsync(
+            "desktop|screenshot",
+            T("Capturer et transmettre le bureau Windows"),
+            $"{targetDesc}\n" + T("Une image sera transmise au fournisseur IA."),
+            T("Capture d’écran Windows · ") + targetDesc,
+            ct))
+            return T("Accès refusé par l’utilisateur.");
+
         ct.ThrowIfCancellationRequested();
-        var capture = DesktopInterop.CaptureDesktop();
-        using var stream = new InMemoryRandomAccessStream();
-        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, (uint)capture.Width, (uint)capture.Height, 96, 96, capture.Pixels);
-        await encoder.FlushAsync();
-        if (stream.Size > 16 * 1024 * 1024) throw new IOException(T("Capture trop volumineuse (16 Mo maximum)."));
-        stream.Seek(0);
-        using var reader = new DataReader(stream.GetInputStreamAt(0));
-        await reader.LoadAsync((uint)stream.Size);
-        var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes);
-        pendingToolScreenshot = bytes; pendingToolScreenshotLabel = $"Capture du bureau Windows ({capture.Width} × {capture.Height}, origine {capture.X},{capture.Y}).";
-        return T("Capture effectuée et jointe au prochain appel du modèle.") + $" {capture.Width} × {capture.Height}.";
+
+        var capture = DesktopInterop.CaptureRegion(region.X, region.Y, region.Width, region.Height);
+        var (scaledW, scaledH) = ScreenGeometry.CalculateScaledDimensions(capture.Width, capture.Height, maxWidth, maxHeight);
+        byte[] pixels = capture.Pixels;
+        int finalW = capture.Width;
+        int finalH = capture.Height;
+
+        if (scaledW != capture.Width || scaledH != capture.Height)
+        {
+            using var tempBmpStream = new InMemoryRandomAccessStream();
+            var tempEncoder = await BitmapEncoder.CreateAsync(BitmapEncoder.BmpEncoderId, tempBmpStream);
+            tempEncoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, (uint)capture.Width, (uint)capture.Height, 96, 96, capture.Pixels);
+            await tempEncoder.FlushAsync();
+            tempBmpStream.Seek(0);
+
+            var decoder = await BitmapDecoder.CreateAsync(tempBmpStream);
+            var transform = new BitmapTransform
+            {
+                ScaledWidth = (uint)scaledW,
+                ScaledHeight = (uint)scaledH,
+                InterpolationMode = BitmapInterpolationMode.Fant
+            };
+            var pixelData = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, transform, ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
+            pixels = pixelData.DetachPixelData();
+            finalW = scaledW;
+            finalH = scaledH;
+        }
+
+        using var outStream = new InMemoryRandomAccessStream();
+        string mime;
+        bool useJpeg = quality.HasValue ? quality.Value < 100 : (finalW * finalH > 1_000_000);
+        int q = quality.HasValue ? Math.Clamp(quality.Value, 1, 100) : 85;
+
+        if (useJpeg)
+        {
+            var propertySet = new BitmapPropertySet();
+            propertySet.Add("ImageQuality", new BitmapTypedValue((float)(q / 100.0), Windows.Foundation.PropertyType.Single));
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, outStream, propertySet);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, (uint)finalW, (uint)finalH, 96, 96, pixels);
+            await encoder.FlushAsync();
+            mime = "image/jpeg";
+        }
+        else
+        {
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, outStream);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, (uint)finalW, (uint)finalH, 96, 96, pixels);
+            await encoder.FlushAsync();
+            mime = "image/png";
+        }
+
+        if (outStream.Size > 16 * 1024 * 1024) throw new IOException(T("Capture trop volumineuse (16 Mo maximum)."));
+        outStream.Seek(0);
+        using var reader = new DataReader(outStream.GetInputStreamAt(0));
+        await reader.LoadAsync((uint)outStream.Size);
+        var bytes = new byte[(int)outStream.Size];
+        reader.ReadBytes(bytes);
+
+        pendingToolScreenshot = bytes;
+        pendingToolScreenshotMime = mime;
+        pendingToolScreenshotWidth = finalW;
+        pendingToolScreenshotHeight = finalH;
+        pendingToolScreenshotLabel = $"Capture d'écran ({targetDesc}, résolution {finalW} × {finalH}, taille {bytes.Length / 1024.0:F1} Ko).";
+
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            target = targetDesc,
+            captured_region = new { x = region.X, y = region.Y, width = region.Width, height = region.Height },
+            image = new { width = finalW, height = finalH, mime, size_bytes = bytes.Length }
+        });
     }
     async Task<string> ControlBrowserMouseAsync(string action, double x, double y, double deltaX, double deltaY, string button, CancellationToken ct)
     {
@@ -800,16 +973,28 @@ public sealed partial class MainWindow
         using var reader = new DataReader(stream.GetInputStreamAt(0));
         await reader.LoadAsync((uint)stream.Size);
         var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes);
-        pendingToolScreenshot = bytes; pendingToolScreenshotLabel = "Capture de la zone visible du navigateur intégré.";
-        return T("Capture effectuée et jointe au prochain appel du modèle.");
+        var bw = (int)Math.Max(1, browser.ActualWidth);
+        var bh = (int)Math.Max(1, browser.ActualHeight);
+        pendingToolScreenshot = bytes;
+        pendingToolScreenshotMime = "image/png";
+        pendingToolScreenshotWidth = bw;
+        pendingToolScreenshotHeight = bh;
+        pendingToolScreenshotLabel = $"Capture de la zone visible du navigateur intégré ({bw} × {bh}).";
+        return T("Capture effectuée et jointe au prochain appel du modèle.") + $" {bw} × {bh}.";
     }
-    (byte[] Data, string Label)? TakePendingToolScreenshot()
+    (byte[] Data, string Label, string Mime, int Width, int Height)? TakePendingToolScreenshot()
     {
         var screenshot = pendingToolScreenshot;
         var label = pendingToolScreenshotLabel;
+        var mime = pendingToolScreenshotMime;
+        var width = pendingToolScreenshotWidth;
+        var height = pendingToolScreenshotHeight;
         pendingToolScreenshot = null;
         pendingToolScreenshotLabel = "";
-        return screenshot == null ? null : (screenshot, label);
+        pendingToolScreenshotMime = "image/png";
+        pendingToolScreenshotWidth = 0;
+        pendingToolScreenshotHeight = 0;
+        return screenshot == null ? null : (screenshot, label, mime, width, height);
     }
     void AddWorkspaceToolDefinitions(JsonArray definitions)
     {
@@ -839,6 +1024,19 @@ public sealed partial class MainWindow
         if (Skills.Enabled(state.EnabledSkills, "screenshots") && browserAccess.IsOn)
             Add("browser_screenshot", "Requests approval, captures the visible integrated browser viewport and attaches it as an image for visual analysis.", []);
         if (Skills.Enabled(state.EnabledSkills, "screenshots"))
-            Add("desktop_screenshot", "Requests approval, captures the complete Windows virtual desktop across all monitors and attaches it as an image for visual analysis.", []);
+        {
+            Add("desktop_screens", "Lists all connected monitors and displays with their indices, names, coordinates, and primary monitor status.", []);
+            Add("desktop_screenshot", "Requests approval, captures a specific screen, a rectangular region, or all monitors, and attaches the resulting image for visual analysis. Optional arguments let you choose the screen, region coordinates, max width/height for downscaling, and quality.", new()
+            {
+                ["screen"] = StringProperty("Screen target: index (e.g. '0', '1'), name (e.g. 'DISPLAY38'), 'primary' for primary monitor, or 'all' for entire virtual desktop. Defaults to 'primary'."),
+                ["x"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional X coordinate for region capture" },
+                ["y"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional Y coordinate for region capture" },
+                ["width"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional width for region capture" },
+                ["height"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional height for region capture" },
+                ["max_width"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional maximum width to downscale image while preserving aspect ratio" },
+                ["max_height"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional maximum height to downscale image while preserving aspect ratio" },
+                ["quality"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional image quality (1 to 100). If < 100, encodes as JPEG with given quality. 100 encodes as PNG." }
+            });
+        }
     }
 }
