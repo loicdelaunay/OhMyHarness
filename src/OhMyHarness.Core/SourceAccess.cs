@@ -1,16 +1,54 @@
 namespace OhMyHarness.Core;
 
-public sealed class SourceAccess(string root)
+public sealed class SourceAccess
 {
     static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
     { ".cs", ".csproj", ".sln", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml" };
     static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", "bin", "obj", "node_modules", ".env", "secrets.json", "appsettings.Production.json", "dist", "build" };
-    public string Resolve(string relative)
+
+    record RootInfo(string FullPath, string Alias);
+    readonly List<RootInfo> _roots = [];
+
+    public SourceAccess(string root) : this(string.IsNullOrWhiteSpace(root) ? [] : [root]) { }
+
+    public SourceAccess(IEnumerable<string> roots)
     {
-        if (string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("Aucun dossier source associé au projet.");
-        var basePath = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var full = Path.GetFullPath(Path.Combine(basePath, relative));
+        var rawList = roots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => Path.GetFullPath(r.Trim())).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var aliasCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rawList)
+        {
+            var baseName = Path.GetFileName(r.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(baseName)) baseName = "root";
+            aliasCounts[baseName] = aliasCounts.TryGetValue(baseName, out var c) ? c + 1 : 1;
+        }
+
+        var seenAliases = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rawList)
+        {
+            var baseName = Path.GetFileName(r.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(baseName)) baseName = "root";
+            string alias;
+            if (aliasCounts[baseName] > 1)
+            {
+                seenAliases[baseName] = seenAliases.TryGetValue(baseName, out var count) ? count + 1 : 1;
+                alias = $"{baseName}_{seenAliases[baseName]}";
+            }
+            else
+            {
+                alias = baseName;
+            }
+            _roots.Add(new RootInfo(r, alias));
+        }
+    }
+
+    public IReadOnlyList<string> Roots => _roots.Select(r => r.FullPath).ToList();
+    public IReadOnlyDictionary<string, string> Aliases => _roots.ToDictionary(r => r.Alias, r => r.FullPath, StringComparer.OrdinalIgnoreCase);
+
+    static string ResolveInRoot(string rootPath, string subpath)
+    {
+        var basePath = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(basePath, subpath));
         if (!full.StartsWith(basePath, StringComparison.OrdinalIgnoreCase) && full + Path.DirectorySeparatorChar != basePath)
             throw new UnauthorizedAccessException("Chemin hors du projet.");
         var current = basePath.TrimEnd(Path.DirectorySeparatorChar);
@@ -25,13 +63,153 @@ public sealed class SourceAccess(string root)
         }
         return full;
     }
+
+    public string Resolve(string relative)
+    {
+        if (_roots.Count == 0) throw new InvalidOperationException("Aucun dossier source associé au projet.");
+        if (string.IsNullOrWhiteSpace(relative)) relative = ".";
+
+        if (Path.IsPathFullyQualified(relative))
+        {
+            var fullReq = Path.GetFullPath(relative);
+            var match = _roots.FirstOrDefault(r =>
+            {
+                var bp = r.FullPath.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                return fullReq.StartsWith(bp, StringComparison.OrdinalIgnoreCase) || string.Equals(fullReq, r.FullPath, StringComparison.OrdinalIgnoreCase);
+            });
+            if (match != null)
+            {
+                var sub = Path.GetRelativePath(match.FullPath, fullReq);
+                return ResolveInRoot(match.FullPath, sub);
+            }
+            throw new UnauthorizedAccessException("Chemin hors du projet.");
+        }
+
+        var normalized = relative.Replace('/', Path.DirectorySeparatorChar);
+
+        if (_roots.Count == 1)
+        {
+            var single = _roots[0];
+            var subpath = normalized;
+            if (string.Equals(subpath, single.Alias, StringComparison.OrdinalIgnoreCase))
+                subpath = ".";
+            else if (subpath.StartsWith(single.Alias + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                subpath = subpath[(single.Alias.Length + 1)..];
+            return ResolveInRoot(single.FullPath, subpath);
+        }
+
+        foreach (var r in _roots)
+        {
+            if (string.Equals(normalized, r.Alias, StringComparison.OrdinalIgnoreCase))
+                return ResolveInRoot(r.FullPath, ".");
+            if (normalized.StartsWith(r.Alias + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                var subpath = normalized[(r.Alias.Length + 1)..];
+                return ResolveInRoot(r.FullPath, subpath);
+            }
+        }
+
+        if (normalized == ".")
+            throw new InvalidOperationException($"Plusieurs dossiers sources sont associés ({string.Join(", ", _roots.Select(r => r.Alias))}). Utilisez 'list_sources' pour les parcourir ou préfixez le chemin avec le nom du dossier source.");
+
+        var matchingRoots = new List<RootInfo>();
+        foreach (var r in _roots)
+        {
+            try
+            {
+                var candidate = ResolveInRoot(r.FullPath, normalized);
+                if (File.Exists(candidate) || Directory.Exists(candidate))
+                    matchingRoots.Add(r);
+            }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        if (matchingRoots.Count == 1)
+        {
+            return ResolveInRoot(matchingRoots[0].FullPath, normalized);
+        }
+        if (matchingRoots.Count > 1)
+        {
+            var aliases = string.Join(", ", matchingRoots.Select(m => m.Alias));
+            throw new InvalidOperationException($"Le chemin '{relative}' est présent dans plusieurs dossiers sources ({aliases}). Veuillez préfixer le chemin avec le nom du dossier souhaité (ex: '{matchingRoots[0].Alias}/{relative}').");
+        }
+
+        throw new InvalidOperationException($"Plusieurs dossiers sources sont associés ({string.Join(", ", _roots.Select(r => r.Alias))}). Veuillez préfixer le chemin avec le nom du dossier source cible (ex: '{_roots[0].Alias}/{relative}').");
+    }
+
     public string List(string relative = ".")
     {
-        var directory = Resolve(relative);
-        return string.Join('\n', Directory.EnumerateFileSystemEntries(directory).Where(p => !Excluded.Contains(Path.GetFileName(p)) && !Path.GetFileName(p).StartsWith(".env", StringComparison.OrdinalIgnoreCase))
+        if (_roots.Count == 0) throw new InvalidOperationException("Aucun dossier source associé au projet.");
+        if (string.IsNullOrWhiteSpace(relative)) relative = ".";
+
+        if (_roots.Count > 1 && (relative == "." || relative == ""))
+        {
+            return string.Join('\n', _roots.Select(r => $"[dossier] {r.Alias}"));
+        }
+
+        if (_roots.Count == 1)
+        {
+            var root = _roots[0];
+            var subpath = relative.Replace('/', Path.DirectorySeparatorChar);
+            if (string.Equals(subpath, root.Alias, StringComparison.OrdinalIgnoreCase)) subpath = ".";
+            else if (subpath.StartsWith(root.Alias + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                subpath = subpath[(root.Alias.Length + 1)..];
+
+            var directory = ResolveInRoot(root.FullPath, subpath);
+            return string.Join('\n', Directory.EnumerateFileSystemEntries(directory)
+                .Where(p => !Excluded.Contains(Path.GetFileName(p)) && !Path.GetFileName(p).StartsWith(".env", StringComparison.OrdinalIgnoreCase))
+                .Where(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0)
+                .Take(300).Select(p => (Directory.Exists(p) ? "[dossier] " : "") + Path.GetRelativePath(root.FullPath, p).Replace('\\', '/')));
+        }
+
+        var norm = relative.Replace('/', Path.DirectorySeparatorChar);
+        RootInfo? matchedRoot = null;
+        string relInRoot = norm;
+        foreach (var r in _roots)
+        {
+            if (string.Equals(norm, r.Alias, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedRoot = r;
+                relInRoot = ".";
+                break;
+            }
+            if (norm.StartsWith(r.Alias + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedRoot = r;
+                relInRoot = norm[(r.Alias.Length + 1)..];
+                break;
+            }
+        }
+
+        if (matchedRoot == null)
+        {
+            var candidateRoots = _roots.Where(r => Directory.Exists(Path.Combine(r.FullPath, norm))).ToList();
+            if (candidateRoots.Count == 1)
+            {
+                matchedRoot = candidateRoots[0];
+                relInRoot = norm;
+            }
+            else if (candidateRoots.Count > 1)
+            {
+                throw new InvalidOperationException($"Le dossier '{relative}' existe dans plusieurs dossiers sources ({string.Join(", ", candidateRoots.Select(c => c.Alias))}). Précisez le nom du dossier source.");
+            }
+            else
+            {
+                throw new DirectoryNotFoundException($"Dossier '{relative}' introuvable dans les dossiers sources.");
+            }
+        }
+
+        var targetDir = ResolveInRoot(matchedRoot.FullPath, relInRoot);
+        return string.Join('\n', Directory.EnumerateFileSystemEntries(targetDir)
+            .Where(p => !Excluded.Contains(Path.GetFileName(p)) && !Path.GetFileName(p).StartsWith(".env", StringComparison.OrdinalIgnoreCase))
             .Where(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0)
-            .Take(300).Select(p => (Directory.Exists(p) ? "[dossier] " : "") + Path.GetRelativePath(root, p)));
+            .Take(300).Select(p =>
+            {
+                var relPath = Path.GetRelativePath(matchedRoot.FullPath, p).Replace('\\', '/');
+                return (Directory.Exists(p) ? "[dossier] " : "") + matchedRoot.Alias + "/" + relPath;
+            }));
     }
+
     public async Task<string> ReadAsync(string relative, CancellationToken ct)
     {
         var full = Resolve(relative);
@@ -39,6 +217,7 @@ public sealed class SourceAccess(string root)
         if (new FileInfo(full).Length > 128_000) throw new InvalidOperationException("Fichier trop volumineux (128 Ko maximum).");
         return await File.ReadAllTextAsync(full, ct);
     }
+
     public async Task<string> WriteAsync(string relative, string content, CancellationToken ct)
     {
         var full = Resolve(relative);
@@ -51,6 +230,7 @@ public sealed class SourceAccess(string root)
         await File.WriteAllTextAsync(full, content, ct);
         return $"Fichier '{relative}' écrit avec succès ({content.Length} caractères).";
     }
+
     public async Task<string> ModifyAsync(string relative, string oldText, string newText, CancellationToken ct)
     {
         var full = Resolve(relative);

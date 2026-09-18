@@ -72,6 +72,7 @@ public sealed partial class MainWindow : Window
     readonly List<Attachment> pendingImages = [];
     readonly List<Control> idleOnly = [];
     ChatEngine engine;
+    OpenCodeEngine openCodeEngine;
     AppState state = new();
     Project? project;
     Chat? chat;
@@ -102,23 +103,42 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         engine = new(http);
+        openCodeEngine = new(http);
         Title = "OhMyHarness";
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1440, 940));
+        var iconFile = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
+        if (File.Exists(iconFile)) AppWindow.SetIcon(iconFile);
         SystemBackdrop = new MicaBackdrop();
         Content = root;
         root.Children.Add(shell);
         BuildSidebar(); BuildWorkspace();
         root.Loaded += async (_, _) => await Guard(InitializeAsync);
         root.SizeChanged += (_, _) => ResizeLayout();
-        Closed += (_, _) => { generation?.Cancel(); terminalRun?.Cancel(); http.Dispose(); };
+        Closed += (_, _) => { generation?.Cancel(); terminalRun?.Cancel(); StopOpenCodeProcesses(); http.Dispose(); };
     }
     void BuildSidebar()
     {
         var panel = new Grid { Padding = new(18), Background = Brush(23, 27, 37), RowSpacing = 16 };
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             panel.RowDefinitions.Add(new RowDefinition { Height = height });
-        var brand = new StackPanel { Spacing = 6 };
-        brand.Children.Add(Label("◈  OhMyHarness", 23));
+        var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        var logoFile = Path.Combine(AppContext.BaseDirectory, "Assets", "logo-32.png");
+        if (File.Exists(logoFile))
+        {
+            var logoImg = new Image
+            {
+                Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(logoFile)),
+                Width = 26,
+                Height = 26,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            brand.Children.Add(logoImg);
+        }
+        else
+        {
+            brand.Children.Add(Label("◈", 22));
+        }
+        brand.Children.Add(Label("OhMyHarness", 22));
         panel.Children.Add(brand);
         var projectBox = new StackPanel { Spacing = 10 };
         projectBox.Children.Add(Label(T("PROJETS"), 11));
@@ -823,6 +843,12 @@ public sealed partial class MainWindow : Window
             "edit_source" => "✏️",
             "browse" => "🌐",
             "read_page" => "📑",
+            "desktop_screenshot" or "browser_screenshot" => "📸",
+            "desktop_mouse" or "browser_mouse" => "🖱️",
+            "desktop_keyboard" or "browser_keyboard" => "⌨️",
+            "inspect_dom" or "browser_dom" => "🔍",
+            "git_changes" => "🌿",
+            "run_terminal" => "💻",
             _ => "🔧"
         };
         titleBox.Children.Add(Label(toolIcon, 13));
@@ -1234,6 +1260,68 @@ public sealed partial class MainWindow : Window
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir le panneau 'Navigateur' et activer 'Accès IA au navigateur'.");
                 return await ReadPage(ct);
 
+            case "desktop_screenshot":
+                if (!Skills.Enabled(state.EnabledSkills, "screenshots")) return T("Outil non autorisé.");
+                return await CaptureDesktopScreenshotAsync(ct);
+
+            case "browser_screenshot":
+                if (!Skills.Enabled(state.EnabledSkills, "screenshots") || !browserAccess.IsOn)
+                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé ou le skill 'screenshots' est inactif.");
+                return await CaptureBrowserScreenshotAsync(ct);
+
+            case "desktop_mouse":
+                if (!Skills.Enabled(state.EnabledSkills, "mouse_control")) return T("Outil non autorisé.");
+                return await ControlDesktopMouseAsync(
+                    argsObj["action"]?.GetValue<string>() ?? "click",
+                    JsonNumber(argsObj["x"]),
+                    JsonNumber(argsObj["y"]),
+                    JsonNumber(argsObj["delta_y"] ?? argsObj["deltaY"] ?? argsObj["delta"]),
+                    argsObj["button"]?.GetValue<string>() ?? "left",
+                    ct);
+
+            case "browser_mouse":
+                if (!Skills.Enabled(state.EnabledSkills, "mouse_control") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                    return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé ou le skill 'mouse_control' est inactif.");
+                return await ControlBrowserMouseAsync(
+                    argsObj["action"]?.GetValue<string>() ?? "click",
+                    JsonNumber(argsObj["x"]),
+                    JsonNumber(argsObj["y"]),
+                    JsonNumber(argsObj["delta_x"] ?? argsObj["deltaX"]),
+                    JsonNumber(argsObj["delta_y"] ?? argsObj["deltaY"] ?? argsObj["delta"]),
+                    argsObj["button"]?.GetValue<string>() ?? "left",
+                    ct);
+
+            case "desktop_keyboard":
+                if (!Skills.Enabled(state.EnabledSkills, "keyboard_control")) return T("Outil non autorisé.");
+                return await ControlDesktopKeyboardAsync(
+                    argsObj["action"]?.GetValue<string>() ?? "type",
+                    argsObj["text"]?.GetValue<string>() ?? "",
+                    argsObj["keys"]?.GetValue<string>() ?? argsObj["key"]?.GetValue<string>() ?? argsObj["shortcut"]?.GetValue<string>() ?? "",
+                    ct);
+
+            case "browser_keyboard":
+                if (!Skills.Enabled(state.EnabledSkills, "keyboard_control") || !browserAccess.IsOn)
+                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé ou le skill 'keyboard_control' est inactif.");
+                return await ControlBrowserKeyboardAsync(
+                    argsObj["action"]?.GetValue<string>() ?? "type",
+                    argsObj["text"]?.GetValue<string>() ?? "",
+                    argsObj["keys"]?.GetValue<string>() ?? argsObj["key"]?.GetValue<string>() ?? argsObj["shortcut"]?.GetValue<string>() ?? "",
+                    ct);
+
+            case "inspect_dom":
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                    return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé.");
+                return await InspectDomAsync(argsObj["selector"]?.GetValue<string>(), ct);
+
+            case "browser_dom":
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                    return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé.");
+                return await InteractWithDomAsync(
+                    argsObj["action"]?.GetValue<string>() ?? "",
+                    argsObj["target"]?.GetValue<string>() ?? "",
+                    argsObj["text"]?.GetValue<string>() ?? "",
+                    ct);
+
             default:
                 return T("Outil non reconnu ou non autorisé.");
         }
@@ -1400,18 +1488,28 @@ public sealed partial class MainWindow : Window
         }
         RefreshSpeedTooltip();
     }
-    void UpdateMetrics(GenerationUpdate update)
+    void ShowContextUsage(double tokens, bool estimated = false)
+    {
+        var limit = provider?.ContextLimit ?? 128_000;
+        var ratio = Math.Clamp(tokens / limit, 0, 1);
+        contextBar.Value = ratio * 100;
+        contextPercentText.Text = $"{(ratio * 100):F1} %{(estimated ? " ~" : "")}";
+        contextValueText.Text = $"{tokens:N0} / {limit:N0} tokens";
+        metrics.Text = $"{speedValueText.Text}  ·  {contextValueText.Text}";
+    }
+    void UpdateMetrics(GenerationUpdate update, int? fallbackInputTokens = null)
     {
         var exact = update.OutputTokens.HasValue;
         var limit = provider?.ContextLimit ?? 128_000;
         speedValueText.Text = $"⚡ {(exact ? "" : "≈ ")}{update.TokensPerSecond:F1} tok/s";
         speedOutputText.Text = $"{T("Sortie : ")}{(exact ? update.OutputTokens!.Value.ToString("N0") : T("estimation"))}";
 
-        if (update.InputTokens.HasValue)
+        var inputTokens = update.InputTokens ?? fallbackInputTokens;
+        if (inputTokens.HasValue)
         {
-            var pct = Math.Min(100.0, update.InputTokens.Value * 100.0 / limit);
-            contextPercentText.Text = $"{pct:F1} %";
-            contextValueText.Text = $"{update.InputTokens.Value:N0} / {limit:N0} tokens";
+            var pct = Math.Min(100.0, inputTokens.Value * 100.0 / limit);
+            contextPercentText.Text = $"{pct:F1} %{(update.InputTokens.HasValue ? "" : " ~")}";
+            contextValueText.Text = $"{inputTokens.Value:N0} / {limit:N0} tokens";
             contextBar.Value = pct;
         }
         else
@@ -1522,6 +1620,22 @@ public sealed partial class MainWindow : Window
                 active.State = "complete"; active.WireJson = completion.Message.ToJsonString();
                 db.Messages.AddRange(toolResults); await db.SaveChangesAsync();
                 wire.Add(completion.Message.DeepClone()); foreach (var result in toolResults) wire.Add(JsonNode.Parse(result.WireJson));
+                var screenshot = TakePendingToolScreenshot();
+                if (screenshot != null)
+                {
+                    var screenshotMsg = new Message
+                    {
+                        ChatId = chat.Id,
+                        Role = "user",
+                        Content = screenshot.Value.Label,
+                        Attachments = [new Attachment { Name = "screenshot.png", Mime = "image/png", Data = screenshot.Value.Data }]
+                    };
+                    db.Messages.Add(screenshotMsg);
+                    await db.SaveChangesAsync();
+                    wire.Add(ChatEngine.ToWire(screenshotMsg));
+                    AddMessage("user", screenshotMsg.Content + "\n📎 screenshot.png");
+                    ScrollToBottom();
+                }
                 if (toolResults.Count == 0) { status.Text = T("Réponse terminée · historique enregistré."); active = null; break; }
                 if (string.IsNullOrEmpty(assistantUi.CurrentText)) assistantUi.UpdateContent(T("Consultation des outils…"));
                 active = null;

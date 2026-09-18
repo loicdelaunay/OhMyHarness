@@ -26,6 +26,19 @@ using (var cancellation = new CancellationTokenSource())
     await Throws<OperationCanceledException>(() => ChatEngine.ParseStreamAsync(new StringReader(stream), _ => { }, cancellation.Token), "Annulation du streaming");
 }
 Check(ChatEngine.Endpoint("https://example.com/v1", "chat/completions").AbsoluteUri == "https://example.com/v1/chat/completions", "Route OpenAI v1");
+Check(MouseInput.NormalizeButton(null) == "left" && MouseInput.NormalizeButton("RIGHT") == "right", "Clics souris gauche et droit normalisés");
+await Throws<ArgumentException>(() => Task.FromResult(MouseInput.NormalizeButton("middle")), "Bouton souris non autorisé refusé");
+var saveChord = KeyboardInput.ParseChord("ctrl+s");
+Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Raccourci clavier CTRL+S normalisé");
+var aliasChord = KeyboardInput.ParseChord("control+return");
+Check(aliasChord.Modifiers.SequenceEqual(["CTRL"]) && aliasChord.Key == "ENTER", "Alias clavier normalisés");
+Check(KeyboardInput.ParseChord("ALT+TAB").Key == "TAB" && KeyboardInput.ParseChord("WIN+D").Key == "D" && KeyboardInput.ParseChord("F12").Key == "F12", "Touches spéciales clavier acceptées");
+await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("CTRL+S+Q")), "Raccourci avec plusieurs touches principales refusé");
+await Throws<ArgumentException>(() => Task.FromResult(KeyboardInput.ParseChord("")), "Raccourci clavier vide refusé");
+var contextSample = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = new JsonArray(
+    new JsonObject { ["type"] = "text", ["text"] = new string('a', 400) },
+    new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:image/png;base64," + new string('A', 20_000) } }) });
+Check(ContextWindow.Estimate(contextSample) is >= 100 and < 5000 && ContextWindow.ShouldCompact(950, 1000) && !ContextWindow.ShouldCompact(949, 1000), "Estimation du contexte et seuil de compaction à 95 %");
 using (var client = new HttpClient(new FakeHandler(async request =>
 {
     Check(request.RequestUri!.AbsoluteUri == "https://example.com/v1/chat/completions", "Requête HTTP vers le bon endpoint");
@@ -52,6 +65,40 @@ using (var client = new HttpClient(new FakeHandler(async request =>
 using (var client = new HttpClient(new FakeHandler(_ => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized)))))
     await Throws<HttpRequestException>(() => new ChatEngine(client).StreamAsync(new Provider(), "invalid", new JsonArray(), new JsonArray(), _ => { }, default), "Erreur API 401 remontée");
 await Throws<ArgumentException>(() => Task.FromResult(ChatEngine.Endpoint("http://example.com", "models")), "Clé API refusée sur HTTP distant");
+var openCodeProvider = new Provider { Kind = "opencode", BaseUrl = "http://127.0.0.1:4096", Username = "opencode", Model = "test/coder" };
+using (var client = new HttpClient(new FakeHandler(request =>
+{
+    Check(request.Headers.Authorization?.Scheme == "Basic", "Authentification Basic du serveur OpenCode");
+    return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"healthy\":true,\"version\":\"1.2.3\"}") });
+})))
+    Check(await new OpenCodeEngine(client).HealthAsync(openCodeProvider, "secret", default) == "1.2.3", "Santé du serveur OpenCode détectée");
+using (var client = new HttpClient(new FakeHandler(_ => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+{
+    Content = new StringContent("{\"all\":[{\"id\":\"test\",\"models\":{\"coder\":{\"name\":\"Coder\",\"limit\":{\"context\":64000},\"capabilities\":{\"input\":[\"text\",\"image\"]}}}}],\"connected\":[\"test\"]}")
+}))))
+{
+    var models = await new OpenCodeEngine(client).ModelsAsync(openCodeProvider, "", null, default);
+    Check(models.Count == 1 && models[0].Reference == "test/coder" && models[0].ContextLimit == 64000 && models[0].SupportsImages, "Catalogue des modèles OpenCode parsé");
+}
+var openCodeMessageReads = 0;
+using (var client = new HttpClient(new FakeHandler(request =>
+{
+    var path = request.RequestUri!.AbsolutePath;
+    if (path.EndsWith("/experimental/tool/ids")) return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("[\"bash\",\"read\"]") });
+    if (path.EndsWith("/prompt_async")) return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.NoContent));
+    if (path.EndsWith("/message"))
+    {
+        openCodeMessageReads++;
+        var json = openCodeMessageReads == 1 ? "[]" : "[{\"info\":{\"id\":\"msg-a\",\"role\":\"assistant\",\"time\":{\"completed\":1},\"tokens\":{\"input\":21,\"output\":4}},\"parts\":[{\"type\":\"reasoning\",\"text\":\"Analyse\"},{\"type\":\"text\",\"text\":\"Bonjour\"}]}]";
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+    }
+    throw new InvalidOperationException(path);
+})))
+{
+    var updates = new List<GenerationUpdate>();
+    var result = await new OpenCodeEngine(client).PromptAsync(openCodeProvider, "", "C:\\Projet", "ses-1", "Salut", "Système", [], updates.Add, default);
+    Check(result.Message["content"]!.GetValue<string>() == "Bonjour" && result.InputTokens == 21 && result.OutputTokens == 4 && updates.Last().Reasoning == "Analyse", "Réponse OpenCode et compteurs récupérés par polling");
+}
 var workspace = Path.Combine(Path.GetTempPath(), "OhMyHarness-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(workspace);
 try
@@ -71,6 +118,36 @@ try
     await Throws<InvalidOperationException>(() => access.WriteAsync("test.exe", "bin", default), "Écriture d'extension non autorisée bloquée");
     await Throws<UnauthorizedAccessException>(() => access.ReadAsync("../outside.cs", default), "Traversée de répertoire bloquée");
     await Throws<UnauthorizedAccessException>(() => access.ReadAsync(".env", default), "Lecture .env bloquée");
+
+    var proj = new Project();
+    Check(proj.GetSourceFolders().Count == 0, "Dossiers sources initialement vides");
+    proj.SetSourceFolders(["  C:\\Projects\\Front  ", "C:\\Projects\\Back", "c:\\projects\\front"]);
+    Check(proj.GetSourceFolders().Count == 2 && proj.SourceFolder == "C:\\Projects\\Front|C:\\Projects\\Back", "SetSourceFolders normalise et déduplique");
+    proj.SourceFolder = "C:\\A;C:\\B\nD:\\C";
+    Check(proj.GetSourceFolders().Count == 3 && proj.GetSourceFolders()[2] == "D:\\C", "GetSourceFolders gère séparateurs multiples");
+
+    var front = Path.Combine(workspace, "frontend"); Directory.CreateDirectory(front);
+    var back = Path.Combine(workspace, "backend"); Directory.CreateDirectory(back);
+    await File.WriteAllTextAsync(Path.Combine(front, "index.html"), "<h1>Frontend</h1>");
+    await File.WriteAllTextAsync(Path.Combine(front, "common.json"), "{\"app\":\"front\"}");
+    await File.WriteAllTextAsync(Path.Combine(back, "server.cs"), "class Server {}");
+    await File.WriteAllTextAsync(Path.Combine(back, "common.json"), "{\"app\":\"back\"}");
+
+    var multiAccess = new SourceAccess([front, back]);
+    Check(multiAccess.Roots.Count == 2, "Multi-racines SourceAccess initialisées");
+    var rootList = multiAccess.List();
+    Check(rootList.Contains("[dossier] frontend") && rootList.Contains("[dossier] backend"), "Listing racine multi-dossiers retourne les alias");
+    var frontList = multiAccess.List("frontend");
+    Check(frontList.Contains("frontend/index.html") && frontList.Contains("frontend/common.json"), "Listing sous-dossier préfixé par son alias");
+    Check((await multiAccess.ReadAsync("frontend/index.html", default)).Contains("Frontend"), "Lecture avec préfixe d'alias");
+    Check((await multiAccess.ReadAsync("server.cs", default)).Contains("Server"), "Lecture sans préfixe d'un fichier non-ambigu");
+    await Throws<InvalidOperationException>(() => multiAccess.ReadAsync("common.json", default), "Lecture d'un fichier ambigu dans plusieurs dossiers lève une exception explicite");
+    await multiAccess.WriteAsync("frontend/style.css", "body { margin: 0; }", default);
+    Check((await multiAccess.ReadAsync("frontend/style.css", default)).Contains("margin"), "Écriture dans un dossier source spécifique");
+    await multiAccess.ModifyAsync("frontend/style.css", "margin: 0", "margin: 10px", default);
+    Check((await multiAccess.ReadAsync("frontend/style.css", default)).Contains("margin: 10px"), "Modification dans un dossier source spécifique");
+    await Throws<InvalidOperationException>(() => multiAccess.WriteAsync("ambiguous.txt", "content", default), "Écriture sans préfixe d'alias en multi-racines refusée");
+
     var path = Path.Combine(workspace, "state.db");
     await using (var upgrade = new HarnessDb(Path.Combine(workspace, "upgrade.db")))
     {
@@ -84,13 +161,16 @@ try
     await using (var db = new HarnessDb(path))
     {
         await db.InitializeAsync(); await db.InitializeAsync();
-        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 4, "Migrations et démarrage idempotent");
+        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 6, "Migrations et démarrage idempotent");
         var template = await db.Templates.SingleAsync();
         Check(template.Name == "Web app" && template.Content.Contains("index.html"), "Template Web app initial créé par migration");
         template.Content = "Mon template personnalisé";
         var settings = await db.States.SingleAsync();
         settings.Language = "en"; settings.EnabledSkills = "review,planning"; settings.ThinkingLevel = "high";
+        db.PermissionGrants.Add(new PermissionGrant { Scope = "browser-origin|https://example.com", Name = "Test", Details = "example.com" });
         Check(await db.Providers.CountAsync() == 2, "Deux fournisseurs initialisés sans doublons");
+        var storedProvider = new Provider { Name = "Compatible local", BaseUrl = "http://localhost:11434/v1", Model = "custom-model", ContextLimit = 32768, SupportsImages = false };
+        db.Providers.Add(storedProvider); await db.SaveChangesAsync(); settings.ProviderId = storedProvider.Id;
         var chat = await db.Chats.FirstAsync();
         db.Messages.Add(new Message { ChatId = chat.Id, Content = "image", Attachments = [new Attachment { Data = [1, 2, 3], Name = "test.png" }] });
         await db.SaveChangesAsync();
@@ -99,6 +179,10 @@ try
     {
         var settings = await db.States.SingleAsync();
         Check(settings.Language == "en" && settings.EnabledSkills == "review,planning" && settings.ThinkingLevel == "high", "Langue, skills et thinking restaurés");
+        var selectedProvider = await db.Providers.SingleAsync(x => x.Id == settings.ProviderId);
+        Check(await db.Providers.CountAsync() == 3 && selectedProvider.Name == "Compatible local" && selectedProvider.ContextLimit == 32768, "Plusieurs fournisseurs et fournisseur actif restaurés");
+        Check(new Provider { Id = 10, Name = "OpenAI" }.ToString() != new Provider { Id = 11, Name = "OpenAI" }.ToString(), "Instances de même nom distinguées dans le sélecteur");
+        Check(await db.PermissionGrants.AnyAsync(x => x.Scope == "browser-origin|https://example.com"), "Autorisation permanente restaurée depuis SQLite");
         await db.InitializeAsync();
         Check((await db.Templates.SingleAsync()).Content == "Mon template personnalisé", "Template personnalisé conservé après redémarrage");
         Check(!Skills.Enabled(settings.EnabledSkills, "web") && Skills.Enabled(settings.EnabledSkills, "review"), "Skills activés indépendamment");
@@ -117,12 +201,26 @@ try
         var promptWrite = Skills.Prompt("write_sources", "fr", hasSources: true, hasBrowser: false, canWriteSources: true);
         Check(promptWrite.Contains("write_source") && promptWrite.Contains("edit_source") && !promptWrite.Contains("Tools are read-only"), "Prompt dynamique avec permissions d'écriture et modification");
         Check(Skills.All.Any(s => s.Id == "write_sources"), "Skill write_sources disponible dans le catalogue");
+        Check(Skills.All.Any(s => s.Id == "mouse_control") && Skills.All.Any(s => s.Id == "keyboard_control") && Skills.All.Any(s => s.Id == "screenshots"), "Skills souris, clavier et capture d’écran disponibles");
         var restored = await db.Messages.Include(x => x.Attachments).SingleAsync();
         Check(restored.Attachments.Single().Data.SequenceEqual(new byte[] { 1, 2, 3 }), "Historique et images restaurés après réouverture");
         var wire = ChatEngine.ToWire(restored);
         Check(wire["content"]![1]!["image_url"]!["url"]!.GetValue<string>().EndsWith("AQID"), "Image sérialisée en contenu multimodal");
         db.Projects.Remove(await db.Projects.SingleAsync()); await db.SaveChangesAsync();
         Check(await db.Messages.CountAsync() == 0 && await db.Set<Attachment>().CountAsync() == 0, "Suppression du projet en cascade");
+    }
+    var emptyProvidersPath = Path.Combine(workspace, "empty-providers.db");
+    await using (var emptyProviders = new HarnessDb(emptyProvidersPath))
+    {
+        await emptyProviders.InitializeAsync();
+        emptyProviders.Providers.RemoveRange(await emptyProviders.Providers.ToListAsync());
+        (await emptyProviders.States.SingleAsync()).ProviderId = 0;
+        await emptyProviders.SaveChangesAsync();
+    }
+    await using (var emptyProviders = new HarnessDb(emptyProvidersPath))
+    {
+        await emptyProviders.InitializeAsync();
+        Check(await emptyProviders.Providers.CountAsync() == 0 && (await emptyProviders.States.SingleAsync()).ProviderId == 0, "Zéro à X fournisseurs conservés sans recréation automatique");
     }
     if (OperatingSystem.IsWindows())
     {
@@ -132,11 +230,15 @@ try
         Check(result.Contains("terminal-ok") && result.Contains("Exit code: 0"), "Terminal PowerShell et code de sortie");
         using var cancelCommand = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         await Throws<OperationCanceledException>(() => WorkspaceTools.PowerShellAsync("Start-Sleep -Seconds 30", workspace, cancelCommand.Token), "Annulation du processus terminal créé");
+        Check(!WorkspaceTools.HasGitRepository(workspace), "Outil Git indisponible sans marqueur .git");
         await WorkspaceTools.GitAsync(workspace, ["init", "--quiet"], default);
+        Check(WorkspaceTools.HasGitRepository(workspace), "Dépôt Git détecté par son marqueur .git");
         await File.WriteAllTextAsync(Path.Combine(workspace, "git-test.txt"), "tracked");
         await WorkspaceTools.GitAsync(workspace, ["add", "git-test.txt"], default);
         var diff = await WorkspaceTools.GitAsync(workspace, ["--no-pager", "diff", "--cached", "--no-ext-diff", "--no-textconv"], default);
         Check(diff.Contains("+tracked"), "Lecture des changements Git indexés");
+        var changes = await WorkspaceTools.GitChangesAsync(workspace, default);
+        Check(changes.Contains("MODIFIED FILES") && changes.Contains("CHANGED LINES (STAGED)") && changes.Contains("+tracked"), "Outil Git limité aux modifications et lignes changées");
         Check(LocalPreview.ResolveResource(sources, "a.cs") == Path.Combine(sources, "a.cs"), "Ressource locale autorisée dans le dossier approuvé");
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, "%2e%2e/outside.cs")), "Évasion URL encodée bloquée dans l’aperçu");
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, ".env")), "Fichiers secrets bloqués dans l’aperçu");
@@ -152,6 +254,12 @@ try
     var openaiProvider = new Provider { Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", Model = "gpt-4o" };
     var oaiModels = ModelCatalog.GetModelsForProvider(openaiProvider);
     Check(oaiModels.Contains("gpt-4o") && oaiModels.Contains("gpt-4o-mini") && oaiModels.Contains("o1"), "Catalogue OpenAI correctement sélectionné");
+    var ocCatalogProvider = new Provider { Name = "OpenCode", Kind = "opencode", BaseUrl = "http://127.0.0.1:4096", Model = "opencode/big-pickle" };
+    var ocModels = ModelCatalog.GetModelsForProvider(ocCatalogProvider);
+    Check(ocModels.Contains("opencode/big-pickle") && ocModels.Contains("opencode/nemotron-3.5-lightning-free") && ocModels.Contains("opencode/muse-spark-1.2-contributor-free"), "Catalogue OpenCode avec modèles gratuits par défaut");
+    Check(ModelCatalog.GetDefaultContextLimit("opencode/big-pickle") == 200_000, "Limite de contexte big-pickle");
+    Check(ModelCatalog.GetDefaultContextLimit("opencode/muse-spark-1.2-contributor-free") == 1_048_576, "Limite de contexte muse-spark");
+    Check(OpenCodeEngine.IsFreeModel(null, "opencode/big-pickle") && OpenCodeEngine.IsFreeModel(null, "nemotron-3.5-lightning-free"), "Détection des modèles gratuits OpenCode");
     var mdSample = "# Titre 1\n\n```csharp\nint x = 42;\n```\n\n- [x] Fait\n- [ ] A faire\n\n| Nom | Valeur |\n| --- | --- |\n| A | 1 |\n\n[Lien](https://example.com)";
     var mdDoc = MarkdownPipelineHelper.Parse(mdSample);
     Check(mdDoc.OfType<Markdig.Syntax.HeadingBlock>().Any(h => h.Level == 1), "Markdown : Titre H1 parsé");

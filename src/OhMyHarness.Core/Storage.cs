@@ -12,6 +12,18 @@ public sealed class Project
     public string SourceFolder { get; set; } = "";
     public List<Chat> Chats { get; set; } = [];
     public override string ToString() => Name;
+
+    public List<string> GetSourceFolders() =>
+        string.IsNullOrWhiteSpace(SourceFolder)
+            ? []
+            : SourceFolder.Split(['|', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+    public void SetSourceFolders(IEnumerable<string> folders)
+    {
+        SourceFolder = string.Join('|', folders.Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+    }
 }
 public sealed class Chat
 {
@@ -51,7 +63,20 @@ public sealed class Provider
     public byte[] ProtectedKey { get; set; } = [];
     public int ContextLimit { get; set; } = 128000;
     public bool SupportsImages { get; set; } = true;
-    public override string ToString() => Name;
+    public string Kind { get; set; } = "openai";
+    public string Username { get; set; } = "";
+    public string ExecutablePath { get; set; } = "";
+    public bool AutoStart { get; set; }
+    public bool OpenCodeTools { get; set; }
+    public bool IsOpenCode => Kind.Equals("opencode", StringComparison.OrdinalIgnoreCase);
+    public override string ToString() => Id > 0 ? $"{Name} · #{Id}" : Name;
+}
+public sealed class ExternalChatSession
+{
+    public int Id { get; set; }
+    public int ChatId { get; set; }
+    public int ProviderId { get; set; }
+    public string SessionId { get; set; } = "";
 }
 public sealed class AppState
 {
@@ -71,6 +96,14 @@ public sealed class PromptTemplate
     public string Content { get; set; } = "";
     public override string ToString() => Name;
 }
+public sealed class PermissionGrant
+{
+    public int Id { get; set; }
+    public string Scope { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Details { get; set; } = "";
+    public DateTime GrantedAtUtc { get; set; } = DateTime.UtcNow;
+}
 public sealed class HarnessDb : DbContext
 {
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OhMyHarness");
@@ -82,6 +115,8 @@ public sealed class HarnessDb : DbContext
     public DbSet<Provider> Providers => Set<Provider>();
     public DbSet<AppState> States => Set<AppState>();
     public DbSet<PromptTemplate> Templates => Set<PromptTemplate>();
+    public DbSet<PermissionGrant> PermissionGrants => Set<PermissionGrant>();
+    public DbSet<ExternalChatSession> ExternalChatSessions => Set<ExternalChatSession>();
     protected override void OnConfiguring(DbContextOptionsBuilder options) =>
         options.UseSqlite($"Data Source={path}")
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
@@ -90,16 +125,20 @@ public sealed class HarnessDb : DbContext
         model.Entity<Project>().HasMany(x => x.Chats).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Chat>().HasMany(x => x.Messages).WithOne().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Message>().HasMany(x => x.Attachments).WithOne().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<PermissionGrant>().HasIndex(x => x.Scope).IsUnique();
+        model.Entity<ExternalChatSession>().HasIndex(x => new { x.ChatId, x.ProviderId }).IsUnique();
+        model.Entity<ExternalChatSession>().HasOne<Chat>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<ExternalChatSession>().HasOne<Provider>().WithMany().HasForeignKey(x => x.ProviderId).OnDelete(DeleteBehavior.Cascade);
     }
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         await Database.MigrateAsync();
-        if (!await Providers.AnyAsync())
+        if (!await States.AnyAsync())
         {
-            Providers.AddRange(new Provider(), new Provider { Name = "DeepSeek", BaseUrl = "https://api.deepseek.com", Model = "deepseek-flash", SupportsImages = true });
+            if (!await Providers.AnyAsync()) Providers.AddRange(new Provider(), new Provider { Name = "DeepSeek", BaseUrl = "https://api.deepseek.com", Model = "deepseek-flash", SupportsImages = true });
             States.Add(new AppState());
-            Projects.Add(new Project { Name = "Espace personnel", Chats = [new Chat()] });
+            if (!await Projects.AnyAsync()) Projects.Add(new Project { Name = "Espace personnel", Chats = [new Chat()] });
             await SaveChangesAsync();
         }
     }

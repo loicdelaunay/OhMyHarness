@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OhMyHarness.Core;
 
@@ -10,9 +11,11 @@ using OhMyHarness.Core;
 namespace OhMyHarness.Core.Migrations
 {
     [DbContext(typeof(HarnessDb))]
-    partial class HarnessDbModelSnapshot : ModelSnapshot
+    [Migration("20260918113601_PersistentPermissions")]
+    partial class PersistentPermissions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -99,32 +102,6 @@ namespace OhMyHarness.Core.Migrations
                     b.HasIndex("ProjectId");
 
                     b.ToTable("Chats");
-                });
-
-            modelBuilder.Entity("OhMyHarness.Core.ExternalChatSession", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ChatId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ProviderId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("SessionId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProviderId");
-
-                    b.HasIndex("ChatId", "ProviderId")
-                        .IsUnique();
-
-                    b.ToTable("ExternalChatSessions");
                 });
 
             modelBuilder.Entity("OhMyHarness.Core.Message", b =>
@@ -241,23 +218,12 @@ namespace OhMyHarness.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("AutoStart")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("BaseUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<int>("ContextLimit")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("ExecutablePath")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("Model")
                         .IsRequired()
@@ -267,19 +233,12 @@ namespace OhMyHarness.Core.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("OpenCodeTools")
-                        .HasColumnType("INTEGER");
-
                     b.Property<byte[]>("ProtectedKey")
                         .IsRequired()
                         .HasColumnType("BLOB");
 
                     b.Property<bool>("SupportsImages")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Username")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -300,21 +259,6 @@ namespace OhMyHarness.Core.Migrations
                     b.HasOne("OhMyHarness.Core.Project", null)
                         .WithMany("Chats")
                         .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("OhMyHarness.Core.ExternalChatSession", b =>
-                {
-                    b.HasOne("OhMyHarness.Core.Chat", null)
-                        .WithMany()
-                        .HasForeignKey("ChatId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("OhMyHarness.Core.Provider", null)
-                        .WithMany()
-                        .HasForeignKey("ProviderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

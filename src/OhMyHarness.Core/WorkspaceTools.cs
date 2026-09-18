@@ -3,8 +3,33 @@ using System.Text;
 
 namespace OhMyHarness.Core;
 
+public static class MouseInput
+{
+    public static string NormalizeButton(string? button)
+    {
+        var normalized = string.IsNullOrWhiteSpace(button) ? "left" : button.Trim().ToLowerInvariant();
+        return normalized is "left" or "right" ? normalized : throw new ArgumentException("Mouse button must be 'left' or 'right'.");
+    }
+}
+
 public static class WorkspaceTools
 {
+    public static bool HasGitRepository(string directory)
+    {
+        if (!Directory.Exists(directory)) return false;
+        var marker = Path.Combine(Path.GetFullPath(directory), ".git");
+        return Directory.Exists(marker) || File.Exists(marker);
+    }
+
+    public static async Task<string> GitChangesAsync(string directory, CancellationToken ct)
+    {
+        if (!HasGitRepository(directory)) throw new InvalidOperationException("No .git repository was found in the project folder.");
+        var status = await GitAsync(directory, ["--no-pager", "status", "--short", "--untracked-files=all"], ct);
+        var unstaged = await GitAsync(directory, ["--no-pager", "diff", "--no-ext-diff", "--no-textconv", "--unified=3", "--", "."], ct);
+        var staged = await GitAsync(directory, ["--no-pager", "diff", "--cached", "--no-ext-diff", "--no-textconv", "--unified=3", "--", "."], ct);
+        return "MODIFIED FILES\n" + status + "\nCHANGED LINES (UNSTAGED)\n" + unstaged + "\nCHANGED LINES (STAGED)\n" + staged;
+    }
+
     public static async Task<string> ExecuteAsync(string executable, IEnumerable<string> arguments, string directory, CancellationToken ct)
     {
         if (!Directory.Exists(directory)) throw new DirectoryNotFoundException(directory);

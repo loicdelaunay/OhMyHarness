@@ -61,6 +61,16 @@ public static class ModelCatalog
         "mistral-large"
     ];
 
+    public static readonly string[] OpenCodeModels =
+    [
+        "opencode/big-pickle",
+        "opencode/nemotron-3.5-lightning-free",
+        "opencode/mimo-v2.5-free",
+        "opencode/muse-spark-1.2-contributor-free",
+        "opencode/ling-3.0-flash-fin-free",
+        "opencode-go/ox-alpha-free"
+    ];
+
     public static List<string> GetModelsForProvider(Provider? provider)
     {
         if (provider == null) return [.. DeepSeekModels];
@@ -69,7 +79,11 @@ public static class ModelCatalog
         var url = provider.BaseUrl ?? "";
 
         string[] baseCatalog;
-        if (name.Contains("DeepSeek", StringComparison.OrdinalIgnoreCase) ||
+        if (provider.IsOpenCode || provider.Kind.Equals("opencode", StringComparison.OrdinalIgnoreCase))
+        {
+            baseCatalog = OpenCodeModels;
+        }
+        else if (name.Contains("DeepSeek", StringComparison.OrdinalIgnoreCase) ||
             url.Contains("deepseek", StringComparison.OrdinalIgnoreCase))
         {
             baseCatalog = DeepSeekModels;
@@ -98,6 +112,12 @@ public static class ModelCatalog
         if (string.IsNullOrWhiteSpace(model)) return null;
 
         var m = model.ToLowerInvariant();
+        if (m.Contains("muse-spark")) return 1_048_576;
+        if (m.Contains("big-pickle")) return 200_000;
+        if (m.Contains("nemotron")) return 262_144;
+        if (m.Contains("mimo")) return 200_000;
+        if (m.Contains("ling-3")) return 262_144;
+        if (m.Contains("ox-alpha")) return 128_000;
         if (m.Contains("o1") || m.Contains("o3")) return 200_000;
         if (m.Contains("deepseek-reasoner")) return 64_000;
         if (m.Contains("deepseek")) return 128_000;
