@@ -1304,6 +1304,20 @@ public sealed partial class MainWindow : Window
         }
 
         var permissionPanel = new StackPanel { Spacing = 12 };
+        var permissionMode = new ComboBox
+        {
+            Header = T("Comportement des demandes d’autorisation"),
+            ItemsSource = new[] { T("Refuser tout"), T("Demander (par défaut)"), T("Acceptation automatique") },
+            SelectedIndex = PermissionModes.Normalize(state.PermissionMode) switch
+            {
+                PermissionModes.Deny => 0,
+                PermissionModes.Allow => 2,
+                _ => 1
+            },
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        permissionPanel.Children.Add(permissionMode);
+        permissionPanel.Children.Add(Label(T("Cette règle globale est appliquée avant les fenêtres de confirmation pour les fichiers, le terminal, le navigateur, la souris, le clavier, les captures et les outils OpenCode."), 12));
         var grants = await db.PermissionGrants.OrderByDescending(x => x.GrantedAtUtc).ToListAsync();
         var revoke = new Dictionary<PermissionGrant, CheckBox>();
         permissionPanel.Children.Add(Label(T("Les autorisations permanentes sont limitées à la portée affichée. Cochez celles à révoquer puis enregistrez."), 13));
@@ -1356,6 +1370,12 @@ public sealed partial class MainWindow : Window
 
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
         state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
+        state.PermissionMode = permissionMode.SelectedIndex switch
+        {
+            0 => PermissionModes.Deny,
+            2 => PermissionModes.Allow,
+            _ => PermissionModes.Ask
+        };
         SaveTemplateDrafts(templateEditor.Drafts);
         foreach (var item in revoke.Where(x => x.Value.IsChecked == true).Select(x => x.Key)) db.PermissionGrants.Remove(item);
         var selectedProvider = await SaveProviderDraftsAsync(providerEditor);
@@ -1607,6 +1627,7 @@ public sealed partial class MainWindow : Window
                     JsonNumber(argsObj["y"]),
                     JsonNumber(argsObj["delta_y"] ?? argsObj["deltaY"] ?? argsObj["delta"]),
                     argsObj["button"]?.GetValue<string>() ?? "left",
+                    JsonNullableInt(argsObj["click_count"] ?? argsObj["clickCount"]) ?? 1,
                     ct);
 
             case "browser_mouse":
@@ -1619,6 +1640,7 @@ public sealed partial class MainWindow : Window
                     JsonNumber(argsObj["delta_x"] ?? argsObj["deltaX"]),
                     JsonNumber(argsObj["delta_y"] ?? argsObj["deltaY"] ?? argsObj["delta"]),
                     argsObj["button"]?.GetValue<string>() ?? "left",
+                    JsonNullableInt(argsObj["click_count"] ?? argsObj["clickCount"]) ?? 1,
                     ct);
 
             case "desktop_keyboard":

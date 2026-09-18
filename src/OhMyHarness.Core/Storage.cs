@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.Data.Sqlite;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -88,6 +89,28 @@ public sealed class AppState
     public string Language { get; set; } = "fr";
     public string EnabledSkills { get; set; } = "sources,web";
     public string ThinkingLevel { get; set; } = "auto";
+    public string PermissionMode { get; set; } = PermissionModes.Ask;
+}
+public static class PermissionModes
+{
+    public const string Deny = "deny";
+    public const string Ask = "ask";
+    public const string Allow = "allow";
+
+    public static string Normalize(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        Deny => Deny,
+        Allow => Allow,
+        _ => Ask
+    };
+
+    // null means that the regular per-scope grant/dialog flow must continue.
+    public static bool? AutomaticDecision(string? value) => Normalize(value) switch
+    {
+        Deny => false,
+        Allow => true,
+        _ => null
+    };
 }
 public sealed class PromptTemplate
 {
@@ -107,8 +130,15 @@ public sealed class PermissionGrant
 public sealed class HarnessDb : DbContext
 {
     public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OhMyHarness");
+    public static string DatabasePath => Path.Combine(AppContext.BaseDirectory, "database.sqlite");
+    public static string LegacyDatabasePath => Path.Combine(DataDirectory, "harness.db");
     readonly string path;
-    public HarnessDb(string? path = null) => this.path = path ?? Path.Combine(DataDirectory, "harness.db");
+    readonly bool usesDefaultPath;
+    public HarnessDb(string? path = null)
+    {
+        usesDefaultPath = string.IsNullOrWhiteSpace(path);
+        this.path = Path.GetFullPath(usesDefaultPath ? DatabasePath : path!);
+    }
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Chat> Chats => Set<Chat>();
     public DbSet<Message> Messages => Set<Message>();
@@ -118,7 +148,7 @@ public sealed class HarnessDb : DbContext
     public DbSet<PermissionGrant> PermissionGrants => Set<PermissionGrant>();
     public DbSet<ExternalChatSession> ExternalChatSessions => Set<ExternalChatSession>();
     protected override void OnConfiguring(DbContextOptionsBuilder options) =>
-        options.UseSqlite($"Data Source={path}")
+        options.UseSqlite(new SqliteConnectionStringBuilder { DataSource = path }.ToString())
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -133,6 +163,7 @@ public sealed class HarnessDb : DbContext
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        if (usesDefaultPath) await ImportLegacyDatabaseAsync();
         await Database.MigrateAsync();
         if (!await States.AnyAsync())
         {
@@ -146,6 +177,51 @@ public sealed class HarnessDb : DbContext
         {
             foreach (var item in legacyProviders) item.Kind = "openai";
             await SaveChangesAsync();
+        }
+    }
+
+    async Task ImportLegacyDatabaseAsync()
+    {
+        if (File.Exists(path) || !File.Exists(LegacyDatabasePath)) return;
+        await CopyDatabaseAsync(LegacyDatabasePath, path);
+    }
+
+    public static async Task CopyDatabaseAsync(string sourcePath, string destinationPath)
+    {
+        sourcePath = Path.GetFullPath(sourcePath);
+        destinationPath = Path.GetFullPath(destinationPath);
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("Base SQLite source introuvable.", sourcePath);
+        if (File.Exists(destinationPath)) throw new IOException("La base SQLite de destination existe déjà.");
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        var temporary = destinationPath + ".migrating-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using var source = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = sourcePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Pooling = false
+            }.ToString());
+            await using var destination = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = temporary, Pooling = false }.ToString());
+            await source.OpenAsync();
+            await destination.OpenAsync();
+            source.BackupDatabase(destination);
+            await destination.CloseAsync();
+            await source.CloseAsync();
+            try { File.Move(temporary, destinationPath); }
+            catch (IOException) when (File.Exists(destinationPath)) { }
+        }
+        catch (Exception ex)
+        {
+            throw new IOException($"Impossible de copier la base SQLite vers {destinationPath}.", ex);
+        }
+        finally
+        {
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+            {
+                var candidate = temporary + suffix;
+                if (File.Exists(candidate)) try { File.Delete(candidate); } catch { }
+            }
         }
     }
 }

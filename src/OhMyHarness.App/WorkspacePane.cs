@@ -36,6 +36,7 @@ public sealed partial class MainWindow
     string pendingToolScreenshotMime = "image/png";
     int pendingToolScreenshotWidth;
     int pendingToolScreenshotHeight;
+    double? browserPointerX, browserPointerY;
     string? fileDirectory, previewFolder, previewHost;
     string? selectedFile;
     bool toolsMaximized;
@@ -125,6 +126,11 @@ public sealed partial class MainWindow
         var local = Action("📂", PickPreviewAsync, true); Grid.SetColumn(local, 2); nav.Children.Add(local); ToolTipService.SetToolTip(local, T("Ouvrir un fichier local"));
         address.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await Guard(async () => { await NavigateAsync(address.Text, CancellationToken.None); }); } };
         Grid.SetRow(nav, 2); web.Children.Add(nav); Grid.SetRow(browser, 3); web.Children.Add(browser);
+        browser.PointerMoved += (_, e) =>
+        {
+            var point = e.GetCurrentPoint(browser).Position;
+            browserPointerX = point.X; browserPointerY = point.Y;
+        };
         idleOnly.Add(browserAccess); idleOnly.Add(browserDomAccess); idleOnly.Add(address); idleOnly.Add(go);
         toolTabs.Items.Add(new PivotItem { Header = "Web", Content = web });
 
@@ -327,6 +333,8 @@ public sealed partial class MainWindow
     static string PermissionScope(string kind, string target) => kind + "|" + target.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
     async Task<bool> RequestAccessAsync(string scope, string action, string details, string scopeDescription, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        if (PermissionModes.AutomaticDecision(state.PermissionMode) is bool automaticDecision) return automaticDecision;
         await approvalQueue.WaitAsync(ct);
         try
         {
@@ -503,7 +511,7 @@ public sealed partial class MainWindow
     {
         internal const int VirtualX = 76, VirtualY = 77, VirtualWidth = 78, VirtualHeight = 79;
         internal const uint LeftDown = 0x0002, LeftUp = 0x0004, RightDown = 0x0008, RightUp = 0x0010, Wheel = 0x0800;
-        const uint InputKeyboard = 1, KeyUp = 0x0002, Unicode = 0x0004;
+        const uint InputMouse = 0, InputKeyboard = 1, KeyUp = 0x0002, Unicode = 0x0004;
         const uint SourceCopy = 0x00CC0020, CaptureLayered = 0x40000000, DibRgbColors = 0;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -539,6 +547,10 @@ public sealed partial class MainWindow
         [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
         delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref Rect lprcMonitor, IntPtr dwData);
         [StructLayout(LayoutKind.Sequential)] struct Rect { internal int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct Point { internal int X, Y; }
+        [StructLayout(LayoutKind.Sequential)] struct CursorInfo { internal int Size, Flags; internal IntPtr Cursor; internal Point ScreenPosition; }
+        [StructLayout(LayoutKind.Sequential)] struct IconInfo { [MarshalAs(UnmanagedType.Bool)] internal bool Icon; internal int HotspotX, HotspotY; internal IntPtr MaskBitmap, ColorBitmap; }
+        internal readonly record struct CursorSnapshot(bool Visible, int X, int Y, int HotspotX, int HotspotY, IntPtr Handle);
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
         struct MonitorInfoEx
         {
@@ -551,7 +563,9 @@ public sealed partial class MainWindow
         }
         [DllImport("user32.dll", CharSet = CharSet.Auto)] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MonitorInfoEx lpmi);
         [DllImport("user32.dll")] internal static extern bool SetCursorPos(int x, int y);
-        [DllImport("user32.dll")] internal static extern void mouse_event(uint flags, uint dx, uint dy, uint data, nuint extraInfo);
+        [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CursorInfo cursorInfo);
+        [DllImport("user32.dll")] static extern bool GetIconInfo(IntPtr icon, out IconInfo iconInfo);
+        [DllImport("user32.dll")] static extern bool DrawIconEx(IntPtr dc, int x, int y, IntPtr icon, int width, int height, int step, IntPtr brush, int flags);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
         [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
@@ -565,6 +579,21 @@ public sealed partial class MainWindow
         [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target, int targetX, int targetY, int width, int height, IntPtr source, int sourceX, int sourceY, uint operation);
         [DllImport("gdi32.dll")] static extern int GetDIBits(IntPtr dc, IntPtr bitmap, uint start, uint lines, byte[] pixels, ref BitmapInfo info, uint usage);
 
+        internal static CursorSnapshot GetCursorSnapshot()
+        {
+            var info = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
+            if (!GetCursorInfo(ref info) || (info.Flags & 1) == 0 || info.Cursor == IntPtr.Zero)
+                return new(false, 0, 0, 0, 0, IntPtr.Zero);
+            var hotspotX = 0; var hotspotY = 0;
+            if (GetIconInfo(info.Cursor, out var icon))
+            {
+                hotspotX = icon.HotspotX; hotspotY = icon.HotspotY;
+                if (icon.MaskBitmap != IntPtr.Zero) DeleteObject(icon.MaskBitmap);
+                if (icon.ColorBitmap != IntPtr.Zero) DeleteObject(icon.ColorBitmap);
+            }
+            return new(true, info.ScreenPosition.X, info.ScreenPosition.Y, hotspotX, hotspotY, info.Cursor);
+        }
+
         static Input VirtualKeyInput(ushort virtualKey, bool released = false) => new()
         {
             Type = InputKeyboard,
@@ -575,13 +604,23 @@ public sealed partial class MainWindow
             Type = InputKeyboard,
             Union = new InputUnion { Keyboard = new KeyboardInputNative { ScanCode = value, Flags = Unicode | (released ? KeyUp : 0) } }
         };
+        static Input MouseEventInput(uint flags, int data = 0) => new()
+        {
+            Type = InputMouse,
+            Union = new InputUnion { Mouse = new MouseInputNative { MouseData = unchecked((uint)data), Flags = flags } }
+        };
         static void Send(IReadOnlyList<Input> inputs)
         {
             if (inputs.Count == 0) return;
             var batch = inputs as Input[] ?? inputs.ToArray();
             if (SendInput((uint)batch.Length, batch, Marshal.SizeOf<Input>()) != (uint)batch.Length)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not inject all keyboard events.");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not inject all input events.");
         }
+        internal static void Click(bool right) => Send([
+            MouseEventInput(right ? RightDown : LeftDown),
+            MouseEventInput(right ? RightUp : LeftUp)
+        ]);
+        internal static void Scroll(int delta) => Send([MouseEventInput(Wheel, delta)]);
         internal static void SendText(string text)
         {
             var inputs = new List<Input>(Math.Min(text.Length * 2, 512));
@@ -658,7 +697,7 @@ public sealed partial class MainWindow
             return list;
         }
 
-        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureRegion(int x, int y, int width, int height)
+        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureRegion(int x, int y, int width, int height, CursorSnapshot? savedCursor = null)
         {
             if (width <= 0 || height <= 0) throw new InvalidOperationException("Region dimensions must be greater than zero.");
             var screenDc = GetDC(IntPtr.Zero); var memoryDc = IntPtr.Zero; var bitmap = IntPtr.Zero; var previous = IntPtr.Zero;
@@ -668,6 +707,14 @@ public sealed partial class MainWindow
                     throw new InvalidOperationException("Desktop capture initialization failed.");
                 previous = SelectObject(memoryDc, bitmap);
                 if (!BitBlt(memoryDc, 0, 0, width, height, screenDc, x, y, SourceCopy | CaptureLayered)) throw new InvalidOperationException("Desktop capture failed.");
+                var cursor = savedCursor ?? GetCursorSnapshot();
+                if (cursor.Visible && cursor.Handle != IntPtr.Zero)
+                {
+                    var cursorX = cursor.X - x - cursor.HotspotX;
+                    var cursorY = cursor.Y - y - cursor.HotspotY;
+                    if (cursorX > -64 && cursorY > -64 && cursorX < width && cursorY < height)
+                        DrawIconEx(memoryDc, cursorX, cursorY, cursor.Handle, 0, 0, 0, IntPtr.Zero, 3);
+                }
                 SelectObject(memoryDc, previous); previous = IntPtr.Zero;
                 var info = new BitmapInfo { Header = new BitmapInfoHeader { Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(), Width = width, Height = -height, Planes = 1, BitCount = 32, Compression = 0 } };
                 var pixels = new byte[checked(width * height * 4)];
@@ -689,6 +736,12 @@ public sealed partial class MainWindow
             var width = GetSystemMetrics(VirtualWidth); var height = GetSystemMetrics(VirtualHeight);
             return CaptureRegion(x, y, width, height);
         }
+    }
+    async Task RestoreForegroundWindowAsync(IntPtr targetWindow, CancellationToken ct)
+    {
+        if (targetWindow == IntPtr.Zero || DesktopInterop.GetForegroundWindow() == targetWindow) return;
+        DesktopInterop.SetForegroundWindow(targetWindow);
+        await Task.Delay(180, ct);
     }
     Task<string> GetDesktopScreensAsync(CancellationToken ct)
     {
@@ -714,26 +767,33 @@ public sealed partial class MainWindow
         };
         return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
-    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, CancellationToken ct)
+    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, int clickCount, CancellationToken ct)
     {
         action = action.Trim().ToLowerInvariant(); button = MouseInput.NormalizeButton(button);
         if (action is not ("move" or "click" or "scroll")) throw new ArgumentException(T("Action souris invalide : move, click ou scroll."));
+        clickCount = MouseInput.NormalizeClickCount(clickCount);
         var minX = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX); var minY = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualY);
         var width = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth); var height = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
         var px = (int)Math.Round(x); var py = (int)Math.Round(y);
         if (px < minX || py < minY || px >= minX + width || py >= minY + height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors du bureau Windows."));
-        var details = T("Action souris demandée : ") + action + $"\nX={px}, Y={py}" + (action == "scroll" ? $"\nΔY={deltaY:0}" : "") + (action == "click" ? "\n" + T("Bouton : ") + button : "");
+        var details = T("Action souris demandée : ") + action + $"\nX={px}, Y={py}" + (action == "scroll" ? $"\nΔY={deltaY:0}" : "") + (action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "");
+        var targetWindow = DesktopInterop.GetForegroundWindow();
         if (!await RequestAccessAsync("desktop|mouse", T("Contrôler la souris Windows"), details, T("Souris sur le bureau Windows"), ct)) return T("Accès refusé par l’utilisateur.");
         ct.ThrowIfCancellationRequested();
+        await RestoreForegroundWindowAsync(targetWindow, ct);
         if (!DesktopInterop.SetCursorPos(px, py)) throw new InvalidOperationException(T("Impossible de déplacer le pointeur."));
+        if (action is "click" or "scroll") await Task.Delay(60, ct);
         if (action == "click")
         {
             var right = button == "right";
-            DesktopInterop.mouse_event(right ? DesktopInterop.RightDown : DesktopInterop.LeftDown, 0, 0, 0, 0);
-            DesktopInterop.mouse_event(right ? DesktopInterop.RightUp : DesktopInterop.LeftUp, 0, 0, 0, 0);
+            for (var index = 0; index < clickCount; index++)
+            {
+                DesktopInterop.Click(right);
+                if (index + 1 < clickCount) await Task.Delay(80, ct);
+            }
         }
-        else if (action == "scroll") DesktopInterop.mouse_event(DesktopInterop.Wheel, 0, 0, unchecked((uint)(int)Math.Round(deltaY)), 0);
-        return JsonSerializer.Serialize(new { ok = true, action, x = px, y = py, button, deltaY, desktop = new { x = minX, y = minY, width, height } });
+        else if (action == "scroll") DesktopInterop.Scroll(MouseInput.ToWindowsWheelDelta(deltaY));
+        return JsonSerializer.Serialize(new { ok = true, action, x = px, y = py, button, click_count = clickCount, deltaY, desktop = new { x = minX, y = minY, width, height } });
     }
     async Task<string> ControlDesktopKeyboardAsync(string action, string text, string keys, CancellationToken ct)
     {
@@ -748,11 +808,7 @@ public sealed partial class MainWindow
         var targetWindow = DesktopInterop.GetForegroundWindow();
         if (!await RequestAccessAsync("desktop|keyboard", T("Contrôler le clavier Windows"), details, T("Clavier sur le bureau Windows"), ct)) return T("Accès refusé par l’utilisateur.");
         ct.ThrowIfCancellationRequested();
-        if (targetWindow != IntPtr.Zero)
-        {
-            DesktopInterop.SetForegroundWindow(targetWindow);
-            await Task.Delay(150, ct);
-        }
+        await RestoreForegroundWindowAsync(targetWindow, ct);
         if (action == "type") DesktopInterop.SendText(text);
         else DesktopInterop.SendChord(chord!);
         return action == "type"
@@ -775,6 +831,8 @@ public sealed partial class MainWindow
         var vh = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
 
         var region = ScreenGeometry.ResolveRegion(screens, screenTarget, x, y, width, height, vx, vy, vw, vh);
+        var targetWindow = DesktopInterop.GetForegroundWindow();
+        var cursor = DesktopInterop.GetCursorSnapshot();
 
         string targetDesc;
         if (x.HasValue && y.HasValue && width.HasValue && height.HasValue)
@@ -798,8 +856,9 @@ public sealed partial class MainWindow
             return T("Accès refusé par l’utilisateur.");
 
         ct.ThrowIfCancellationRequested();
+        await RestoreForegroundWindowAsync(targetWindow, ct);
 
-        var capture = DesktopInterop.CaptureRegion(region.X, region.Y, region.Width, region.Height);
+        var capture = DesktopInterop.CaptureRegion(region.X, region.Y, region.Width, region.Height, cursor);
         var (scaledW, scaledH) = ScreenGeometry.CalculateScaledDimensions(capture.Width, capture.Height, maxWidth, maxHeight);
         byte[] pixels = capture.Pixels;
         int finalW = capture.Width;
@@ -869,24 +928,46 @@ public sealed partial class MainWindow
             image = new { width = finalW, height = finalH, mime, size_bytes = bytes.Length }
         });
     }
-    async Task<string> ControlBrowserMouseAsync(string action, double x, double y, double deltaX, double deltaY, string button, CancellationToken ct)
+    sealed record BrowserViewport(double Width, double Height, double DeviceScaleFactor);
+    async Task<BrowserViewport> GetBrowserViewportAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var encoded = await browser.ExecuteScriptAsync("JSON.stringify({width:window.innerWidth,height:window.innerHeight,scale:window.devicePixelRatio||1})");
+        var json = JsonSerializer.Deserialize<string>(encoded);
+        var value = string.IsNullOrWhiteSpace(json) ? null : JsonNode.Parse(json) as JsonObject;
+        var width = JsonNumber(value?["width"], Math.Max(1, browser.ActualWidth));
+        var height = JsonNumber(value?["height"], Math.Max(1, browser.ActualHeight));
+        var scale = JsonNumber(value?["scale"], 1);
+        return new(Math.Max(1, width), Math.Max(1, height), Math.Max(.1, scale));
+    }
+    async Task<string> ControlBrowserMouseAsync(string action, double x, double y, double deltaX, double deltaY, string button, int clickCount, CancellationToken ct)
     {
         await EnsureBrowser();
         action = action.Trim().ToLowerInvariant(); button = MouseInput.NormalizeButton(button);
         if (action is not ("move" or "click" or "scroll")) throw new ArgumentException(T("Action souris invalide : move, click ou scroll."));
-        if (x < 0 || y < 0 || x > Math.Max(1, browser.ActualWidth) || y > Math.Max(1, browser.ActualHeight)) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors de la zone du navigateur."));
+        clickCount = MouseInput.NormalizeClickCount(clickCount);
+        var viewport = await GetBrowserViewportAsync(ct);
+        if (x < 0 || y < 0 || x >= viewport.Width || y >= viewport.Height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors de la zone du navigateur."));
         var permission = BrowserPermissionTarget();
-        var details = T("Action souris demandée : ") + action + $"\nX={x:0}, Y={y:0}" + (action == "scroll" ? $"\nΔX={deltaX:0}, ΔY={deltaY:0}" : action == "click" ? "\n" + T("Bouton : ") + button : "");
+        var details = T("Action souris demandée : ") + action + $"\nX={x:0}, Y={y:0}" + (action == "scroll" ? $"\nΔX={deltaX:0}, ΔY={deltaY:0}" : action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "");
         if (!await RequestAccessAsync(permission.Key + "|mouse", T("Contrôler la souris dans le navigateur"), details, T("Souris du navigateur · ") + permission.Description, ct)) return T("Accès refusé par l’utilisateur.");
+        browserPointerX = x; browserPointerY = y;
         async Task Dispatch(object payload) => await browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(payload));
         if (action == "move") await Dispatch(new { type = "mouseMoved", x, y });
         else if (action == "scroll") await Dispatch(new { type = "mouseWheel", x, y, deltaX, deltaY });
         else
         {
-            await Dispatch(new { type = "mousePressed", x, y, button, clickCount = 1 });
-            await Dispatch(new { type = "mouseReleased", x, y, button, clickCount = 1 });
+            await Dispatch(new { type = "mouseMoved", x, y });
+            await Task.Delay(50, ct);
+            for (var index = 1; index <= clickCount; index++)
+            {
+                await Dispatch(new { type = "mousePressed", x, y, button, clickCount = index });
+                await Dispatch(new { type = "mouseReleased", x, y, button, clickCount = index });
+                if (index < clickCount) await Task.Delay(80, ct);
+            }
         }
-        return JsonSerializer.Serialize(new { ok = true, action, x, y, deltaX, deltaY, button });
+        return JsonSerializer.Serialize(new { ok = true, action, x, y, deltaX, deltaY, button, click_count = clickCount,
+            viewport = new { width = viewport.Width, height = viewport.Height, device_scale_factor = viewport.DeviceScaleFactor } });
     }
     async Task<string> ControlBrowserKeyboardAsync(string action, string text, string keys, CancellationToken ct)
     {
@@ -966,21 +1047,55 @@ public sealed partial class MainWindow
         await EnsureBrowser();
         var permission = BrowserPermissionTarget();
         if (!await RequestAccessAsync(permission.Key + "|screenshot", T("Capturer et transmettre la page"), T("Une image de la zone visible du navigateur sera transmise au fournisseur IA.") + "\n\n" + permission.Description, T("Captures du navigateur · ") + permission.Description, ct)) return T("Accès refusé par l’utilisateur.");
+        var viewport = await GetBrowserViewportAsync(ct);
+        var bw = Math.Max(1, (int)Math.Round(viewport.Width));
+        var bh = Math.Max(1, (int)Math.Round(viewport.Height));
         using var stream = new InMemoryRandomAccessStream();
         await browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream);
         if (stream.Size > 8 * 1024 * 1024) throw new IOException(T("Capture trop volumineuse (8 Mo maximum)."));
         stream.Seek(0);
-        using var reader = new DataReader(stream.GetInputStreamAt(0));
-        await reader.LoadAsync((uint)stream.Size);
-        var bytes = new byte[(int)stream.Size]; reader.ReadBytes(bytes);
-        var bw = (int)Math.Max(1, browser.ActualWidth);
-        var bh = (int)Math.Max(1, browser.ActualHeight);
+        var decoder = await BitmapDecoder.CreateAsync(stream);
+        var transform = new BitmapTransform { ScaledWidth = (uint)bw, ScaledHeight = (uint)bh, InterpolationMode = BitmapInterpolationMode.Fant };
+        var pixelData = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, transform,
+            ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
+        var pixels = pixelData.DetachPixelData();
+        if (browserPointerX.HasValue && browserPointerY.HasValue)
+            DrawCursorGlyph(pixels, bw, bh, (int)Math.Round(browserPointerX.Value), (int)Math.Round(browserPointerY.Value));
+        using var normalized = new InMemoryRandomAccessStream();
+        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, normalized);
+        encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore, (uint)bw, (uint)bh, 96, 96, pixels);
+        await encoder.FlushAsync();
+        normalized.Seek(0);
+        using var reader = new DataReader(normalized.GetInputStreamAt(0));
+        await reader.LoadAsync((uint)normalized.Size);
+        var bytes = new byte[(int)normalized.Size]; reader.ReadBytes(bytes);
         pendingToolScreenshot = bytes;
         pendingToolScreenshotMime = "image/png";
         pendingToolScreenshotWidth = bw;
         pendingToolScreenshotHeight = bh;
-        pendingToolScreenshotLabel = $"Capture de la zone visible du navigateur intégré ({bw} × {bh}).";
-        return T("Capture effectuée et jointe au prochain appel du modèle.") + $" {bw} × {bh}.";
+        pendingToolScreenshotLabel = $"Capture de la zone visible du navigateur intégré ({bw} × {bh} pixels CSS, échelle Windows {viewport.DeviceScaleFactor:0.##}×).";
+        return T("Capture effectuée et jointe au prochain appel du modèle.") + $" {bw} × {bh} pixels CSS ; utilisez directement ces coordonnées avec browser_mouse.";
+    }
+    static void DrawCursorGlyph(byte[] pixels, int width, int height, int cursorX, int cursorY)
+    {
+        string[] glyph =
+        [
+            "B...........", "BB..........", "BWB.........", "BWWB........",
+            "BWWWB.......", "BWWWWB......", "BWWWWWB.....", "BWWWWWWB....",
+            "BWWWBBBB....", "BWWB.BB.....", "BWB...BB....", "BB.....BB...",
+            "B.......BB..", ".........BB."
+        ];
+        for (var gy = 0; gy < glyph.Length; gy++)
+        for (var gx = 0; gx < glyph[gy].Length; gx++)
+        {
+            var color = glyph[gy][gx];
+            if (color == '.') continue;
+            var px = cursorX + gx; var py = cursorY + gy;
+            if (px < 0 || py < 0 || px >= width || py >= height) continue;
+            var offset = (py * width + px) * 4;
+            var value = color == 'W' ? (byte)255 : (byte)0;
+            pixels[offset] = value; pixels[offset + 1] = value; pixels[offset + 2] = value; pixels[offset + 3] = 255;
+        }
     }
     (byte[] Data, string Label, string Mime, int Width, int Height)? TakePendingToolScreenshot()
     {
@@ -1014,9 +1129,9 @@ public sealed partial class MainWindow
             Add("browser_dom", "Requests approval, then interacts with one DOM target. Use an ID returned by inspect_dom or a CSS selector. Actions: click, focus, type, select, scroll_into_view.", new() { ["action"] = StringProperty(), ["target"] = StringProperty(), ["text"] = StringProperty("Text or select value for type/select") }, "action", "target");
         }
         if (Skills.Enabled(state.EnabledSkills, "mouse_control") && browserAccess.IsOn && browserDomAccess.IsOn)
-            Add("browser_mouse", "Requests approval, then controls the mouse inside the integrated browser viewport. Actions: move, click, scroll. Click button can be left or right. Coordinates are CSS pixels from the viewport top-left.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_x"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left") }, "action", "x", "y");
+            Add("browser_mouse", "Requests approval, then controls the mouse inside the integrated browser viewport. Actions: move, click, scroll. Prefer inspect_dom coordinates when an element is available. A browser_screenshot is normalized to the same CSS pixel coordinate system, so its image coordinates can be used directly. Positive delta_y scrolls down and negative scrolls up. Click button can be left or right; click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_x"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
         if (Skills.Enabled(state.EnabledSkills, "mouse_control"))
-            Add("desktop_mouse", "Requests approval, then moves, left/right-clicks or scrolls the Windows mouse. Coordinates use the full virtual desktop, including negative coordinates on monitors left or above the primary display. Actions: move, click, scroll.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left") }, "action", "x", "y");
+            Add("desktop_mouse", "Requests approval, restores the window that was active before the approval dialog, then moves, left/right-clicks or scrolls the Windows mouse. Coordinates use the full virtual desktop, including negative coordinates on monitors left or above the primary display. For a scaled desktop_screenshot, map image coordinates through captured_region and image dimensions. Positive delta_y scrolls down and negative scrolls up. click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control") && browserAccess.IsOn)
             Add("browser_keyboard", "Requests approval, then types into the currently focused control or presses one key with optional CTRL, ALT, SHIFT or WIN modifiers in the integrated browser page. Actions: type (provide text), press (provide keys such as CTRL+A, ENTER or SHIFT+TAB). Focus the intended page control first.", new() { ["action"] = StringProperty("type or press"), ["text"] = StringProperty("Text for the type action"), ["keys"] = StringProperty("Key or shortcut for the press action") }, "action");
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))

@@ -28,6 +28,12 @@ using (var cancellation = new CancellationTokenSource())
 Check(ChatEngine.Endpoint("https://example.com/v1", "chat/completions").AbsoluteUri == "https://example.com/v1/chat/completions", "Route OpenAI v1");
 Check(MouseInput.NormalizeButton(null) == "left" && MouseInput.NormalizeButton("RIGHT") == "right", "Clics souris gauche et droit normalisés");
 await Throws<ArgumentException>(() => Task.FromResult(MouseInput.NormalizeButton("middle")), "Bouton souris non autorisé refusé");
+Check(MouseInput.NormalizeClickCount(1) == 1 && MouseInput.NormalizeClickCount(2) == 2, "Simple et double clic souris acceptés");
+await Throws<ArgumentOutOfRangeException>(() => Task.FromResult(MouseInput.NormalizeClickCount(3)), "Nombre de clics souris invalide refusé");
+Check(MouseInput.ToWindowsWheelDelta(240) == -240 && MouseInput.ToWindowsWheelDelta(-120) == 120, "Sens de défilement souris cohérent entre navigateur et Windows");
+Check(PermissionModes.AutomaticDecision("deny") == false && PermissionModes.AutomaticDecision("allow") == true && PermissionModes.AutomaticDecision("ask") == null, "Politique globale des autorisations appliquée avant les dialogues");
+Check(PermissionModes.Normalize("inconnu") == PermissionModes.Ask, "Politique d’autorisation invalide ramenée au mode Demander");
+Check(HarnessDb.DatabasePath == Path.Combine(AppContext.BaseDirectory, "database.sqlite"), "Base SQLite par défaut placée à côté de l’exécutable");
 var saveChord = KeyboardInput.ParseChord("ctrl+s");
 Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Raccourci clavier CTRL+S normalisé");
 var aliasChord = KeyboardInput.ParseChord("control+return");
@@ -156,17 +162,17 @@ try
         await upgrade.Database.ExecuteSqlRawAsync("INSERT INTO States (Id, ProviderId, BrowserUrl) VALUES (1, 1, 'https://example.com')");
         await upgrade.Database.MigrateAsync();
         var migrated = await upgrade.States.SingleAsync();
-        Check(migrated.Language == "fr" && migrated.EnabledSkills == "sources,web" && migrated.BrowserUrl == "https://example.com" && migrated.ThinkingLevel == "auto", "Mise à niveau d’une base existante sans perte d’état");
+        Check(migrated.Language == "fr" && migrated.EnabledSkills == "sources,web" && migrated.BrowserUrl == "https://example.com" && migrated.ThinkingLevel == "auto" && migrated.PermissionMode == PermissionModes.Ask, "Mise à niveau d’une base existante sans perte d’état");
     }
     await using (var db = new HarnessDb(path))
     {
         await db.InitializeAsync(); await db.InitializeAsync();
-        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 6, "Migrations et démarrage idempotent");
+        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 7, "Migrations et démarrage idempotent");
         var template = await db.Templates.SingleAsync();
         Check(template.Name == "Web app" && template.Content.Contains("index.html"), "Template Web app initial créé par migration");
         template.Content = "Mon template personnalisé";
         var settings = await db.States.SingleAsync();
-        settings.Language = "en"; settings.EnabledSkills = "review,planning"; settings.ThinkingLevel = "high";
+        settings.Language = "en"; settings.EnabledSkills = "review,planning"; settings.ThinkingLevel = "high"; settings.PermissionMode = PermissionModes.Allow;
         db.PermissionGrants.Add(new PermissionGrant { Scope = "browser-origin|https://example.com", Name = "Test", Details = "example.com" });
         Check(await db.Providers.CountAsync() == 2, "Deux fournisseurs initialisés sans doublons");
         var storedProvider = new Provider { Name = "Compatible local", BaseUrl = "http://localhost:11434/v1", Model = "custom-model", ContextLimit = 32768, SupportsImages = false };
@@ -178,7 +184,7 @@ try
     await using (var db = new HarnessDb(path))
     {
         var settings = await db.States.SingleAsync();
-        Check(settings.Language == "en" && settings.EnabledSkills == "review,planning" && settings.ThinkingLevel == "high", "Langue, skills et thinking restaurés");
+        Check(settings.Language == "en" && settings.EnabledSkills == "review,planning" && settings.ThinkingLevel == "high" && settings.PermissionMode == PermissionModes.Allow, "Langue, skills, thinking et politique d’autorisation restaurés");
         var selectedProvider = await db.Providers.SingleAsync(x => x.Id == settings.ProviderId);
         Check(await db.Providers.CountAsync() == 3 && selectedProvider.Name == "Compatible local" && selectedProvider.ContextLimit == 32768, "Plusieurs fournisseurs et fournisseur actif restaurés");
         Check(new Provider { Id = 10, Name = "OpenAI" }.ToString() != new Provider { Id = 11, Name = "OpenAI" }.ToString(), "Instances de même nom distinguées dans le sélecteur");
@@ -243,6 +249,13 @@ try
     {
         await emptyProviders.InitializeAsync();
         Check(await emptyProviders.Providers.CountAsync() == 0 && (await emptyProviders.States.SingleAsync()).ProviderId == 0, "Zéro à X fournisseurs conservés sans recréation automatique");
+    }
+    var relocatedPath = Path.Combine(workspace, "database.sqlite");
+    await HarnessDb.CopyDatabaseAsync(path, relocatedPath);
+    await using (var relocated = new HarnessDb(relocatedPath))
+    {
+        Check((await relocated.States.SingleAsync()).Language == "en" && (await relocated.Templates.SingleAsync()).Content == "Mon template personnalisé",
+            "Copie cohérente de l’ancienne base SQLite vers database.sqlite");
     }
     if (OperatingSystem.IsWindows())
     {

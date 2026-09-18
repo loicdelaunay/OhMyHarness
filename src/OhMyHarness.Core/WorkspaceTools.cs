@@ -10,6 +10,14 @@ public static class MouseInput
         var normalized = string.IsNullOrWhiteSpace(button) ? "left" : button.Trim().ToLowerInvariant();
         return normalized is "left" or "right" ? normalized : throw new ArgumentException("Mouse button must be 'left' or 'right'.");
     }
+
+    public static int NormalizeClickCount(int clickCount) => clickCount is 1 or 2
+        ? clickCount
+        : throw new ArgumentOutOfRangeException(nameof(clickCount), "Mouse click count must be 1 or 2.");
+
+    // Tool coordinates use the browser convention: positive Y scrolls down.
+    // Win32 wheel input uses the opposite sign.
+    public static int ToWindowsWheelDelta(double deltaY) => -(int)Math.Round(deltaY);
 }
 
 public static class WorkspaceTools
