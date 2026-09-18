@@ -475,6 +475,7 @@ public sealed partial class MainWindow : Window
         bool compact = toolsMaximized || root.ActualWidth < (browserVisible ? 1500 : 1000);
         var mode = compact ? SplitViewDisplayMode.Overlay : SplitViewDisplayMode.Inline;
         if (shell.DisplayMode != mode) { shell.DisplayMode = mode; shell.IsPaneOpen = !compact; }
+        if (toolsMaximized) shell.IsPaneOpen = false;
         bool fill = browserVisible && (toolsMaximized || root.ActualWidth < 960);
         mainArea.Visibility = fill ? Visibility.Collapsed : Visibility.Visible;
         workspace.ColumnDefinitions[0].Width = fill ? new(0) : new(1, GridUnitType.Star);
@@ -1126,6 +1127,10 @@ public sealed partial class MainWindow : Window
         browser.CoreWebView2.NavigationCompleted += async (_, _) =>
         {
             address.Text = browser.CoreWebView2.Source;
+            if (previewFolder != null && Uri.TryCreate(address.Text, UriKind.Absolute, out var displayed) && displayed.Host == previewHost)
+            {
+                try { address.Text = LocalPreview.ResolveResource(previewFolder, displayed.AbsolutePath); } catch { }
+            }
             state.BrowserUrl = address.Text;
             if (generation == null) await Guard(() => db.SaveChangesAsync());
         };
@@ -1200,7 +1205,8 @@ public sealed partial class MainWindow : Window
                 if (string.IsNullOrWhiteSpace(writePath))
                     return T("Erreur : le chemin relatif du fichier à écrire est obligatoire.");
                 var writeContent = argsObj["content"]?.GetValue<string>() ?? "";
-                return await source.WriteAsync(writePath, writeContent, ct);
+                try { return await source.WriteAsync(writePath, writeContent, ct); }
+                catch (UnauthorizedAccessException) { return await WriteWithApprovalAsync(writePath, writeContent, null, ct); }
 
             case "edit_source":
                 if (!Skills.Enabled(state.EnabledSkills, "write_sources") || string.IsNullOrEmpty(project?.SourceFolder))
@@ -1212,7 +1218,8 @@ public sealed partial class MainWindow : Window
                 if (oldText == null)
                     return T("Erreur : le paramètre 'old_text' (texte à remplacer) est obligatoire.");
                 var newText = argsObj["new_text"]?.GetValue<string>() ?? "";
-                return await source.ModifyAsync(editPath, oldText, newText, ct);
+                try { return await source.ModifyAsync(editPath, oldText, newText, ct); }
+                catch (UnauthorizedAccessException) { return await WriteWithApprovalAsync(editPath, newText, oldText, ct); }
 
             case "browse":
                 if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn)

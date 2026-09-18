@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doodle Jump — aperçu local OhMyHarness</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 18px;
+    background: radial-gradient(circle at 50% 0%, #1b2d45, #070d14 70%);
+    color: #e9f5ff;
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { width: min(420px, 100%); text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .3px; }
+  p.hint { margin: 0 0 12px; font-size: 13px; color: #9fb3c8; }
+  canvas {
+    width: 100%; height: auto; display: block; border-radius: 14px; touch-action: none;
+    box-shadow: 0 10px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .scores { display: flex; justify-content: space-between; margin-top: 10px; font-size: 14px; color: #9fb3c8; }
+  .scores b { color: #c8f56a; font-variant-numeric: tabular-nums; }
+  footer { margin-top: 12px; font-size: 12px; color: #6b8099; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Doodle Jump</h1>
+  <p class="hint">← → ou A/D pour se déplacer · glisser sur l'écran · Entrée ou clic pour rejouer</p>
+  <canvas id="game" width="400" height="600" aria-label="Jeu Doodle Jump"></canvas>
+  <div class="scores">
+    <span>Score : <b id="score">0</b></span>
+    <span>Record : <b id="best">0</b></span>
+  </div>
+  <footer>Fichier de test local — aucun accès réseau, aucune donnée utilisateur.</footer>
+</main>
+<script>
+(() => {
+  'use strict';
+
+  const W = 400, H = 600;
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+
+  const GRAVITY = 0.45;    // accélération verticale par pas
+  const JUMP = -13;        // impulsion du rebond
+  const SPEED = 7;         // vitesse horizontale max
+  const FIXED = 1000 / 60; // pas de simulation fixe (indépendant du taux de rafraîchissement)
+
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  let platforms, player, camY, topY, score, best = 0, state;
+  let keyLeft = false, keyRight = false, pointerX = null, tilt = 0;
+  let acc = 0, last = 0;
+
+  function makePlatform(y) {
+    const w = 66;
+    const r = Math.random();
+    const type = r > 0.90 ? 'break' : r > 0.65 ? 'moving' : 'normal';
+    return {
+      x: rnd(0, W - w), y, w, h: 12, type,
+      vx: type === 'moving' ? rnd(1, 2.4) * (Math.random() < 0.5 ? -1 : 1) : 0
+    };
+  }
+
+  function reset() {
+    player = { x: W / 2 - 18, y: 444, w: 36, h: 36, vx: 0, vy: JUMP };
+    camY = 0;
+    score = 0;
+    pointerX = null;
+    scoreEl.textContent = '0';
+    bestEl.textContent = String(best);
+    // plateforme de départ, large et fixe
+    platforms = [{ x: W / 2 - 42, y: 480, w: 84, h: 12, type: 'normal', vx: 0 }];
+    topY = 480;
+    while (topY > -260) { topY -= rnd(55, 88); platforms.push(makePlatform(topY)); }
+    state = 'play';
+  }
+
+  function step() {
+    if (state !== 'play') return;
+
+    // --- déplacement horizontal ---
+    let dir = (keyRight ? 1 : 0) - (keyLeft ? 1 : 0);
+    if (!dir && Math.abs(tilt) > 0.08) dir = Math.sign(tilt) * Math.min(1, Math.abs(tilt));
+    if (dir) player.vx = dir * SPEED;
+    else if (pointerX !== null) player.vx = Math.max(-SPEED, Math.min(SPEED, (pointerX - (player.x + player.w / 2)) * 0.15));
+    else player.vx *= 0.8;
+
+    player.x += player.vx;
+    // passage d'un bord à l'autre, comme dans l'original
+    if (player.x + player.w < 0) player.x = W;
+    else if (player.x > W) player.x = -player.w;
+
+    // --- plateformes mobiles ---
+    for (const p of platforms) {
+      if (p.type !== 'moving') continue;
+      p.x += p.vx;
+      if (p.x < 0) { p.x = 0; p.vx *= -1; }
+      else if (p.x + p.w > W) { p.x = W - p.w; p.vx *= -1; }
+    }
+
+    // --- chute et collisions (uniquement en descente) ---
+    const prevBottom = player.y + player.h;
+    player.vy += GRAVITY;
+    player.y += player.vy;
+    const bottom = player.y + player.h;
+
+    if (player.vy > 0) {
+      for (let i = platforms.length - 1; i >= 0; i--) {
+        const p = platforms[i];
+        const overlap = player.x + player.w > p.x + 5 && player.x < p.x + p.w - 5;
+        if (overlap && prevBottom <= p.y && bottom >= p.y) {
+          if (p.type === 'break') { platforms.splice(i, 1); continue; } // cassée : on passe au travers
+          player.y = p.y - player.h;
+          player.vy = JUMP;
+          break;
+        }
+      }
+    }
+
+    // --- caméra + score ---
+    const target = player.y - 250;
+    if (target < camY) {
+      camY = target;
+      score = Math.max(score, Math.round(-camY / 6));
+      scoreEl.textContent = String(score);
+    }
+
+    // --- recyclage des plateformes ---
+    platforms = platforms.filter(p => p.y - camY < H + 80);
+    while (topY > camY - 240) { topY -= rnd(52, 92); platforms.push(makePlatform(topY)); }
+
+    // --- défaite ---
+    if (player.y - camY > H + 60) {
+      state = 'over';
+      if (score > best) best = score;
+      bestEl.textContent = String(best);
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    // fond
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0d1b2a');
+    g.addColorStop(1, '#13293d');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+
+    // décor discret, défile avec la caméra
+    ctx.fillStyle = 'rgba(255,255,255,.05)';
+    for (let y = -40 - (camY % 40); y < H; y += 40)
+      for (let x = 20; x < W; x += 40) ctx.fillRect(x, y, 2, 2);
+
+    ctx.save();
+    ctx.translate(0, -camY);
+
+    // plateformes
+    for (const p of platforms) {
+      const sy = p.y - camY;
+      if (sy < -40 || sy > H + 40) continue;
+      ctx.fillStyle = p.type === 'moving' ? '#4cc9f0' : p.type === 'break' ? '#b05a3c' : '#7ae582';
+      roundRect(p.x, p.y, p.w, p.h, 6);
+      ctx.fill();
+      if (p.type === 'break') {
+        ctx.strokeStyle = 'rgba(0,0,0,.45)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(p.x + 4, p.y + p.h / 2);
+        ctx.lineTo(p.x + p.w - 4, p.y + p.h / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // personnage
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.fillStyle = '#c8f56a';
+    roundRect(0, 0, player.w, player.h, 12);
+    ctx.fill();
+    ctx.fillStyle = '#8fd14f';
+    roundRect(6, 19, 24, 12, 6);
+    ctx.fill();
+    ctx.fillStyle = '#101820';
+    ctx.beginPath(); ctx.arc(11, 12, 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(25, 12, 3.5, 0, Math.PI * 2); ctx.fill();
+    roundRect(4, player.h - 6, 11, 6, 3); ctx.fill();
+    roundRect(21, player.h - 6, 11, 6, 3); ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+
+    // écran de fin
+    if (state === 'over') {
+      ctx.fillStyle = 'rgba(6,12,20,.72)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#e9f5ff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 34px system-ui, sans-serif';
+      ctx.fillText('Perdu !', W / 2, H / 2 - 30);
+      ctx.font = '18px system-ui, sans-serif';
+      ctx.fillText('Score : ' + score, W / 2, H / 2 + 8);
+      ctx.fillText('Entrée ou clic pour rejouer', W / 2, H / 2 + 42);
+      ctx.textAlign = 'start';
+    }
+  }
+
+  function loop(t) {
+    if (!last) last = t;
+    acc += Math.min(120, t - last);
+    last = t;
+    while (acc >= FIXED) { step(); acc -= FIXED; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // --- clavier ---
+  addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a' || k === 'q') { keyLeft = true; e.preventDefault(); }
+    else if (k === 'arrowright' || k === 'd') { keyRight = true; e.preventDefault(); }
+    else if (k === 'enter' || k === ' ') { if (state === 'over') reset(); e.preventDefault(); }
+  });
+  addEventListener('keyup', e => {
+    const k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a' || k === 'q') keyLeft = false;
+    else if (k === 'arrowright' || k === 'd') keyRight = false;
+  });
+
+  // --- pointeur / tactile ---
+  function setPointer(e) {
+    const r = canvas.getBoundingClientRect();
+    pointerX = (e.clientX - r.left) * (W / r.width);
+  }
+  canvas.addEventListener('pointerdown', e => {
+    if (state === 'over') { reset(); return; }
+    canvas.setPointerCapture(e.pointerId);
+    setPointer(e);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (e.buttons || e.pointerType === 'touch') setPointer(e);
+  });
+  canvas.addEventListener('pointerup', () => { pointerX = null; });
+  canvas.addEventListener('pointercancel', () => { pointerX = null; });
+
+  // --- inclinaison (mobile, silencieux sur desktop) ---
+  addEventListener('deviceorientation', e => {
+    if (typeof e.gamma === 'number') tilt = Math.max(-1, Math.min(1, e.gamma / 25));
+  });
+
+  reset();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

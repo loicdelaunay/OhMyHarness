@@ -84,7 +84,10 @@ try
     await using (var db = new HarnessDb(path))
     {
         await db.InitializeAsync(); await db.InitializeAsync();
-        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 3, "Migrations et démarrage idempotent");
+        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 4, "Migrations et démarrage idempotent");
+        var template = await db.Templates.SingleAsync();
+        Check(template.Name == "Web app" && template.Content.Contains("index.html"), "Template Web app initial créé par migration");
+        template.Content = "Mon template personnalisé";
         var settings = await db.States.SingleAsync();
         settings.Language = "en"; settings.EnabledSkills = "review,planning"; settings.ThinkingLevel = "high";
         Check(await db.Providers.CountAsync() == 2, "Deux fournisseurs initialisés sans doublons");
@@ -96,6 +99,8 @@ try
     {
         var settings = await db.States.SingleAsync();
         Check(settings.Language == "en" && settings.EnabledSkills == "review,planning" && settings.ThinkingLevel == "high", "Langue, skills et thinking restaurés");
+        await db.InitializeAsync();
+        Check((await db.Templates.SingleAsync()).Content == "Mon template personnalisé", "Template personnalisé conservé après redémarrage");
         Check(!Skills.Enabled(settings.EnabledSkills, "web") && Skills.Enabled(settings.EnabledSkills, "review"), "Skills activés indépendamment");
         var prompt = Skills.Prompt(settings.EnabledSkills, settings.Language);
         Check(prompt.Contains("Reply in English") && prompt.Contains("When reviewing code") && !prompt.Contains("Use the browser when"), "Seuls les skills actifs sont ajoutés au prompt");
@@ -123,6 +128,20 @@ try
     {
         var encrypted = KeyVault.Encrypt("clé-test");
         Check(KeyVault.Decrypt(encrypted) == "clé-test" && !System.Text.Encoding.UTF8.GetString(encrypted).Contains("clé-test"), "Clé API chiffrée par DPAPI");
+        var result = await WorkspaceTools.PowerShellAsync("Write-Output 'terminal-ok'", workspace, default);
+        Check(result.Contains("terminal-ok") && result.Contains("Exit code: 0"), "Terminal PowerShell et code de sortie");
+        using var cancelCommand = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        await Throws<OperationCanceledException>(() => WorkspaceTools.PowerShellAsync("Start-Sleep -Seconds 30", workspace, cancelCommand.Token), "Annulation du processus terminal créé");
+        await WorkspaceTools.GitAsync(workspace, ["init", "--quiet"], default);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "git-test.txt"), "tracked");
+        await WorkspaceTools.GitAsync(workspace, ["add", "git-test.txt"], default);
+        var diff = await WorkspaceTools.GitAsync(workspace, ["--no-pager", "diff", "--cached", "--no-ext-diff", "--no-textconv"], default);
+        Check(diff.Contains("+tracked"), "Lecture des changements Git indexés");
+        Check(LocalPreview.ResolveResource(sources, "a.cs") == Path.Combine(sources, "a.cs"), "Ressource locale autorisée dans le dossier approuvé");
+        await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, "%2e%2e/outside.cs")), "Évasion URL encodée bloquée dans l’aperçu");
+        await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, ".env")), "Fichiers secrets bloqués dans l’aperçu");
+        await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ValidatePath(@"\\server\share\file.html")), "Chemin réseau refusé pour aperçu local");
+        await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ValidatePath(Path.Combine(sources, "a.cs:secret"))), "Flux alternatif NTFS refusé");
     }
     var deepseekProvider = new Provider { Name = "DeepSeek", BaseUrl = "https://api.deepseek.com", Model = "deepseek-reasoner" };
     var dsModels = ModelCatalog.GetModelsForProvider(deepseekProvider);
@@ -156,7 +175,13 @@ try
     Check(chatSpeedStats.HasValue && chatSpeedStats.Value.Min == 30.0 && chatSpeedStats.Value.Max == 60.0 && Math.Abs(chatSpeedStats.Value.Avg - 45.0) < 0.01, "SpeedStats : Min, Max et Moyenne sur historique");
     Check(SpeedStats.Compute(Array.Empty<(int, double)>()) == null, "SpeedStats : Résultat null sur historique vide");
 }
-finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); Directory.Delete(workspace, true); }
+finally
+{
+    Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+    // Git marks objects read-only. This directory is the unique test directory created above.
+    foreach (var file in Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+    Directory.Delete(workspace, true);
+}
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

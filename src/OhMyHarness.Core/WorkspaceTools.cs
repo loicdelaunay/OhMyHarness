@@ -54,6 +54,8 @@ public static class LocalPreview
         foreach (var part in full[current.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             if (part.Contains(':')) throw new UnauthorizedAccessException("Alternate data streams are not supported.");
+            if (part.StartsWith(".env", StringComparison.OrdinalIgnoreCase) || new[] { ".git", ".vs", "bin", "obj", "node_modules", "secrets.json", "appsettings.Production.json" }.Contains(part, StringComparer.OrdinalIgnoreCase))
+                throw new UnauthorizedAccessException("Protected file or directory.");
             current = Path.Combine(current, part);
             if (Path.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
                 throw new UnauthorizedAccessException("Symbolic links and junctions are not supported.");
