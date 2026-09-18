@@ -1,0 +1,1 @@
+src/OhMyHarness.Core/Models/minilm_multilingual/model.onnx filter=lfs diff=lfs merge=lfs -text
