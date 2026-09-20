@@ -13,7 +13,10 @@ public sealed partial class MainWindow
     {
         var drafts = db.Templates.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Id)
             .Select(x => new PromptTemplate { Id = x.Id, Name = x.Name, Content = x.Content }).ToList();
-        var chooser = new ComboBox { Header = "Template", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var chooser = new ComboBox { Header = T("Template à modifier"), PlaceholderText = T("Sélectionnez un template"), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var add = new Button { Content = "+ " + T("Nouveau template"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+        var remove = new Button { Content = T("Supprimer"), IsEnabled = false };
+        var empty = Label(T("Aucun template. Cliquez sur Nouveau template pour en créer un."), 13);
         var name = new TextBox { Header = T("Nom du template"), MaxLength = 100 };
         var content = new TextBox { Header = T("Contenu du template"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 220, MaxHeight = 350, MaxLength = 50000 };
         var error = Label("", 12); error.Tag = null;
@@ -23,6 +26,9 @@ public sealed partial class MainWindow
             refreshing = true; selected = item;
             name.Text = item?.Name ?? ""; content.Text = item?.Content ?? "";
             name.IsEnabled = content.IsEnabled = item != null;
+            remove.IsEnabled = item != null;
+            empty.Visibility = drafts.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            error.Text = "";
             refreshing = false;
         }
         void Refresh(PromptTemplate? item)
@@ -33,9 +39,12 @@ public sealed partial class MainWindow
         name.TextChanged += (_, _) => { if (!refreshing && selected != null) selected.Name = name.Text; };
         name.LostFocus += (_, _) => { if (!refreshing) Refresh(selected); };
         content.TextChanged += (_, _) => { if (!refreshing && selected != null) selected.Content = content.Text; };
-        var add = new Button { Content = T("Nouveau template") };
-        add.Click += (_, _) => { var item = new PromptTemplate { Name = T("Nouveau template"), Content = T("Décrivez votre demande ici.") }; drafts.Add(item); Refresh(item); };
-        var remove = new Button { Content = T("Supprimer") };
+        add.Click += (_, _) =>
+        {
+            var item = new PromptTemplate { Name = T("Nouveau template"), Content = T("Décrivez votre demande ici.") };
+            drafts.Add(item); Refresh(item);
+            name.Focus(FocusState.Programmatic); name.SelectAll();
+        };
         remove.Click += (_, _) => { if (selected == null) return; drafts.Remove(selected); Refresh(drafts.FirstOrDefault()); };
         var restore = new Button { Content = T("Réinitialiser Web app") };
         restore.Click += (_, _) =>
@@ -46,7 +55,7 @@ public sealed partial class MainWindow
         };
         var panel = new StackPanel { Spacing = 12 };
         panel.Children.Add(Label("Les templates préremplissent le message sans l’envoyer. Les modifications sont appliquées avec Enregistrer.", 12));
-        foreach (var item in new UIElement[] { chooser, name, content, Row(add, remove), restore, error }) panel.Children.Add(item);
+        foreach (var item in new UIElement[] { add, empty, chooser, name, content, remove, restore, error }) panel.Children.Add(item);
         Refresh(drafts.FirstOrDefault());
         return new(panel, drafts, error);
     }

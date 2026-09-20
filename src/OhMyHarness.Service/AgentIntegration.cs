@@ -1,0 +1,22 @@
+using OhMyHarness.Core;
+using Microsoft.EntityFrameworkCore;
+
+namespace OhMyHarness.Service;
+
+public sealed partial class HarnessService
+{
+    AgentRuntime CreateAgentRuntime(ConversationSession run, string secret) => new(run, new CustomSkills(CustomSkills.DefaultRoot),
+        async (wire, definitions, ct) =>
+        {
+            if (!run.Provider.IsOpenCode) return await new ChatEngine(http).StreamAsync(run.Provider, secret, wire, definitions, _ => { }, ct, run.Options.ThinkingLevel);
+            var directory = OpenCodeDirectory(run.Project);
+            await EnsureOpenCode(run.Provider, secret, directory, ct);
+            var engine = new OpenCodeEngine(http);
+            var session = await engine.CreateSessionAsync(run.Provider, secret, directory, "Sous-agent · " + run.Chat.Title, ct);
+            return await engine.PromptAsync(run.Provider, secret, directory, session, wire.Last()?["content"]?.GetValue<string>() ?? "",
+                wire[0]?["content"]?.GetValue<string>() ?? "", [], _ => { }, ct, policy: new("plan", "disabled"), workflow: run.Workflow?.ForChild());
+        },
+        (scope, diff, ct) => Approve(scope, run.Chat.Title + " · Sous-agent · Patch", diff, ct),
+        text => emit(new { @event = "status", chatId = run.Chat.Id, text }),
+        async ct => { await using var db = Db(); return await db.States.Select(x => x.EnabledSkills).SingleAsync(ct); });
+}

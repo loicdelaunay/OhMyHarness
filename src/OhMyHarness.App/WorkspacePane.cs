@@ -23,7 +23,10 @@ public sealed partial class MainWindow
     readonly TextBox terminalOutput = OutputBox();
     readonly TextBox terminalCommand = new() { PlaceholderText = "PowerShell…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 70, MaxHeight = 140 };
     readonly TextBlock terminalDirectory = Label("", 12);
-    readonly TextBox gitOutput = OutputBox();
+    readonly TextBlock gitSummary = new() { TextWrapping = TextWrapping.Wrap };
+    readonly ListView gitFiles = new() { SelectionMode = ListViewSelectionMode.Single };
+    readonly StackPanel gitDiff = new() { Spacing = 0 };
+    int gitRevision, gitDiffRevision;
     readonly ListView fileList = new() { IsItemClickEnabled = true, SelectionMode = ListViewSelectionMode.Single };
     readonly TextBlock fileLocation = Label("", 12);
     readonly TextBox fileContent = OutputBox();
@@ -53,7 +56,7 @@ public sealed partial class MainWindow
         var plus = new Button { Content = "+", FontSize = 24, Width = 38, Height = 38, Padding = new(0),
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(10, 0, 0, 10) };
         idleOnly.Add(plus);
-        var menu = new MenuFlyout(); plus.Flyout = menu;
+        var menu = new Flyout(); plus.Flyout = menu;
         menu.Opening += (_, _) => BuildComposerMenu(menu);
         overlay.Children.Add(plus);
         send.Content = "↑"; send.Width = 38; send.Height = 38; send.Padding = new(0); send.FontSize = 22;
@@ -62,48 +65,101 @@ public sealed partial class MainWindow
         overlay.Children.Add(right);
         return overlay;
     }
-    void BuildComposerMenu(MenuFlyout menu)
+    void BuildComposerMenu(Flyout menu)
     {
-        menu.Items.Clear();
-        MenuFlyoutItem Item(string label, Func<Task> action)
+        // A content flyout keeps controls interactive until light-dismiss (outside click or Escape).
+        var content = new StackPanel { Spacing = 6, Width = 320, MaxWidth = Math.Max(180, root.ActualWidth - 60) };
+        menu.Content = new ScrollViewer { Content = content, MaxHeight = Math.Clamp(root.ActualHeight * .65, 180, 600), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        StackPanel Section(string title)
         {
-            var item = new MenuFlyoutItem { Text = T(label) };
+            var section = new StackPanel { Spacing = 4 };
+            var expander = new Expander { Header = title, Content = section, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            section.Tag = expander; content.Children.Add(expander);
+            return section;
+        }
+        Button Item(string label, Func<Task> action)
+        {
+            var item = new Button { Content = T(label), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
             item.Click += async (_, _) => await Guard(action);
             return item;
         }
-        menu.Items.Add(Item("Joindre des images", AttachImages));
-        menu.Items.Add(Item("Ajouter un dossier source", AttachFolder));
-        menu.Items.Add(new MenuFlyoutSeparator());
-        var skillMenu = new MenuFlyoutSubItem { Text = "Skills" };
-        foreach (var skill in Skills.All)
+        content.Children.Add(Item("Joindre des images", AttachImages));
+        content.Children.Add(Item("Ajouter un dossier source", AttachFolder));
+        if (chat is { } selectedChat)
         {
-            var toggle = new ToggleMenuFlyoutItem { Text = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsChecked = Skills.Enabled(state.EnabledSkills, skill.Id) };
+            AddSandboxMenu(content, selectedChat);
+            var modeMenu = Section("Mode · " + (selectedChat.ExecutionMode == "plan" ? "Plan" : T("Exécution")));
+            foreach (var value in new[] { "plan", "execute" })
+            {
+                var choice = new RadioButton { GroupName = "composer-mode", Content = value == "plan" ? "Plan" : T("Exécution"), IsChecked = selectedChat.ExecutionMode == value };
+                choice.Click += async (_, _) => await Guard(async () => {
+                    selectedChat.ExecutionMode = value; await db.SaveChangesAsync();
+                    ((Expander)modeMenu.Tag).Header = "Mode · " + choice.Content;
+                    status.Text = T("Mode appliqué au prochain envoi : ") + choice.Content;
+                });
+                modeMenu.Children.Add(choice);
+            }
+
+            var agentsMenu = Section(T("Orchestration sous-agents") + " · " + selectedChat.OrchestrationMode);
+            foreach (var value in new[] { "disabled", "auto", "forced" })
+            {
+                var choice = new RadioButton { GroupName = "composer-orchestration", Content = value == "disabled" ? "Disable" : value == "auto" ? "Auto" : "Forced", IsChecked = selectedChat.OrchestrationMode == value };
+                choice.Click += async (_, _) => await Guard(async () => {
+                    selectedChat.OrchestrationMode = value; await db.SaveChangesAsync();
+                    ((Expander)agentsMenu.Tag).Header = T("Orchestration sous-agents") + " · " + choice.Content;
+                    status.Text = T("Mode appliqué au prochain envoi : ") + choice.Content;
+                });
+                agentsMenu.Children.Add(choice);
+            }
+
+        }
+        content.Children.Add(new Border { Height = 1, Margin = new(0, 6, 0, 6), Background = new SolidColorBrush(Microsoft.UI.Colors.DimGray) });
+        var skillMenu = Section("Skills");
+        foreach (var skill in Skills.Available())
+        {
+            var toggle = new CheckBox { Content = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsChecked = Skills.Enabled(state.EnabledSkills, skill.Id) };
             toggle.Click += async (_, _) => await Guard(async () =>
             {
                 var enabled = state.EnabledSkills.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
-                if (toggle.IsChecked) enabled.Add(skill.Id); else enabled.Remove(skill.Id);
+                if (toggle.IsChecked == true) enabled.Add(skill.Id); else enabled.Remove(skill.Id);
                 state.EnabledSkills = string.Join(',', enabled); await db.SaveChangesAsync();
             });
-            skillMenu.Items.Add(toggle);
+            skillMenu.Children.Add(toggle);
         }
-        menu.Items.Add(skillMenu);
-        var templates = new MenuFlyoutSubItem { Text = "Templates" };
+        skillMenu.Children.Add(new Border { Height = 1, Margin = new(0, 6, 0, 6), Background = new SolidColorBrush(Microsoft.UI.Colors.DimGray) });
+        var browserToggle = new CheckBox { Content = T("Accès IA au navigateur"), IsChecked = browserAccess.IsOn };
+        browserToggle.Click += (_, _) => browserAccess.IsOn = browserToggle.IsChecked == true;
+        skillMenu.Children.Add(browserToggle);
+        var domToggle = new CheckBox { Content = T("Accès DOM et interaction IA"), IsChecked = browserDomAccess.IsOn };
+        domToggle.Click += (_, _) => browserDomAccess.IsOn = domToggle.IsChecked == true;
+        skillMenu.Children.Add(domToggle);
+
+        var mcpMenu = Section("MCP");
+        foreach (var server in db.McpServers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name))
+        {
+            var toggle = new CheckBox { Content = server.Name, IsChecked = server.Enabled };
+            toggle.Click += async (_, _) => await Guard(async () => { server.Enabled = toggle.IsChecked == true; await db.SaveChangesAsync(); });
+            mcpMenu.Children.Add(toggle);
+        }
+        mcpMenu.Children.Add(Item("Configurer MCP…", Settings));
+
+        var templates = Section("Templates");
         foreach (var template in db.Templates.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name))
         {
             var captured = template;
-            templates.Items.Add(Item(template.Name, async () =>
+            templates.Children.Add(Item(template.Name, async () =>
             {
                 if (!string.IsNullOrWhiteSpace(composer.Text))
                 {
                     var confirm = new ContentDialog { XamlRoot = root.XamlRoot, Title = T("Remplacer le brouillon ?"), Content = T("Le template remplacera le texte actuel. Les pièces jointes sont conservées."), PrimaryButtonText = T("Remplacer"), CloseButtonText = T("Annuler") };
                     if (await ShowDialogAsync(confirm) != ContentDialogResult.Primary) return;
                 }
-                composer.Text = captured.Content; composer.Focus(FocusState.Programmatic); composer.Select(composer.Text.Length, 0);
+                composer.Text = captured.Content; composer.Select(composer.Text.Length, 0);
             }));
         }
-        templates.Items.Add(Item("Modifier les templates…", Settings));
-        menu.Items.Add(templates);
-        menu.Items.Add(Item("Réglages", Settings));
+        templates.Children.Add(Item("Modifier les templates…", Settings));
+
+        content.Children.Add(Item("Réglages", Settings));
     }
 
     void BuildToolsPane()
@@ -116,21 +172,19 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(actions.Children[0], T("Agrandir / restaurer le panneau"));
         Grid.SetColumn(actions, 1); toolbar.Children.Add(actions); container.Children.Add(toolbar);
         var web = new Grid { RowSpacing = 8 };
-        web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
-        web.Children.Add(browserAccess);
-        Grid.SetRow(browserDomAccess, 1); web.Children.Add(browserDomAccess);
+        web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         var nav = new Grid { ColumnSpacing = 4 }; nav.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); nav.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); nav.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         nav.Children.Add(address);
         var go = Action("→", async () => { await NavigateAsync(address.Text, CancellationToken.None); }); Grid.SetColumn(go, 1); nav.Children.Add(go);
         var local = Action("📂", PickPreviewAsync, true); Grid.SetColumn(local, 2); nav.Children.Add(local); ToolTipService.SetToolTip(local, T("Ouvrir un fichier local"));
         address.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await Guard(async () => { await NavigateAsync(address.Text, CancellationToken.None); }); } };
-        Grid.SetRow(nav, 2); web.Children.Add(nav); Grid.SetRow(browser, 3); web.Children.Add(browser);
+        Grid.SetRow(nav, 0); web.Children.Add(nav); Grid.SetRow(browser, 1); web.Children.Add(browser);
         browser.PointerMoved += (_, e) =>
         {
             var point = e.GetCurrentPoint(browser).Position;
             browserPointerX = point.X; browserPointerY = point.Y;
         };
-        idleOnly.Add(browserAccess); idleOnly.Add(browserDomAccess); idleOnly.Add(address); idleOnly.Add(go);
+        idleOnly.Add(address); idleOnly.Add(go);
         toolTabs.Items.Add(new PivotItem { Header = "Web", Content = web });
 
         var terminal = new Grid { RowSpacing = 8 };
@@ -144,7 +198,25 @@ public sealed partial class MainWindow
 
         var git = new Grid { RowSpacing = 8 }; git.RowDefinitions.Add(new() { Height = GridLength.Auto }); git.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         git.Children.Add(Action("Actualiser les changements", async () => { await RefreshGitAsync(CancellationToken.None); }));
-        Grid.SetRow(gitOutput, 1); git.Children.Add(gitOutput); toolTabs.Items.Add(new PivotItem { Header = "Git", Content = git });
+        git.RowDefinitions.Add(new() { Height = new(2, GridUnitType.Star) });
+        var gitHeader = new StackPanel { Spacing = 6 }; var refreshGit = git.Children[0]; git.Children.Clear();
+        gitHeader.Children.Add(refreshGit); gitHeader.Children.Add(gitSummary); git.Children.Add(gitHeader);
+        Grid.SetRow(gitFiles, 1); git.Children.Add(gitFiles);
+        var diffScroll = new ScrollViewer { Content = gitDiff, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(diffScroll, 2); git.Children.Add(diffScroll);
+        gitFiles.SelectionChanged += async (_, _) => await Guard(async () =>
+        {
+            var revision = ++gitDiffRevision; gitDiff.Children.Clear();
+            if (gitFiles.SelectedItem is not GitChangedFile file) return;
+            var text = await GitWorkspace.DiffAsync(file, CancellationToken.None);
+            if (revision != gitDiffRevision) return;
+            foreach (var line in text.Split('\n'))
+                gitDiff.Children.Add(new TextBlock { Text = line.TrimEnd('\r'), FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Code, Consolas"),
+                    IsTextSelectionEnabled = true, FontSize = 12,
+                    Foreground = line.StartsWith('+') ? Brush(110, 220, 150) : line.StartsWith('-') ? Brush(255, 145, 145) : line.StartsWith("@@") ? Brush(130, 175, 255) : Brush(220, 225, 235) });
+            diffScroll.ChangeView(0, 0, null);
+        });
+        toolTabs.Items.Add(new PivotItem { Header = "Git", Content = git });
 
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star) }) filePanel.RowDefinitions.Add(new() { Height = height });
         filePanel.RowSpacing = 8;
@@ -225,7 +297,7 @@ public sealed partial class MainWindow
         fileRevision++;
         fileDirectory = null; selectedFile = null;
         if (conversationRuns.Count == 0) { previewFolder = null; previewHost = null; }
-        fileList.ItemsSource = null; fileContent.Text = ""; gitOutput.Text = "";
+        fileList.ItemsSource = null; fileContent.Text = ""; gitRevision++; gitDiffRevision++; gitFiles.ItemsSource = null; gitDiff.Children.Clear(); gitSummary.Text = "";
         var dirs = project?.GetSourceFolders() ?? [];
         if (terminalRun == null) { terminalOutput.Text = ""; terminalDirectory.Text = dirs.Count > 0 ? dirs[0] : ""; }
         if (conversationRuns.Count == 0 && browserReady && browser.CoreWebView2.Source.Contains(".preview.invalid")) browser.CoreWebView2.Navigate("about:blank");
@@ -285,30 +357,24 @@ public sealed partial class MainWindow
     }
     async Task<string> RefreshGitAsync(CancellationToken ct, Project? targetProject = null)
     {
+        var revision = ++gitRevision; gitDiffRevision++;
+        gitFiles.ItemsSource = null; gitDiff.Children.Clear();
         var folders = (targetProject ?? project)?.GetSourceFolders() ?? [];
-        if (folders.Count == 0) return gitOutput.Text = T("Associez un dossier source via le bouton +.");
+        gitSummary.Text = T("Chargement…");
         var repos = folders.Where(WorkspaceTools.HasGitRepository).ToList();
-        if (repos.Count == 0) return gitOutput.Text = T("Aucun dépôt Git : .git absent du dossier du projet.");
-        if (repos.Count == 1)
+        var files = await GitWorkspace.ListAsync(repos, ct);
+        if (revision != gitRevision) return "";
+        gitSummary.Text = repos.Count == 0 ? T("Aucun dépôt Git : .git absent du dossier du projet.")
+            : files.Count == 0 ? (state.Language == "en" ? "No modified files." : "Aucun fichier modifié.")
+            : (state.Language == "en" ? $"{files.Count} modified file(s) · Changes since HEAD" : $"{files.Count} fichier(s) modifié(s) · Depuis le dernier commit");
+        gitFiles.ItemsSource = files;
+        if (targetProject != null)
         {
-            var result = await WorkspaceTools.GitChangesAsync(repos[0], ct);
-            gitOutput.Text = result;
-            return result;
+            var results = new List<string>();
+            foreach (var repo in repos) results.Add(await WorkspaceTools.GitChangesAsync(repo, ct));
+            return string.Join("\n", results);
         }
-        else
-        {
-            var parts = new List<string>();
-            foreach (var repo in repos)
-            {
-                var folderName = Path.GetFileName(repo.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                if (string.IsNullOrWhiteSpace(folderName)) folderName = repo;
-                var result = await WorkspaceTools.GitChangesAsync(repo, ct);
-                parts.Add($"=== [{folderName}] {repo} ===\n{result}");
-            }
-            var combined = string.Join("\n\n", parts);
-            gitOutput.Text = combined;
-            return combined;
-        }
+        return gitSummary.Text;
     }
     async Task<string> RunTerminalAsync(string command, bool fromAi, CancellationToken ct, Project? targetProject = null)
     {
@@ -341,7 +407,9 @@ public sealed partial class MainWindow
         {
             ct.ThrowIfCancellationRequested();
             if (PermissionModes.AutomaticDecision(state.PermissionMode) is bool queuedDecision) return queuedDecision;
-            if (await db.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
+            // Settings and navigation can query their context while an agent asks for permission.
+            await using var permissionDb = new HarnessDb();
+            if (await permissionDb.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
             var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = T("Autorisation supplémentaire"),
                 Content = new ScrollViewer { MaxHeight = 400, Content = new TextBlock { Text = action + "\n\n" + details, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true } },
                 PrimaryButtonText = T("Autoriser une fois"), SecondaryButtonText = T("Toujours autoriser"), CloseButtonText = T("Refuser"), DefaultButton = ContentDialogButton.Close };
@@ -350,8 +418,8 @@ public sealed partial class MainWindow
             ct.ThrowIfCancellationRequested();
             if (response == ContentDialogResult.Secondary)
             {
-                db.PermissionGrants.Add(new PermissionGrant { Scope = scope, Name = action, Details = scopeDescription, GrantedAtUtc = DateTime.UtcNow });
-                await db.SaveChangesAsync(ct);
+                permissionDb.PermissionGrants.Add(new PermissionGrant { Scope = scope, Name = action, Details = scopeDescription, GrantedAtUtc = DateTime.UtcNow });
+                await permissionDb.SaveChangesAsync(ct);
             }
             return response is ContentDialogResult.Primary or ContentDialogResult.Secondary;
         }
@@ -384,6 +452,16 @@ public sealed partial class MainWindow
     {
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync(); if (file != null) await OpenLocalPreviewAsync(file.Path, CancellationToken.None);
+    }
+    async Task OpenChatFileAsync(string path, Project? messageProject)
+    {
+        try
+        {
+            if (messageProject != null && !Path.IsPathFullyQualified(path))
+                path = new SourceAccess(messageProject.GetSourceFolders()).Resolve(path);
+            await OpenLocalPreviewAsync(path, CancellationToken.None, messageProject);
+        }
+        catch (Exception ex) { status.Text = ex.Message; }
     }
     async Task<string> OpenLocalPreviewAsync(string requested, CancellationToken ct, Project? targetProject = null)
     {
@@ -1131,7 +1209,7 @@ public sealed partial class MainWindow
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute Windows path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a PowerShell command in the attached project folder. Each invocation is a new session, 60 second timeout. The command runs with the user's Windows privileges.", new() { ["command"] = StringProperty() }, "command");
-        if (Skills.Enabled(state.EnabledSkills, "sources") && (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false)) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
+        if (Skills.Enabled(state.EnabledSkills, "sources") && (run.Chat.SandboxEnabled || (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false))) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
         if (Skills.Enabled(state.EnabledSkills, "web") && browserAccess.IsOn && browserDomAccess.IsOn)
         {
             Add("inspect_dom", "Inspects a sanitized DOM snapshot and returns interactive element IDs, labels and visible coordinates. Optional CSS selector limits the subtree.", new() { ["selector"] = StringProperty("Optional CSS selector") });

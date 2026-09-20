@@ -91,6 +91,17 @@ public sealed partial class MainWindow
         if (!force && !ContextWindow.ShouldCompact(currentEstimate, provider.ContextLimit)) return history;
 
         var groups = ConversationGroups(history);
+        if (groups.Count <= 1 && history.Count(x => x.Role == "assistant") > 2)
+        {
+            // A long autonomous run may contain only one user turn. Compact complete
+            // assistant/tool groups without separating tool results from their calls.
+            groups = [];
+            foreach (var message in history)
+            {
+                if (groups.Count == 0 || message.Role == "assistant") groups.Add([]);
+                groups[^1].Add(message);
+            }
+        }
         var candidates = new List<Message>();
         var targetTokens = force && currentEstimate < provider.ContextLimit * ContextWindow.CompactThreshold
             ? currentEstimate * (ContextWindow.CompactTarget / ContextWindow.CompactThreshold)

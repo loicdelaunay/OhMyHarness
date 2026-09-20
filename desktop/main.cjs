@@ -11,7 +11,7 @@ const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyRe
 const requests = new Map(); let sequence = 0, dialogs = Promise.resolve();
 const uiUrl = pathToFileURL(path.join(__dirname, 'ui/index.html')).href;
 const serviceMethods = new Set(['snapshot','history','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
-  'state.save','template.save','template.delete','permission.revoke','browser.access','files.list','files.read','git','terminal','preview','send','stop']);
+  'sandbox.review','sandbox.apply','sandbox.close','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop']);
 const uiHostMethods = new Set(['pick.folders','pick.images','pick.file','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
 function trusted(event) {
   if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || event.senderFrame.url !== uiUrl) throw new Error('Untrusted IPC sender.');
@@ -70,7 +70,7 @@ async function start() {
   const dbFile = path.join(directory, 'database.sqlite');
   await fs.access(directory, require('node:fs').constants.W_OK);
   service = spawn(serviceFile, ['--database', dbFile], { stdio: ['pipe','pipe','pipe'], windowsHide: true,
-    env: { ...process.env, PATH: process.platform === 'darwin' ? `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}` : process.env.PATH } });
+    env: { ...process.env, OHMYHARNESS_SKILLS_DIR: path.join(directory,'skills'), PATH: process.platform === 'darwin' ? `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}` : process.env.PATH } });
   service.on('error', error => readyReject(error));
   let startupError = '';
   service.stderr.on('data', chunk => { startupError = (startupError + chunk.toString()).slice(-4000); });

@@ -20,13 +20,16 @@ public sealed partial class HarnessService
         var text = S(p, "text").Trim();
         if (text.Length == 0 && images.Count == 0) throw new ArgumentException("Message required.");
         using var run = new ConversationSession(chat, project, provider, options, text, images, database);
+        await using var mcp = CreateMcpSession();
         if (!runs.TryAdd(chat.Id, run)) throw new InvalidOperationException("This conversation is already running.");
         using var cancel = lifetime.Register(run.Cancellation.Cancel);
         var ct = run.Cancellation.Token;
         Message? active = null;
         string error = "";
+        string completionStatus = "";
         try
         {
+            await run.PrepareSandboxAsync(ct);
             var secret = await Decrypt(provider.ProtectedKey, ct);
             var history = await History(run, ct);
             if (!provider.SupportsImages && (images.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException("Choose a model that supports images.");
@@ -36,10 +39,36 @@ public sealed partial class HarnessService
             await emit(new { @event = "message", chatId = chat.Id, title = run.Chat.Title, message = MessageView(user) });
             var definitions = Definitions(run);
             var system = Skills.Prompt(options.EnabledSkills, options.Language, project.GetSourceFolders().Count > 0, browserAccess, Skills.Enabled(options.EnabledSkills, "write_sources"));
+            run.Workflow = CreateWorkflow(run);
+            var agent = CreateAgentRuntime(run, secret);
+            system += await agent.InitializeAsync(ct);
+            if (run.Chat.OrchestrationMode == "forced")
+            {
+                var report = await agent.ForcedAsync(ct);
+                if (provider.IsOpenCode) system += "\nSubagent findings:\n" + report;
+                var delegated = new Message { ChatId = chat.Id, Role = "assistant", Content = "Sous-agents / Subagents\n" + report };
+                run.Db.Messages.Add(delegated); await run.Db.SaveChangesAsync(ct); history.Add(delegated);
+                await emit(new { @event = "message", chatId = chat.Id, message = MessageView(delegated) });
+            }
             var engine = new ChatEngine(http);
-            for (int round = 0; round < 12; round++)
+            for (int round = 0; ; round++)
             {
                 ct.ThrowIfCancellationRequested();
+                if (round > 0 && round % 12 == 0)
+                {
+                    await using var current = Db();
+                    if (!await current.States.Select(x => x.AutoContinue).SingleAsync(ct))
+                    { completionStatus = "12 étapes atteintes / 12 steps reached. Send continue to proceed."; await emit(new { @event = "status", chatId = chat.Id, text = completionStatus }); break; }
+                    await emit(new { @event = "status", chatId = chat.Id, text = "Continuation automatique / Auto-continue…" });
+                }
+                if (!provider.IsOpenCode)
+                {
+                    definitions = Definitions(run);
+                    agent.AddDefinitions(definitions); AgentPolicy.Filter(definitions, run.Chat.ExecutionMode);
+                    SandboxWorkspace.Filter(definitions, run.Chat.SandboxEnabled);
+                    if (!run.Chat.SandboxEnabled && !AgentPolicy.ReadOnly(run.Chat.ExecutionMode))
+                        foreach (var definition in await mcp.RefreshAsync(ct)) definitions.Add(definition!.DeepClone());
+                }
                 if (!provider.IsOpenCode) history = await Compact(run, history, system, definitions, secret, ct);
                 var wire = Wire(system, history);
                 int input = ContextWindow.Estimate(wire) + ContextWindow.Estimate(definitions);
@@ -70,15 +99,28 @@ public sealed partial class HarnessService
                         var name = call!["function"]!["name"]!.GetValue<string>();
                         var arguments = call["function"]?["arguments"]?.GetValue<string>() ?? "{}";
                         ToolResult result;
-                        await tools.WaitAsync(ct);
+                        await run.LoopGuard.CheckAsync(name, arguments, run.Workflow, ct);
+                        var ownsToolQueue = !AgentRuntime.Handles(name);
+                        if (ownsToolQueue) await tools.WaitAsync(ct);
                         try
                         {
                             await emit(new { @event = "status", chatId = chat.Id, text = "Outil / Tool: " + name });
-                            try { result = await Tool(run, name, JsonNode.Parse(arguments) as JsonObject ?? [], ct); }
+                            try
+                            {
+                                AgentPolicy.Demand(run.Chat.ExecutionMode, name);
+                                SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
+                                if (AgentRuntime.Handles(name)) result = new(await agent.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], ct));
+                                else if (name.StartsWith("mcp_", StringComparison.Ordinal))
+                                {
+                                    var output = await mcp.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], provider.SupportsImages, ct);
+                                    result = new(output.Text, output.Image);
+                                }
+                                else result = await Tool(run, name, JsonNode.Parse(arguments) as JsonObject ?? [], ct);
+                            }
                             catch (OperationCanceledException) { throw; }
                             catch (Exception ex) { result = new("Erreur outil / Tool error: " + ex.Message); }
                         }
-                        finally { tools.Release(); }
+                        finally { if (ownsToolQueue) tools.Release(); }
                         var toolWire = new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result.Text };
                         var message = new Message { ChatId = chat.Id, Role = "tool", State = "interrupted", Content = name + "\n" + result.Text, WireJson = toolWire.ToJsonString() };
                         if (result.Image != null) message.Attachments.Add(result.Image);
@@ -101,7 +143,6 @@ public sealed partial class HarnessService
                 }
                 active = null;
                 if (results.Count == 0) break;
-                if (round == 11) await emit(new { @event = "status", chatId = chat.Id, text = "12 étapes atteintes / 12 steps reached. Continue?" });
             }
         }
         catch (Exception ex) { error = ex is OperationCanceledException ? "Génération arrêtée / Generation stopped" : ex.Message; throw; }
@@ -112,7 +153,7 @@ public sealed partial class HarnessService
                 await run.Db.SaveChangesAsync();
                 if (active != null) await emit(new { @event = "message", chatId = chat.Id, message = MessageView(active) });
             }
-            finally { runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error }); }
+            finally { runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status = completionStatus }); }
         }
         return true;
     }
@@ -140,8 +181,9 @@ public sealed partial class HarnessService
         if (measured != null && (previousSummary == null || measured.Id > previousSummary.Id)) estimate = Math.Max(estimate, measured.InputTokens!.Value + (measured.OutputTokens ?? 0));
         if (!ContextWindow.ShouldCompact(estimate, run.Provider.ContextLimit)) return history;
         var users = history.Select((m, i) => (m, i)).Where(x => x.m.Role == "user").Select(x => x.i).ToList();
-        if (users.Count < 2) return history;
-        var split = users.Count > 2 ? users[^2] : users[^1];
+        var assistants = history.Select((m, i) => (m, i)).Where(x => x.m.Role == "assistant").Select(x => x.i).ToList();
+        if (users.Count < 2 && assistants.Count < 3) return history;
+        var split = users.Count > 2 ? users[^2] : users.Count == 2 ? users[^1] : assistants[^2];
         if (split == 0) return history;
         var old = history.Take(split).ToList();
         await emit(new { @event = "status", chatId = run.Chat.Id, text = "Compaction du contexte / Compacting context…" });
@@ -212,6 +254,6 @@ public sealed partial class HarnessService
         return await engine.PromptAsync(p, password, directory, link.SessionId, run.Prompt, system,
             run.Images.Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList(), update, ct,
             async (permission, token) => await Approve($"opencode|{p.Id}|{directory}|{permission.Action}|{string.Join('|', permission.Resources)}",
-                run.Chat.Title + " · OpenCode · " + permission.Action, string.Join('\n', permission.Resources) + "\n" + permission.Details, token) ? "once" : "reject");
+                run.Chat.Title + " · OpenCode · " + permission.Action, string.Join('\n', permission.Resources) + "\n" + permission.Details, token) ? "once" : "reject", new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
     }
 }

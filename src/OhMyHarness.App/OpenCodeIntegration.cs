@@ -212,6 +212,17 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             var system = state.Language == "en"
                 ? "You are connected through OpenCode inside OhMyHarness. Answer the user directly. Respect every permission denial from the application."
                 : "Tu es connecté à travers OpenCode dans OhMyHarness. Réponds directement à l’utilisateur en français. Respecte chaque refus d’autorisation de l’application.";
+            run.Workflow = CreateWorkflow(run);
+            var agent = CreateAgentRuntime(run, password);
+            system += await agent.InitializeAsync(ct);
+            if (run.Chat.OrchestrationMode == "forced")
+            {
+                var report = await agent.ForcedAsync(ct);
+                system += "\nSubagent findings:\n" + report;
+                var delegated = new Message { ChatId = chat.Id, Role = "assistant", Content = "Sous-agents / Subagents\n" + report };
+                db.Messages.Add(delegated); await db.SaveChangesAsync(ct);
+                AddAssistantMessage(delegated.Content, target: run.Messages, sourceProject: run.Project);
+            }
             if (!provider.OpenCodeTools) system += state.Language == "en"
                 ? " OpenCode tools are disabled for this connection."
                 : " Les outils OpenCode sont désactivés pour cette connexion.";
@@ -244,7 +255,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
                 assistantUi.UpdateContent(update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…");
                 UpdateMetrics(run, update, inputEstimate);
                 if (IsVisible(run) && scroll.ScrollableHeight - scroll.VerticalOffset < 300) scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
-            }, ct, (permission, token) => AuthorizeOpenCodePermissionAsync(provider, directory, permission, token));
+            }, ct, (permission, token) => AuthorizeOpenCodePermissionAsync(provider, directory, permission, token), new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
             active.Content = completion.Message["content"]?.GetValue<string>() ?? "";
             active.InputTokens = completion.InputTokens; active.OutputTokens = completion.OutputTokens; active.Seconds = completion.Seconds;
             active.WireJson = completion.Message.ToJsonString(); active.State = "complete";

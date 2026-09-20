@@ -1,7 +1,8 @@
 namespace OhMyHarness.Core;
 
-public sealed class SourceAccess
+public sealed partial class SourceAccess
 {
+    static readonly SemaphoreSlim WriteGate = new(1, 1);
     static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
     { ".cs", ".csproj", ".sln", ".slnx", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml", ".swift", ".m", ".mm", ".sh", ".zsh", ".plist", ".entitlements", ".xcconfig", ".ps1", ".bat" };
     static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
@@ -220,6 +221,13 @@ public sealed class SourceAccess
 
     public async Task<string> WriteAsync(string relative, string content, CancellationToken ct)
     {
+        await WriteGate.WaitAsync(ct);
+        try { return await WriteCoreAsync(relative, content, ct); }
+        finally { WriteGate.Release(); }
+    }
+
+    async Task<string> WriteCoreAsync(string relative, string content, CancellationToken ct)
+    {
         var full = Resolve(relative);
         var ext = Path.GetExtension(full);
         if (string.IsNullOrEmpty(ext) || !Extensions.Contains(ext))
@@ -232,6 +240,13 @@ public sealed class SourceAccess
     }
 
     public async Task<string> ModifyAsync(string relative, string oldText, string newText, CancellationToken ct)
+    {
+        await WriteGate.WaitAsync(ct);
+        try { return await ModifyCoreAsync(relative, oldText, newText, ct); }
+        finally { WriteGate.Release(); }
+    }
+
+    async Task<string> ModifyCoreAsync(string relative, string oldText, string newText, CancellationToken ct)
     {
         var full = Resolve(relative);
         var ext = Path.GetExtension(full);

@@ -16,6 +16,8 @@ public static class MarkdownPipelineHelper
     {
         if (string.IsNullOrEmpty(markdown))
             return new MarkdownDocument();
-        return Markdown.Parse(markdown, Pipeline);
+        var document = Markdown.Parse(markdown, Pipeline);
+        LocalFileLinks.Decorate(document);
+        return document;
     }
 }

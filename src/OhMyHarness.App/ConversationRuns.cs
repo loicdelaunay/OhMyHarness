@@ -140,6 +140,7 @@ public sealed partial class MainWindow
         SetRunStatus(run, T("Le modèle réfléchit…"));
         try
         {
+            await run.PrepareSandboxAsync(run.Cancellation.Token);
             if (run.Provider.IsOpenCode) await SendOpenCodeAsync(run, secret);
             else await SendCoreAsync(run, secret);
         }
@@ -160,7 +161,7 @@ public sealed partial class MainWindow
         {
             try { await run.Db.SaveChangesAsync(); }
             catch (Exception ex) { SetRunStatus(run, T("Erreur : ") + ex.Message); }
-            conversationHistory[run.Chat.Id] = run.Db.Messages.Local.ToList();
+            if (run.Submitted) conversationHistory[run.Chat.Id] = run.Db.Messages.Local.ToList();
             conversationRuns.Remove(run.Chat.Id);
             run.Dispose();
             RefreshGenerationControls();

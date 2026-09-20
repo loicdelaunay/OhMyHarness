@@ -159,7 +159,7 @@ public sealed partial class MainWindow
                 var picker = new Windows.Storage.Pickers.FileOpenPicker();
                 picker.FileTypeFilter.Add(".exe");
                 picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(settingsWindow ?? this));
                 var file = await picker.PickSingleFileAsync();
                 if (file != null && state.Selected != null)
                 {

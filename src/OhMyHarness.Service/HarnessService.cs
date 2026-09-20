@@ -23,9 +23,14 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     static bool B(JsonObject p, string name, bool fallback = false) => p[name]?.GetValue<bool>() ?? fallback;
     static JsonObject Obj(object value) => (JsonSerializer.SerializeToNode(value, Json) as JsonObject)!;
     HarnessDb Db() => new(database);
-    public async Task Initialize() { await using var db = Db(); await db.InitializeAsync(); }
+    public async Task Initialize() { await using var db = Db(); await db.InitializeAsync(); new CustomSkills(CustomSkills.DefaultRoot).EnsureTemplate(); }
     static object ProviderView(Provider p) => new { p.Id, p.Name, p.Kind, p.BaseUrl, p.Model, p.ContextLimit, p.SupportsImages, p.Username, p.ExecutablePath, p.AutoStart, p.OpenCodeTools, hasKey = p.ProtectedKey.Length > 0 };
-    static string Html(string text) => Markdig.Markdown.ToHtml(text, Markdown);
+    static string Html(string text)
+    {
+        var document = Markdig.Markdown.Parse(text, Markdown);
+        LocalFileLinks.Decorate(document);
+        return Markdig.Markdown.ToHtml(document, Markdown);
+    }
     static object MessageView(Message m) => new { m.Id, m.ChatId, m.Role, m.Content, m.State, m.InputTokens, m.OutputTokens, m.Seconds,
         html = Html(m.Content), reasoning = string.IsNullOrEmpty(m.WireJson) ? "" : JsonNode.Parse(m.WireJson)?["reasoning_content"]?.GetValue<string>() ?? "",
         attachments = m.Attachments.Select(x => new { x.Name, x.Mime, data = Convert.ToBase64String(x.Data) }) };
@@ -35,15 +40,19 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         await using var db = Db();
         switch (method)
         {
+            case "context.details": return await ReadContext(I(p, "chatId"), I(p, "providerId"), ct);
+            case "context.compact": return await CompactManually(p, ct);
+            case "question.answer": return AnswerQuestion(p);
             case "snapshot":
                 return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database,
                     projects = await db.Projects.AsNoTracking().Select(x => new { x.Id, x.Name, x.SourceFolder }).ToListAsync(ct),
-                    chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title }).ToListAsync(ct),
+                    chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
+                    mcpServers = (await db.McpServers.AsNoTracking().ToListAsync(ct)).Select(McpView),
                     state = await db.States.SingleAsync(ct), templates = await db.Templates.ToListAsync(ct),
-                    permissions = await db.PermissionGrants.ToListAsync(ct), skills = Skills.All.Select(skill => OperatingSystem.IsMacOS() ? skill with
+                    permissions = await db.PermissionGrants.ToListAsync(ct), skills = Skills.Available().Select(skill => OperatingSystem.IsMacOS() ? skill with
                     { FrenchDescription = skill.FrenchDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh"), EnglishDescription = skill.EnglishDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh") } : skill), running = runs.Keys,
-                    browserAccess, domAccess };
+                    questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }), browserAccess, domAccess, skillsDirectory = CustomSkills.DefaultRoot };
             case "history":
                 return (await db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == I(p, "chatId")).OrderBy(x => x.Id).ToListAsync(ct)).Select(MessageView);
             case "project.save":
@@ -65,6 +74,15 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "chat.delete":
                 if (runs.ContainsKey(I(p, "id"))) throw new InvalidOperationException("Stop this conversation before deleting it.");
                 db.Chats.Remove(await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
+            case "sandbox.review": return await ReviewSandbox(p, ct);
+            case "sandbox.apply": return await ApplySandbox(p, ct);
+            case "sandbox.close": CloseSandboxReview(S(p, "token")); return true;
+            case "chat.modes":
+                var modeChat = await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct);
+                modeChat.ExecutionMode = AgentPolicy.Mode(S(p, "executionMode", modeChat.ExecutionMode));
+                modeChat.SandboxEnabled = B(p, "sandboxEnabled", modeChat.SandboxEnabled);
+                modeChat.OrchestrationMode = AgentPolicy.Orchestration(S(p, "orchestrationMode", modeChat.OrchestrationMode));
+                await db.SaveChangesAsync(ct); return true;
             case "provider.save":
                 var provider = I(p, "id") == 0 ? new Provider() : await db.Providers.SingleAsync(x => x.Id == I(p, "id"), ct);
                 provider.Name = S(p, "name", "Compatible OpenAI"); provider.Kind = S(p, "kind", "openai");
@@ -93,7 +111,9 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 var state = await db.States.SingleAsync(ct);
                 state.Language = S(p, "language", state.Language) == "en" ? "en" : "fr";
                 state.PermissionMode = PermissionModes.Normalize(S(p, "permissionMode", state.PermissionMode));
-                state.EnabledSkills = string.Join(',', S(p, "enabledSkills", state.EnabledSkills).Split(',').Where(id => Skills.All.Any(x => x.Id == id)));
+                state.AutoContinue = B(p, "autoContinue", state.AutoContinue);
+                state.ShowReasoningDetails = B(p, "showReasoningDetails", state.ShowReasoningDetails);
+                state.EnabledSkills = string.Join(',', S(p, "enabledSkills", state.EnabledSkills).Split(',').Where(id => Skills.Available().Any(x => x.Id == id)));
                 state.ThinkingLevel = S(p, "thinkingLevel", state.ThinkingLevel);
                 state.ProviderId = I(p, "providerId", state.ProviderId);
                 state.ProjectId = p["projectId"]?.GetValue<int>() ?? state.ProjectId; state.ChatId = p["chatId"]?.GetValue<int>() ?? state.ChatId;
@@ -108,16 +128,23 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "permission.revoke":
                 db.PermissionGrants.Remove(await db.PermissionGrants.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "browser.access": browserAccess = B(p, "enabled"); domAccess = B(p, "dom"); return true;
-            case "files.list": case "files.read": case "git": case "terminal":
+            case "files.list": case "files.read": case "git": case "git.files": case "git.diff": case "terminal":
                 var workspace = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
                 var source = new SourceAccess(workspace.GetSourceFolders());
                 if (method == "files.list") return source.List(S(p, "path", "."));
                 if (method == "files.read") return await source.ReadAsync(S(p, "path"), ct);
                 if (method == "git") return await Git(workspace, ct);
+                if (method == "git.files") return new { hasRepository = workspace.GetSourceFolders().Any(WorkspaceTools.HasGitRepository), files = await GitWorkspace.ListAsync(workspace.GetSourceFolders(), ct) };
+                if (method == "git.diff")
+                {
+                    var file = (await GitWorkspace.ListAsync(workspace.GetSourceFolders(), ct)).FirstOrDefault(x => x.Repository == S(p, "repository") && x.Path == S(p, "path"));
+                    return file == null ? "Aucune modification / No changes." : await GitWorkspace.DiffAsync(file, ct);
+                }
                 return await WorkspaceTools.ShellAsync(S(p, "command"), Root(workspace), ct);
             case "preview":
                 var previewProject = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
                 return await Preview(previewProject, S(p, "path"), ct);
+            case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
             case "send": return await Send(p, ct);
             case "stop": if (runs.TryGetValue(I(p, "chatId"), out var running)) running.Cancellation.Cancel(); return true;
             default: throw new ArgumentException("Unknown method: " + method);

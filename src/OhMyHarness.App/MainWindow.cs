@@ -116,7 +116,7 @@ public sealed partial class MainWindow : Window
         BuildSidebar(); BuildWorkspace();
         root.Loaded += async (_, _) => await Guard(InitializeAsync);
         root.SizeChanged += (_, _) => ResizeLayout();
-        Closed += (_, _) => { foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); terminalRun?.Cancel(); StopOpenCodeProcesses(); http.Dispose(); };
+        Closed += (_, _) => { settingsWindow?.Close(); foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); terminalRun?.Cancel(); StopOpenCodeProcesses(); http.Dispose(); };
     }
     void BuildSidebar()
     {
@@ -234,12 +234,18 @@ public sealed partial class MainWindow : Window
         var toolsButton = Action("Outils", ToggleBrowser);
         Grid.SetColumn(toolsButton, 2); header.Children.Add(toolsButton);
         main.Children.Add(header);
-        scroll.Content = messages; Grid.SetRow(scroll, 1); main.Children.Add(scroll);
+        var conversationPanel = new Grid { RowSpacing = 8 };
+        conversationPanel.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
+        conversationPanel.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        scroll.Content = messages; conversationPanel.Children.Add(scroll);
+        status.TextWrapping = TextWrapping.Wrap;
+        status.Margin = new(4, 0, 12, 0);
+        Grid.SetRow(status, 1); conversationPanel.Children.Add(status);
+        Grid.SetRow(conversationPanel, 1); main.Children.Add(conversationPanel);
         var composePanel = new StackPanel { Spacing = 4 };
         composePanel.Children.Add(BuildFloatingInfoBar());
         composePanel.Children.Add(attachmentLabel);
         composePanel.Children.Add(BuildComposer());
-        composePanel.Children.Add(status);
         Grid.SetRow(composePanel, 2); main.Children.Add(composePanel);
         workspace.Children.Add(main);
         send.Click += async (_, _) => await Guard(SendAsync);
@@ -343,6 +349,7 @@ public sealed partial class MainWindow : Window
         contextStack.Children.Add(contextValueText);
         Grid.SetColumn(contextStack, 4);
         grid.Children.Add(contextStack);
+        AttachContextPopover(contextStack);
 
         assetsScroll.Content = assetsBar;
         var infoBarStack = new StackPanel { Spacing = 2 };
@@ -565,14 +572,14 @@ public sealed partial class MainWindow : Window
         title.Text = chat?.Title ?? T("Nouvelle conversation");
         ToolTipService.SetToolTip(title, title.Text);
         PopulateThinkingSelector();
-        var last = VisibleHistory().LastOrDefault(x => x.InputTokens.HasValue);
-        if (last != null) UpdateMetrics(new(last.Content, "", last.InputTokens, last.OutputTokens, last.Seconds));
-        else RefreshContextInfo();
+        RefreshContextInfo();
     }
     async Task InitializeAsync()
     {
         await db.InitializeAsync();
+        new CustomSkills(CustomSkills.DefaultRoot).EnsureTemplate();
         await db.Templates.LoadAsync();
+        await db.McpServers.LoadAsync();
         state = await db.States.SingleAsync();
         UiText.Language = state.Language;
         ApplyLanguage();
@@ -661,7 +668,8 @@ public sealed partial class MainWindow : Window
             for (int i = 0; i < history.Count; i++)
             {
                 var item = history[i];
-                if (item.Role == "user")
+                if (item.Role == "tasks") { RenderTasks(item.Content, messages); }
+                else if (item.Role == "user")
                 {
                     AddMessage("user", item.Content, item.Attachments);
                 }
@@ -733,6 +741,7 @@ public sealed partial class MainWindow : Window
         }
         await db.SaveChangesAsync();
     }
+    readonly List<WeakReference<AssistantMessageUi>> reasoningViews = [];
     sealed class AssistantMessageUi
     {
         public StackPanel BodyContainer { get; init; } = null!;
@@ -742,12 +751,24 @@ public sealed partial class MainWindow : Window
         public ScrollViewer ThinkingScroll { get; init; } = null!;
         public TextBlock ThinkingBody { get; init; } = null!;
         public bool IsThinkingExpanded { get; set; }
+        public Func<bool> ShowReasoningDetails { get; init; } = () => true;
+        bool? lastReasoningPreference;
+        public void RefreshReasoningPreference()
+        {
+            var preference = ShowReasoningDetails();
+            if (lastReasoningPreference == preference) return;
+            lastReasoningPreference = preference;
+            IsThinkingExpanded = preference;
+            ThinkingScroll.Visibility = preference ? Visibility.Visible : Visibility.Collapsed;
+            ThinkingHeaderLabel.Text = $"🧠 {T("Raisonnement du modèle")}  {(preference ? "▼" : "▶")}";
+        }
         public string CurrentText { get; private set; } = "";
+        public Func<string, Task>? OpenFile { get; init; }
 
         public void UpdateContent(string text)
         {
             CurrentText = text;
-            MarkdownRenderer.RenderTo(BodyContainer, text);
+            MarkdownRenderer.RenderTo(BodyContainer, text, OpenFile);
         }
 
         public void UpdateThinking(string reasoning, bool isComplete = false)
@@ -759,15 +780,10 @@ public sealed partial class MainWindow : Window
             }
             ThinkingCard.Visibility = Visibility.Visible;
             ThinkingBody.Text = reasoning;
+            RefreshReasoningPreference();
             var prefix = isComplete ? T("Raisonnement terminé") : T("Raisonnement en cours…");
             var chevron = IsThinkingExpanded ? "▼" : "▶";
             ThinkingHeaderLabel.Text = $"🧠 {prefix} ({reasoning.Length:N0} {T("car.")})  {chevron}";
-            if (!isComplete && !IsThinkingExpanded)
-            {
-                IsThinkingExpanded = true;
-                ThinkingScroll.Visibility = Visibility.Visible;
-                ThinkingHeaderLabel.Text = $"🧠 {prefix} ({reasoning.Length:N0} {T("car.")})  ▼";
-            }
             if (!isComplete && IsThinkingExpanded)
             {
                 ThinkingScroll.UpdateLayout();
@@ -777,8 +793,9 @@ public sealed partial class MainWindow : Window
             }
         }
     }
-    AssistantMessageUi AddAssistantMessage(string initialText = "…", string? initialReasoning = null, StackPanel? target = null)
+    AssistantMessageUi AddAssistantMessage(string initialText = "…", string? initialReasoning = null, StackPanel? target = null, Project? sourceProject = null)
     {
+        var messageProject = sourceProject ?? project;
         var bodyContainer = new StackPanel { Spacing = 4 };
 
         var stack = new StackPanel { Spacing = 10 };
@@ -830,6 +847,8 @@ public sealed partial class MainWindow : Window
         var ui = new AssistantMessageUi
         {
             BodyContainer = bodyContainer,
+            ShowReasoningDetails = () => state.ShowReasoningDetails,
+            OpenFile = path => OpenChatFileAsync(path, messageProject),
             ThinkingCard = thinkingCard,
             ThinkingHeaderBtn = thinkingHeaderBtn,
             ThinkingHeaderLabel = thinkingHeaderLabel,
@@ -838,6 +857,8 @@ public sealed partial class MainWindow : Window
             IsThinkingExpanded = false
         };
 
+        reasoningViews.RemoveAll(reference => !reference.TryGetTarget(out _));
+        reasoningViews.Add(new(ui));
         thinkingHeaderBtn.Click += (_, _) =>
         {
             ui.IsThinkingExpanded = !ui.IsThinkingExpanded;
@@ -868,9 +889,6 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrEmpty(initialReasoning))
         {
             ui.UpdateThinking(initialReasoning, isComplete: true);
-            ui.IsThinkingExpanded = false;
-            thinkingScroll.Visibility = Visibility.Collapsed;
-            thinkingHeaderLabel.Text = $"🧠 {T("Raisonnement du modèle")} ({initialReasoning.Length:N0} {T("car.")})  ▶";
         }
 
         return ui;
@@ -1307,7 +1325,7 @@ public sealed partial class MainWindow : Window
         attachmentLabel.Visibility = pendingImages.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         UpdateFloatingAssets();
     }
-    async Task Settings()
+    async Task EditSettingsAsync()
     {
         var providerEditor = BuildProviderEditor(provider?.Id ?? state.ProviderId);
         var language = new ComboBox
@@ -1319,12 +1337,20 @@ public sealed partial class MainWindow : Window
         };
         var general = new StackPanel { Spacing = 14 };
         general.Children.Add(language);
+        var autoContinue = new ToggleSwitch { Header = T("Continuer automatiquement après 12 étapes"), IsOn = state.AutoContinue,
+            OnContent = T("Activé"), OffContent = T("Désactivé") };
+        general.Children.Add(autoContinue);
+        var showReasoning = new CheckBox { Content = T("Afficher les détails du raisonnement"), IsChecked = state.ShowReasoningDetails };
+        general.Children.Add(showReasoning);
+        general.Children.Add(Label(T("Poursuit les appels d’outils jusqu’à la réponse finale ou Arrêter. Des tokens supplémentaires peuvent être consommés ; les autorisations restent applicables."), 12));
         general.Children.Add(Label(T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"), 13));
 
         var skillPanel = new StackPanel { Spacing = 16 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
+        skillPanel.Children.Add(Label(T("Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Modèle exemple-revue fourni.") + "\n" + CustomSkills.DefaultRoot, 12));
+        var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
-        foreach (var skill in Skills.All)
+        foreach (var skill in Skills.Available())
         {
             var toggle = new ToggleSwitch
             {
@@ -1370,23 +1396,18 @@ public sealed partial class MainWindow : Window
         }
 
         var templateEditor = BuildTemplateEditor();
+        var mcpEditor = BuildMcpEditor();
         var tabs = new Pivot();
         tabs.Items.Add(new PivotItem { Header = T("Général"), Content = general });
         tabs.Items.Add(new PivotItem { Header = T("Fournisseurs"), Content = providerEditor.Panel });
         tabs.Items.Add(new PivotItem { Header = "Skills", Content = skillPanel });
+        tabs.Items.Add(new PivotItem { Header = "MCP", Content = mcpEditor.Panel });
         tabs.Items.Add(new PivotItem { Header = "Templates", Content = templateEditor.Panel });
         tabs.Items.Add(new PivotItem { Header = T("Autorisations"), Content = permissionPanel });
 
-        var dialog = new ContentDialog
+        if (!await ShowSettingsWindowAsync(tabs, () =>
         {
-            XamlRoot = root.XamlRoot,
-            Title = T("Réglages"),
-            Content = new ScrollViewer { Content = tabs, MaxHeight = 620, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
-            PrimaryButtonText = T("Enregistrer"),
-            CloseButtonText = T("Annuler")
-        };
-        dialog.PrimaryButtonClick += (_, args) =>
-        {
+            var valid = true;
             var providerError = ValidateProviderDrafts(providerEditor);
             if (conversationRuns.Values.Any(run => !providerEditor.Drafts.Any(draft => draft.Id == run.Provider.Id)))
                 providerError = T("Ce fournisseur est utilisé par une conversation en cours.");
@@ -1394,18 +1415,25 @@ public sealed partial class MainWindow : Window
             {
                 providerEditor.Error.Text = providerError;
                 tabs.SelectedIndex = 1;
-                args.Cancel = true;
+                valid = false;
             }
             if (templateEditor.Drafts.Any(x => string.IsNullOrWhiteSpace(x.Name) || string.IsNullOrWhiteSpace(x.Content)))
             {
                 templateEditor.Error.Text = T("Nom et contenu du template requis.");
-                tabs.SelectedIndex = 3;
-                args.Cancel = true;
+                tabs.SelectedIndex = 4;
+                valid = false;
             }
-        };
-        if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
+            if (!mcpEditor.Validate()) { tabs.SelectedIndex = 3; valid = false; }
+            return valid;
+        })) return;
 
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
+        state.AutoContinue = autoContinue.IsOn;
+        state.ShowReasoningDetails = showReasoning.IsChecked == true;
+        foreach (var reference in reasoningViews)
+            if (reference.TryGetTarget(out var view)) view.RefreshReasoningPreference();
+        browserAccess.IsOn = browserSkillToggles.Browser.IsOn;
+        browserDomAccess.IsOn = browserSkillToggles.Dom.IsOn;
         state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
         state.PermissionMode = permissionMode.SelectedIndex switch
         {
@@ -1414,6 +1442,7 @@ public sealed partial class MainWindow : Window
             _ => PermissionModes.Ask
         };
         SaveTemplateDrafts(templateEditor.Drafts);
+        mcpEditor.Save();
         foreach (var item in revoke.Where(x => x.Value.IsChecked == true).Select(x => x.Key)) db.PermissionGrants.Remove(item);
         var selectedProvider = await SaveProviderDraftsAsync(providerEditor);
         state.ProviderId = selectedProvider?.Id ?? 0;
@@ -1465,8 +1494,9 @@ public sealed partial class MainWindow : Window
         general.Children.Add(Label(T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"), 13));
         var skillPanel = new StackPanel { Spacing = 16 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
+        var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
-        foreach (var skill in Skills.All)
+        foreach (var skill in Skills.Available())
         {
             var toggle = new ToggleSwitch { Header = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsOn = Skills.Enabled(state.EnabledSkills, skill.Id), OnContent = T("Activé"), OffContent = T("Désactivé") };
             skillToggles.Add(skill.Id, toggle);
@@ -1492,6 +1522,8 @@ public sealed partial class MainWindow : Window
         };
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
+        browserAccess.IsOn = browserSkillToggles.Browser.IsOn;
+        browserDomAccess.IsOn = browserSkillToggles.Dom.IsOn;
         state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
         SaveTemplateDrafts(templateEditor.Drafts);
         target.BaseUrl = url.Text.Trim().TrimEnd('/'); target.Model = model.Text.Trim(); target.ContextLimit = (int)limit.Value; target.SupportsImages = vision.IsChecked == true;
@@ -1570,7 +1602,11 @@ public sealed partial class MainWindow : Window
         }
         catch { argsObj = []; }
 
+        AgentPolicy.Demand(run.Chat.ExecutionMode, name);
+        SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         SetRunStatus(run, T("Outil : ") + name);
+        if (SourceTools.Handles(name)) return await SourceTools.ExecuteAsync(source, name, argsObj, () => state.EnabledSkills,
+            (scope, diff, token) => RequestAccessAsync(scope, "Patch multi-fichiers / Multi-file patch", diff, "Patch des sources / Source patch", token), ct);
         switch (name)
         {
             case "open_local_file":
@@ -1578,26 +1614,33 @@ public sealed partial class MainWindow : Window
                 return await OpenLocalPreviewAsync(argsObj["path"]?.GetValue<string>() ?? "", ct, project);
             case "run_terminal":
                 if (!Skills.Enabled(state.EnabledSkills, "terminal")) return T("Outil non autorisé.");
+                if (run.Sandbox != null)
+                {
+                    var command = argsObj["command"]?.GetValue<string>() ?? "";
+                    if (!await RequestAccessAsync("sandbox-terminal|" + run.Chat.Id, "Sandbox Linux", command, "Terminal sandbox", ct)) return T("Outil non autorisé.");
+                    return await SandboxContainer.ExecuteAsync(run.Sandbox, run.SandboxEngine!, command, ct);
+                }
                 return await RunTerminalAsync(argsObj["command"]?.GetValue<string>() ?? "", true, ct, project);
             case "git_changes":
                 if (!Skills.Enabled(state.EnabledSkills, "sources")) return T("Outil non autorisé.");
+                if (run.Sandbox != null) return (await run.Sandbox.ReviewAsync(ct)).Diff;
                 await ShowToolAsync(2);
                 return await RefreshGitAsync(ct, project);
             case "list_sources":
-                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || project?.GetSourceFolders().Count is not > 0)
+                if (!SourceTools.CanRead(state.EnabledSkills) || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'sources' est inactif. Veuillez associer un dossier via le bouton 'Sources'.");
                 var listPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(listPath)) listPath = ".";
                 return await Task.Run(() => source.List(listPath), ct);
 
             case "read_source":
-                if ((!Skills.Enabled(state.EnabledSkills, "sources") && !Skills.Enabled(state.EnabledSkills, "write_sources")) || project?.GetSourceFolders().Count is not > 0)
+                if (!SourceTools.CanRead(state.EnabledSkills) || project?.GetSourceFolders().Count is not > 0)
                     return T("Erreur : aucun dossier source n'est associé à ce projet ou le skill 'sources' est inactif.");
                 var readPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(readPath))
                     return T("Erreur : le chemin relatif du fichier à lire est obligatoire.");
                 try { return await source.ReadAsync(readPath, ct); }
-                catch (UnauthorizedAccessException) { return await ReadWithApprovalAsync(readPath, ct, project); }
+                catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await ReadWithApprovalAsync(readPath, ct, project); }
 
             case "write_source":
                 if (!Skills.Enabled(state.EnabledSkills, "write_sources") || project?.GetSourceFolders().Count is not > 0)
@@ -1607,7 +1650,7 @@ public sealed partial class MainWindow : Window
                     return T("Erreur : le chemin relatif du fichier à écrire est obligatoire.");
                 var writeContent = argsObj["content"]?.GetValue<string>() ?? "";
                 try { return await source.WriteAsync(writePath, writeContent, ct); }
-                catch (UnauthorizedAccessException) { return await WriteWithApprovalAsync(writePath, writeContent, null, ct, project); }
+                catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await WriteWithApprovalAsync(writePath, writeContent, null, ct, project); }
 
             case "edit_source":
                 if (!Skills.Enabled(state.EnabledSkills, "write_sources") || project?.GetSourceFolders().Count is not > 0)
@@ -1620,11 +1663,11 @@ public sealed partial class MainWindow : Window
                     return T("Erreur : le paramètre 'old_text' (texte à remplacer) est obligatoire.");
                 var newText = argsObj["new_text"]?.GetValue<string>() ?? "";
                 try { return await source.ModifyAsync(editPath, oldText, newText, ct); }
-                catch (UnauthorizedAccessException) { return await WriteWithApprovalAsync(editPath, newText, oldText, ct, project); }
+                catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await WriteWithApprovalAsync(editPath, newText, oldText, ct, project); }
 
             case "browse":
                 if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn)
-                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir le panneau 'Navigateur' et activer 'Accès IA au navigateur'.");
+                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir 'Réglages > Skills' et activer 'Accès IA au navigateur'.");
                 var url = argsObj["url"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(url))
                     return T("Erreur : une URL est requise pour naviguer.");
@@ -1632,7 +1675,7 @@ public sealed partial class MainWindow : Window
 
             case "read_page":
                 if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn)
-                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir le panneau 'Navigateur' et activer 'Accès IA au navigateur'.");
+                    return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir 'Réglages > Skills' et activer 'Accès IA au navigateur'.");
                 return await ReadPage(ct);
 
             case "desktop_screens":
@@ -1859,7 +1902,12 @@ public sealed partial class MainWindow : Window
     {
         if (ActiveRun is { } running) { RestoreRunMetrics(running); return; }
         var limit = provider?.ContextLimit ?? 128_000;
-        var last = VisibleHistory().LastOrDefault(x => x.InputTokens.HasValue);
+        var currentDetails = ContextDetails.From(VisibleHistory(), limit);
+        if (currentDetails.Estimated && currentDetails.ActiveMessages > 0)
+        {
+            ShowContextUsage(currentDetails.Used, true, limit); RefreshSpeedTooltip(); return;
+        }
+        var last = VisibleHistory().LastOrDefault(x => x.State == "complete" && x.InputTokens.HasValue);
         if (last?.InputTokens is int inputTokens)
         {
             var contextTokens = inputTokens + (last.OutputTokens ?? 0);
@@ -1933,28 +1981,51 @@ public sealed partial class MainWindow : Window
         AddMessage("user", user.Content, user.Attachments, run.Messages);
         ScrollRunToBottom(run);
         var sourceFolders = project.GetSourceFolders();
-        var hasSources = sourceFolders.Count > 0 && (Skills.Enabled(run.Options.EnabledSkills, "sources") || Skills.Enabled(run.Options.EnabledSkills, "write_sources"));
+        var hasSources = sourceFolders.Count > 0 && SourceTools.CanRead(run.Options.EnabledSkills);
         var canWriteSources = sourceFolders.Count > 0 && Skills.Enabled(run.Options.EnabledSkills, "write_sources");
         var hasBrowser = browserAccess.IsOn && Skills.Enabled(run.Options.EnabledSkills, "web");
         var systemPrompt = Skills.Prompt(run.Options.EnabledSkills, run.Options.Language, hasSources, hasBrowser, canWriteSources) +
             "\nAdditional tools may request one-time user approval for local previews, files outside the project and terminal commands. Never claim approval before the tool returns success. A denial is final for that action; explain it and do not retry to bypass it.";
+        run.Workflow = CreateWorkflow(run);
+            var agent = CreateAgentRuntime(run, secret);
+        systemPrompt += await agent.InitializeAsync(ct);
+        if (run.Chat.OrchestrationMode == "forced")
+        {
+            var report = await agent.ForcedAsync(ct);
+            var delegated = new Message { ChatId = chat.Id, Role = "assistant", Content = "Sous-agents / Subagents\n" + report };
+            db.Messages.Add(delegated); await db.SaveChangesAsync(ct); history.Add(delegated);
+            AddAssistantMessage(delegated.Content, target: run.Messages, sourceProject: run.Project);
+        }
         var definitions = ChatEngine.ToolDefinitions(hasSources, hasBrowser, canWriteSources);
+        SourceTools.AddDefinitions(definitions, sourceFolders.Count > 0, run.Options.EnabledSkills);
         AddWorkspaceToolDefinitions(definitions, run);
+        agent.AddDefinitions(definitions); AgentPolicy.Filter(definitions, run.Chat.ExecutionMode);
+        SandboxWorkspace.Filter(definitions, run.Chat.SandboxEnabled);
+        await using var mcp = CreateMcpSession();
         history = await AutoCompactHistoryAsync(run, history, systemPrompt, definitions, secret, ct);
         var wire = ComposeWire(systemPrompt, history);
         var source = new SourceAccess(sourceFolders);
         Message? active = null; AssistantMessageUi? activeAssistantUi = null;
         try
         {
-            for (var round = 0; round < 12; round++)
+            for (var round = 0; ; round++)
             {
                 ct.ThrowIfCancellationRequested();
+                if (round > 0 && round % 12 == 0)
+                {
+                    if (!state.AutoContinue) { SetRunStatus(run, T("Limite de 12 étapes atteinte. Envoyez « continue » pour poursuivre.")); break; }
+                    SetRunStatus(run, T("Continuation automatique…"));
+                }
+                for (int i = definitions.Count - 1; i >= 0; i--)
+                    if (definitions[i]?["function"]?["name"]?.GetValue<string>().StartsWith("mcp_", StringComparison.Ordinal) == true) definitions.RemoveAt(i);
+                if (!run.Chat.SandboxEnabled && !AgentPolicy.ReadOnly(run.Chat.ExecutionMode))
+                    foreach (var definition in await mcp.RefreshAsync(ct)) definitions.Add(definition!.DeepClone());
                 var definitionsTokens = ContextWindow.Estimate(definitions);
                 var inputEstimate = ContextWindow.Estimate(wire) + definitionsTokens;
                 ShowContextUsage(run, inputEstimate, estimated: true);
                 active = new Message { ChatId = chat.Id, Role = "assistant", State = "interrupted" };
                 db.Messages.Add(active); await db.SaveChangesAsync();
-                var assistantUi = AddAssistantMessage("…", target: run.Messages);
+                var assistantUi = AddAssistantMessage("…", target: run.Messages, sourceProject: run.Project);
                 activeAssistantUi = assistantUi;
                 ScrollRunToBottom(run);
                 run.Tracker = new GenerationSpeedTracker();
@@ -1995,17 +2066,31 @@ public sealed partial class MainWindow : Window
                     foreach (var call in calls)
                     {
                         string result;
+                        var toolName = call!["function"]!["name"]!.GetValue<string>();
                         (byte[] Data, string Label, string Mime, int Width, int Height)? screenshot;
-                        await toolQueue.WaitAsync(ct);
+                        await run.LoopGuard.CheckAsync(toolName, call["function"]?["arguments"]?.GetValue<string>() ?? "{}", run.Workflow, ct);
+                        var ownsToolQueue = !AgentRuntime.Handles(toolName);
+                        if (ownsToolQueue) await toolQueue.WaitAsync(ct);
                         try
                         {
-                            try { result = await RunTool(call!, source, run, ct); }
+                            try
+                            {
+                                AgentPolicy.Demand(run.Chat.ExecutionMode, toolName);
+                                SandboxWorkspace.Demand(run.Chat.SandboxEnabled, toolName);
+                                if (AgentRuntime.Handles(toolName)) result = await agent.CallAsync(toolName, JsonNode.Parse(call["function"]!["arguments"]!.GetValue<string>())!.AsObject(), ct);
+                                else if (toolName.StartsWith("mcp_", StringComparison.Ordinal))
+                                {
+                                    var output = await mcp.CallAsync(toolName, JsonNode.Parse(call["function"]!["arguments"]!.GetValue<string>())!.AsObject(), provider.SupportsImages, ct);
+                                    result = output.Text;
+                                    if (output.Image != null) SetPendingMcpImage(output.Image);
+                                }
+                                else result = await RunTool(call!, source, run, ct);
+                            }
                             catch (OperationCanceledException) { throw; }
                             catch (Exception ex) { result = T("Erreur outil : ") + ex.Message; }
-                            screenshot = TakePendingToolScreenshot();
+                            screenshot = ownsToolQueue ? TakePendingToolScreenshot() : null;
                         }
-                        finally { TakePendingToolScreenshot(); toolQueue.Release(); }
-                        var toolName = call!["function"]!["name"]!.GetValue<string>();
+                        finally { if (ownsToolQueue) { TakePendingToolScreenshot(); toolQueue.Release(); } }
                         var toolArgs = call["function"]?["arguments"]?.GetValue<string>() ?? "";
                         var toolWire = new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result };
                         var toolMsg = new Message { ChatId = chat.Id, Role = "tool", Content = toolName + "\n" + result, WireJson = toolWire.ToJsonString() };
@@ -2031,7 +2116,6 @@ public sealed partial class MainWindow : Window
                 if (toolResults.Count == 0) { SetRunStatus(run, T("Réponse terminée · historique enregistré.")); active = null; break; }
                 if (string.IsNullOrEmpty(assistantUi.CurrentText)) assistantUi.UpdateContent(T("Consultation des outils…"));
                 active = null;
-                if (round == 11) SetRunStatus(run, T("Limite de 12 étapes atteinte. Envoyez « continue » pour poursuivre."));
             }
         }
         catch (Exception ex)

@@ -21,11 +21,14 @@ using MdInline = Markdig.Syntax.Inlines.Inline;
 
 namespace OhMyHarness.App;
 
-public static class MarkdownRenderer
+public sealed class MarkdownRenderer
 {
-    private static SolidColorBrush Brush(byte r, byte g, byte b) => new(ColorHelper.FromArgb(255, r, g, b));
+    private SolidColorBrush Brush(byte r, byte g, byte b) => new(ColorHelper.FromArgb(255, r, g, b));
 
-    public static void RenderTo(Panel container, string? markdown)
+    readonly Func<string, Task>? openFile;
+    MarkdownRenderer(Func<string, Task>? openFile) { this.openFile = openFile; }
+    public static void RenderTo(Panel container, string? markdown, Func<string, Task>? openFile = null) => new MarkdownRenderer(openFile).Render(container, markdown);
+    void Render(Panel container, string? markdown)
     {
         container.Children.Clear();
         if (string.IsNullOrWhiteSpace(markdown))
@@ -60,7 +63,7 @@ public static class MarkdownRenderer
         }
     }
 
-    public static FrameworkElement? RenderBlock(MdBlock block)
+    public FrameworkElement? RenderBlock(MdBlock block)
     {
         switch (block)
         {
@@ -102,7 +105,7 @@ public static class MarkdownRenderer
         }
     }
 
-    private static FrameworkElement RenderHeading(HeadingBlock heading)
+    private FrameworkElement RenderHeading(HeadingBlock heading)
     {
         var (fontSize, weight, margin) = heading.Level switch
         {
@@ -132,7 +135,7 @@ public static class MarkdownRenderer
         return rtb;
     }
 
-    private static FrameworkElement RenderParagraph(ParagraphBlock paragraph)
+    private FrameworkElement RenderParagraph(ParagraphBlock paragraph)
     {
         var rtb = new RichTextBlock
         {
@@ -153,25 +156,25 @@ public static class MarkdownRenderer
         return rtb;
     }
 
-    private static FrameworkElement RenderFencedCode(FencedCodeBlock fenced)
+    private FrameworkElement RenderFencedCode(FencedCodeBlock fenced)
     {
         var rawCode = ExtractCode(fenced.Lines);
         var lang = string.IsNullOrWhiteSpace(fenced.Info) ? "code" : fenced.Info.Trim();
         return CreateCodeBlockElement(lang, rawCode);
     }
 
-    private static FrameworkElement RenderCodeBlock(CodeBlock code)
+    private FrameworkElement RenderCodeBlock(CodeBlock code)
     {
         var rawCode = ExtractCode(code.Lines);
         return CreateCodeBlockElement("code", rawCode);
     }
 
-    private static string ExtractCode(StringLineGroup lines)
+    private string ExtractCode(StringLineGroup lines)
     {
         return lines.ToString();
     }
 
-    private static FrameworkElement CreateCodeBlockElement(string language, string code)
+    private FrameworkElement CreateCodeBlockElement(string language, string code)
     {
         var container = new Border
         {
@@ -254,7 +257,7 @@ public static class MarkdownRenderer
         return container;
     }
 
-    private static FrameworkElement RenderQuote(QuoteBlock quote)
+    private FrameworkElement RenderQuote(QuoteBlock quote)
     {
         var border = new Border
         {
@@ -276,7 +279,7 @@ public static class MarkdownRenderer
         return border;
     }
 
-    private static FrameworkElement RenderList(ListBlock list)
+    private FrameworkElement RenderList(ListBlock list)
     {
         var stack = new StackPanel
         {
@@ -322,7 +325,7 @@ public static class MarkdownRenderer
         return stack;
     }
 
-    private static FrameworkElement RenderThematicBreak()
+    private FrameworkElement RenderThematicBreak()
     {
         return new Border
         {
@@ -332,7 +335,7 @@ public static class MarkdownRenderer
         };
     }
 
-    private static FrameworkElement RenderTable(Table table)
+    private FrameworkElement RenderTable(Table table)
     {
         var container = new Border
         {
@@ -393,7 +396,7 @@ public static class MarkdownRenderer
         return container;
     }
 
-    private static void RenderInlines(ContainerInline inlines, InlineCollection target)
+    private void RenderInlines(ContainerInline inlines, InlineCollection target)
     {
         foreach (var inline in inlines)
         {
@@ -401,7 +404,7 @@ public static class MarkdownRenderer
         }
     }
 
-    private static void RenderInline(MdInline inline, InlineCollection target)
+    private void RenderInline(MdInline inline, InlineCollection target)
     {
         switch (inline)
         {
@@ -460,7 +463,11 @@ public static class MarkdownRenderer
                         Foreground = Brush(120, 175, 255),
                         UnderlineStyle = UnderlineStyle.Single
                     };
-                    if (Uri.TryCreate(link.Url, UriKind.Absolute, out var uri))
+                    if (LocalFileLinks.PathFromUrl(link.Url) is string path && openFile != null)
+                    {
+                        hyperlink.Click += async (_, _) => await openFile(path);
+                    }
+                    else if (Uri.TryCreate(link.Url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http" or "mailto")
                     {
                         hyperlink.Click += async (_, _) =>
                         {

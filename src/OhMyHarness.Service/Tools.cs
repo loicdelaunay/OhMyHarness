@@ -53,7 +53,8 @@ public sealed partial class HarnessService
     {
         var skills = run.Options.EnabledSkills;
         var source = run.Project.GetSourceFolders().Count > 0;
-        var definitions = ChatEngine.ToolDefinitions(source && (Skills.Enabled(skills, "sources") || Skills.Enabled(skills, "write_sources")), browserAccess && Skills.Enabled(skills, "web"), source && Skills.Enabled(skills, "write_sources"));
+        var definitions = ChatEngine.ToolDefinitions(source && SourceTools.CanRead(skills), browserAccess && Skills.Enabled(skills, "web"), source && Skills.Enabled(skills, "write_sources"));
+        SourceTools.AddDefinitions(definitions, source, skills);
         void Add(string name, string description, params (string Name, string Type)[] properties)
         {
             var props = new JsonObject(); foreach (var (key, type) in properties) props[key] = new JsonObject { ["type"] = type };
@@ -61,7 +62,7 @@ public sealed partial class HarnessService
                 ["parameters"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["additionalProperties"] = false } } });
         }
         if (Skills.Enabled(skills, "terminal") && source) Add("run_terminal", $"Run a {PlatformSupport.ShellName} command in the project directory after approval. Fresh session, 60 second timeout.", ("command", "string"));
-        if (Skills.Enabled(skills, "sources") && run.Project.GetSourceFolders().Any(WorkspaceTools.HasGitRepository)) Add("git_changes", "List changed lines in .git repositories; read only.");
+        if (Skills.Enabled(skills, "sources") && (run.Chat.SandboxEnabled || run.Project.GetSourceFolders().Any(WorkspaceTools.HasGitRepository))) Add("git_changes", "List changed lines in .git repositories; read only.");
         if (Skills.Enabled(skills, "web")) Add("open_local_file", "Preview a local file after explicit approval, with resources scoped to its directory.", ("path", "string"));
         if (Skills.Enabled(skills, "web") && browserAccess && domAccess)
         {
@@ -89,8 +90,16 @@ public sealed partial class HarnessService
     }
     async Task<ToolResult> Tool(ConversationSession run, string name, JsonObject p, CancellationToken ct)
     {
+        AgentPolicy.Demand(run.Chat.ExecutionMode, name);
+        SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
+        if (SourceTools.Handles(name)) return new(await SourceTools.ExecuteAsync(new SourceAccess(run.Project.GetSourceFolders()), name, p, () => skills,
+            async (scope, diff, token) => {
+                var allowed = await Approve(scope, run.Chat.Title + " · Patch multi-fichiers / Multi-file patch", diff, token);
+                skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(token);
+                return allowed;
+            }, ct));
         var required = name switch
         {
             "keyboard_keys" or "desktop_keyboard" or "browser_keyboard" => "keyboard_control",
@@ -99,11 +108,16 @@ public sealed partial class HarnessService
             "run_terminal" => "terminal", "write_source" or "edit_source" => "write_sources",
             "list_sources" or "read_source" or "git_changes" => "sources", _ => "web"
         };
-        if (!Skills.Enabled(skills, required) && !(required == "sources" && Skills.Enabled(skills, "write_sources"))) throw new UnauthorizedAccessException("Skill disabled.");
+        if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
         if (name == "keyboard_keys") return new(KeyboardInput.DescribeKeys());
-        if (name == "git_changes") return new(await Git(run.Project, ct));
+        if (name == "git_changes") return new(run.Sandbox != null ? (await run.Sandbox.ReviewAsync(ct)).Diff : await Git(run.Project, ct));
         if (name == "run_terminal")
         {
+            if (run.Sandbox != null)
+            {
+                if (!await Approve("sandbox-terminal|" + run.Chat.Id, run.Chat.Title + " · Sandbox Linux", S(p, "command"), ct)) return new("Access denied.");
+                return new(await SandboxContainer.ExecuteAsync(run.Sandbox, run.SandboxEngine!, S(p, "command"), ct));
+            }
             var directory = Root(run.Project);
             if (!await Approve("terminal|" + directory, run.Chat.Title + " · " + PlatformSupport.ShellName, directory + "\n\n" + S(p, "command"), ct)) return new("Access denied.");
             return new(await WorkspaceTools.ShellAsync(S(p, "command"), directory, ct));
@@ -114,7 +128,7 @@ public sealed partial class HarnessService
             var source = new SourceAccess(run.Project.GetSourceFolders()); var path = S(p, "path", ".");
             if (name == "list_sources") return new(source.List(path));
             try { source.Resolve(path); }
-            catch (UnauthorizedAccessException)
+            catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled)
             {
                 var absolute = LocalPreview.ValidatePath(Path.IsPathFullyQualified(path) ? path : Path.Combine(Root(run.Project), path));
                 var outside = new SourceAccess(Path.GetDirectoryName(absolute)!); outside.Resolve(Path.GetFileName(absolute));

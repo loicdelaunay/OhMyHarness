@@ -114,6 +114,27 @@ using (var client = new HttpClient(new FakeHandler(request =>
     var result = await new OpenCodeEngine(client).PromptAsync(openCodeProvider, "", "C:\\Projet", "ses-1", "Salut", "Système", [], updates.Add, default);
     Check(result.Message["content"]!.GetValue<string>() == "Bonjour" && result.InputTokens == 21 && result.OutputTokens == 4 && updates.Last().Reasoning == "Analyse", "Réponse OpenCode et compteurs récupérés par polling");
 }
+var policyReads = 0;
+JsonObject? openCodePolicyPayload = null;
+using (var client = new HttpClient(new FakeHandler(async request =>
+{
+    var route = request.RequestUri!.AbsolutePath;
+    if (route.EndsWith("/prompt_async")) { openCodePolicyPayload = JsonNode.Parse(await request.Content!.ReadAsStringAsync())!.AsObject(); return new(System.Net.HttpStatusCode.NoContent); }
+    if (route.EndsWith("/permission")) return new(System.Net.HttpStatusCode.OK) { Content = new StringContent("[]") };
+    if (route.EndsWith("/message")) return new(System.Net.HttpStatusCode.OK) { Content = new StringContent(++policyReads % 2 == 1 ? "[]" : "[{\"info\":{\"id\":\"answer\",\"role\":\"assistant\",\"time\":{\"completed\":1}},\"parts\":[{\"type\":\"text\",\"text\":\"Plan\"}]}]") };
+    throw new Exception(route);
+})))
+{
+    var native = new Provider { Kind = "opencode", BaseUrl = "http://127.0.0.1:4096", Model = "test/coder", OpenCodeTools = true };
+    var engine = new OpenCodeEngine(client);
+    await engine.PromptAsync(native, "", "C:\\test", "session", "Plan", "system", [], _ => { }, default, policy: new("plan", "forced"));
+    Check(openCodePolicyPayload?["tools"]?["*"]?.GetValue<bool>() == false && openCodePolicyPayload?["tools"]?["read"]?.GetValue<bool>() == true
+        && openCodePolicyPayload?["tools"]?["task"] == null, "OpenCode Plan : refus global et seules exceptions de lecture");
+    await engine.PromptAsync(native, "", "C:\\test", "session", "Execute", "system", [], _ => { }, default, policy: new("execute", "disabled"));
+    Check(openCodePolicyPayload?["tools"]?["task"]?.GetValue<bool>() == false, "OpenCode Disable interdit task");
+    await engine.PromptAsync(native, "", "C:\\test", "session", "Execute", "system", [], _ => { }, default, policy: new("execute", "auto"));
+    Check(openCodePolicyPayload?["tools"]?["task"]?.GetValue<bool>() == true && openCodePolicyPayload?["tools"]?["*"] == null, "OpenCode Exécution Auto rétablit les outils sans refus Plan résiduel");
+}
 var workspace = Path.Combine(Path.GetTempPath(), "OhMyHarness-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(workspace);
 try
@@ -247,23 +268,34 @@ try
     await using (var db = new HarnessDb(path))
     {
         await db.InitializeAsync(); await db.InitializeAsync();
-        Check((await db.Database.GetAppliedMigrationsAsync()).Count() == 7, "Migrations et démarrage idempotent");
+        Check((await db.Database.GetAppliedMigrationsAsync()).SequenceEqual(db.Database.GetMigrations()), "Migrations et démarrage idempotent");
+        Check(!(await db.States.SingleAsync()).AutoContinue && !await db.McpServers.AnyAsync(), "Auto-continuation désactivée et liste MCP vide après migration");
         var template = await db.Templates.SingleAsync();
         Check(template.Name == "Web app" && template.Content.Contains("index.html"), "Template Web app initial créé par migration");
         template.Content = "Mon template personnalisé";
         var settings = await db.States.SingleAsync();
         settings.Language = "en"; settings.EnabledSkills = "review,planning"; settings.ThinkingLevel = "high"; settings.PermissionMode = PermissionModes.Allow;
+        Check(settings.ShowReasoningDetails, "Détails du raisonnement visibles par défaut après migration");
+        settings.ShowReasoningDetails = false;
+        settings.AutoContinue = true;
+        db.McpServers.Add(new McpServer { Name = "Test MCP", Transport = "http", Url = "https://example.com/mcp", Enabled = true });
         db.PermissionGrants.Add(new PermissionGrant { Scope = "browser-origin|https://example.com", Name = "Test", Details = "example.com" });
         Check(await db.Providers.CountAsync() == 2, "Deux fournisseurs initialisés sans doublons");
         var storedProvider = new Provider { Name = "Compatible local", BaseUrl = "http://localhost:11434/v1", Model = "custom-model", ContextLimit = 32768, SupportsImages = false };
         db.Providers.Add(storedProvider); await db.SaveChangesAsync(); settings.ProviderId = storedProvider.Id;
         var chat = await db.Chats.FirstAsync();
+        Check(chat.ExecutionMode == "execute" && chat.OrchestrationMode == "disabled", "Modes de conversation par défaut après migration");
+        chat.ExecutionMode = "plan"; chat.OrchestrationMode = "forced";
         db.Messages.Add(new Message { ChatId = chat.Id, Content = "image", Attachments = [new Attachment { Data = [1, 2, 3], Name = "test.png" }] });
         await db.SaveChangesAsync();
     }
     await using (var db = new HarnessDb(path))
     {
         var settings = await db.States.SingleAsync();
+        var savedModeChat = await db.Chats.FirstAsync();
+        Check(savedModeChat.ExecutionMode == "plan" && savedModeChat.OrchestrationMode == "forced", "Modes Plan et Forced restaurés depuis SQLite");
+        Check(!settings.ShowReasoningDetails, "Préférence de raisonnement replié restaurée après réouverture");
+        Check(settings.AutoContinue && (await db.McpServers.SingleAsync()).Url == "https://example.com/mcp", "Auto-continuation et serveur MCP restaurés après réouverture");
         Check(settings.Language == "en" && settings.EnabledSkills == "review,planning" && settings.ThinkingLevel == "high" && settings.PermissionMode == PermissionModes.Allow, "Langue, skills, thinking et politique d’autorisation restaurés");
         var selectedProvider = await db.Providers.SingleAsync(x => x.Id == settings.ProviderId);
         Check(await db.Providers.CountAsync() == 3 && selectedProvider.Name == "Compatible local" && selectedProvider.ContextLimit == 32768, "Plusieurs fournisseurs et fournisseur actif restaurés");
@@ -352,8 +384,27 @@ try
         await WorkspaceTools.GitAsync(workspace, ["add", "git-test.txt"], default);
         var diff = await WorkspaceTools.GitAsync(workspace, ["--no-pager", "diff", "--cached", "--no-ext-diff", "--no-textconv"], default);
         Check(diff.Contains("+tracked"), "Lecture des changements Git indexés");
+        var unbornFiles = await GitWorkspace.ListAsync([workspace], default);
+        var unborn = unbornFiles.Single(x => x.Path == "git-test.txt");
+        Check((await GitWorkspace.DiffAsync(unborn, default)).Contains("+"), "Git : fichier ajouté avant le premier commit");
+        await WorkspaceTools.GitAsync(workspace, ["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit", "-m", "Fixture", "--quiet"], default);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "git-test.txt"), "staged-change\n");
+        await WorkspaceTools.GitAsync(workspace, ["add", "git-test.txt"], default);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "git-test.txt"), "working-tree-change\n");
+        var changedFiles = await GitWorkspace.ListAsync([workspace], default);
+        var totalDiff = await GitWorkspace.DiffAsync(changedFiles.Single(x => x.Path == "git-test.txt"), default);
+        Check(totalDiff.Contains("+working-tree-change") && !totalDiff.Contains("+staged-change"), "Git : diff total index et travail par rapport à HEAD");
+        await File.WriteAllTextAsync(Path.Combine(workspace, "nouveau fichier é.txt"), "nouveau\n");
+        var untracked = (await GitWorkspace.ListAsync([workspace], default)).Single(x => x.Path == "nouveau fichier é.txt");
+        Check(untracked.Status == "??" && (await GitWorkspace.DiffAsync(untracked, default)).Contains("+nouveau"), "Git : fichier non suivi avec espaces et Unicode");
+        await WorkspaceTools.GitAsync(workspace, ["add", "git-test.txt"], default);
+        await WorkspaceTools.GitAsync(workspace, ["-c", "user.name=Tests", "-c", "user.email=tests@example.invalid", "commit", "-m", "Rename baseline", "--quiet"], default);
+        await WorkspaceTools.GitAsync(workspace, ["mv", "git-test.txt", "renamed.txt"], default);
+        await File.AppendAllTextAsync(Path.Combine(workspace, "renamed.txt"), "extra-line\n");
+        var renamed = (await GitWorkspace.ListAsync([workspace], default)).Single(x => x.Path == "renamed.txt");
+        Check(renamed.PreviousPath == "git-test.txt" && (await GitWorkspace.DiffAsync(renamed, default)).Contains("working-tree-change"), "Git : renommage et modification depuis HEAD");
         var changes = await WorkspaceTools.GitChangesAsync(workspace, default);
-        Check(changes.Contains("MODIFIED FILES") && changes.Contains("CHANGED LINES (STAGED)") && changes.Contains("+tracked"), "Outil Git limité aux modifications et lignes changées");
+        Check(changes.Contains("MODIFIED FILES") && changes.Contains("CHANGED LINES (STAGED)") && changes.Contains("+extra-line"), "Outil Git limité aux modifications et lignes changées");
         Check(LocalPreview.ResolveResource(sources, "a.cs") == Path.Combine(sources, "a.cs"), "Ressource locale autorisée dans le dossier approuvé");
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, "%2e%2e/outside.cs")), "Évasion URL encodée bloquée dans l’aperçu");
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ResolveResource(sources, ".env")), "Fichiers secrets bloqués dans l’aperçu");
@@ -394,6 +445,86 @@ try
     Check(speedTracker.MinSpeed!.Value <= speedTracker.AverageSpeed && speedTracker.AverageSpeed <= speedTracker.MaxSpeed!.Value, "SpeedTracker : Inégalité Min <= Moyenne <= Max respectée");
     Check(Math.Abs(speedTracker.AverageSpeed - 30.0) < 0.01, "SpeedTracker : Moyenne exacte");
 
+    var featureRoot = Path.Combine(workspace, "source-tools");
+    Directory.CreateDirectory(Path.Combine(featureRoot, "nested"));
+    Directory.CreateDirectory(Path.Combine(featureRoot, "node_modules"));
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "one.cs"), "alpha\r\nbeta\r\n", new System.Text.UTF8Encoding(true));
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "nested", "two.cs"), "alpha\nalpha\n");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "node_modules", "hidden.cs"), "alpha");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, ".env.local"), "alpha");
+    var featureSource = new SourceAccess(featureRoot);
+    var globResult = await featureSource.SearchAsync("**/*.cs", null, false, false, default);
+    Check(globResult.Contains("one.cs") && globResult.Contains("nested/two.cs") && !globResult.Contains("hidden.cs"), "Glob récursif et exclusions");
+    var grepResult = await featureSource.SearchAsync("**/*", "ALPHA", false, true, default);
+    Check(grepResult.Contains("one.cs:1:") && grepResult.Contains("two.cs:2:") && !grepResult.Contains(".env"), "Grep lignes, casse et secrets exclus");
+    Check((await featureSource.SearchAsync("*.cs", "^beta$", true, false, default)).Contains("one.cs:2:"), "Grep regex et glob non récursif");
+    await Throws<ArgumentException>(() => featureSource.SearchAsync("../*", null, false, false, default), "Glob hors périmètre refusé");
+    var beforePatch = await File.ReadAllBytesAsync(Path.Combine(featureRoot, "one.cs"));
+    var plan = await featureSource.PreparePatchAsync([new("one.cs", "beta", "gamma"), new("new.md", null, "report\n")], default);
+    Check(plan.Diff.Contains("-beta") && plan.Diff.Contains("+gamma") && plan.Diff.Contains("+++ b/new.md") && !File.Exists(Path.Combine(featureRoot, "new.md")), "Diff multi-fichiers sans écriture");
+    await featureSource.ApplyPatchAsync(plan, default);
+    Check((await File.ReadAllBytesAsync(Path.Combine(featureRoot, "one.cs"))).Take(3).SequenceEqual(beforePatch.Take(3)) && (await File.ReadAllTextAsync(Path.Combine(featureRoot, "one.cs"))).Contains("gamma\r\n"), "Patch préserve BOM UTF-8 et CRLF");
+    Check(await File.ReadAllTextAsync(Path.Combine(featureRoot, "new.md")) == "report\n", "Patch crée un fichier");
+    await Throws<InvalidOperationException>(() => featureSource.PreparePatchAsync([new("one.cs", "gamma", "bad"), new("nested/two.cs", "alpha", "ambiguous")], default), "Patch entier refusé si remplacement ambigu");
+    Check((await File.ReadAllTextAsync(Path.Combine(featureRoot, "one.cs"))).Contains("gamma"), "Échec de validation ne modifie aucun fichier");
+    await Throws<UnauthorizedAccessException>(() => featureSource.PreparePatchAsync([new("../outside.md", null, "bad")], default), "Patch hors sources refusé");
+    await Throws<InvalidOperationException>(() => featureSource.PreparePatchAsync([new("one.cs", null, "bad")], default), "Création ne remplace pas un fichier existant");
+    var stalePlan = await featureSource.PreparePatchAsync([new("one.cs", "gamma", "delta")], default);
+    await featureSource.WriteAsync("one.cs", "external change", default);
+    await Throws<InvalidOperationException>(() => featureSource.ApplyPatchAsync(stalePlan, default), "Patch refuse un fichier modifié après aperçu");
+    var defs = new JsonArray(); SourceTools.AddDefinitions(defs, true, "code_search,patch_sources");
+    Check(defs.Count == 3 && SourceTools.CanRead("patch_sources"), "Définitions des nouveaux skills autonomes");
+    var patchArgs = JsonNode.Parse("""{"edits":[{"path":"denied.md","old_text":null,"new_text":"test"}],"dry_run":false}""")!.AsObject();
+    var deniedPatch = await SourceTools.ExecuteAsync(featureSource, "patch_sources", patchArgs, () => "patch_sources", (_, _, _) => Task.FromResult(false), default);
+    Check(deniedPatch.Contains("refusé") && !File.Exists(Path.Combine(featureRoot, "denied.md")), "Autorisation refusée : aucun patch");
+    var enabledPatch = "patch_sources";
+    await Throws<UnauthorizedAccessException>(() => SourceTools.ExecuteAsync(featureSource, "patch_sources", patchArgs, () => enabledPatch, (_, _, _) => { enabledPatch = ""; return Task.FromResult(true); }, default), "Désactivation pendant autorisation honorée");
+    string FileHtml(string markdown) => Markdig.Markdown.ToHtml(MarkdownPipelineHelper.Parse(markdown), MarkdownPipelineHelper.Pipeline);
+    var reportHtml = FileHtml("Rapport écrit : docs/rapport-comparatif-opencode.html (autonome). `docs/a.md` [Rapport](docs/rapport.html)");
+    Check(reportHtml.Split("omh-file:").Length == 4, "Liens locaux : texte, code inline et Markdown");
+    Check(LocalFileLinks.PathFromUrl("omh-file:docs%2Frapport.html") == "docs/rapport.html", "Décodage du chemin local");
+    Check(!FileHtml("https://example.com/report.html\n\n```\ndocs/no.html\n```").Contains("omh-file:"), "URLs et blocs de code non convertis en fichiers");
+    Check(FileHtml("[Rapport](<docs/mon rapport.html>)").Contains("omh-file:"), "Lien explicite avec espaces");
+
+    foreach (var blockedTool in new[] { "write_source", "edit_source", "patch_sources", "run_terminal", "browser_dom", "desktop_keyboard", "browse", "mcp_fake", "new_unknown_tool" })
+        await Throws<UnauthorizedAccessException>(() => { AgentPolicy.Demand("plan", blockedTool); return Task.CompletedTask; }, "Plan interdit " + blockedTool);
+    Check(AgentPolicy.Allowed("plan", "read_source") && AgentPolicy.Allowed("plan", "delegate_tasks") && AgentPolicy.Allowed("execute", "write_source"), "Plan autorise lecture et délégation contrôlée ; Exécution autorise édition");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "AGENTS.md"), "ROOT-CONVENTION");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "nested", "AGENTS.md"), "NESTED-CONVENTION");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "node_modules", "AGENTS.md"), "IGNORED-CONVENTION");
+    var instructions = await ProjectInstructions.LoadAsync([featureRoot], default);
+    Check(instructions.Contains("ROOT-CONVENTION") && instructions.Contains("NESTED-CONVENTION") && !instructions.Contains("IGNORED-CONVENTION"), "AGENTS.md racine et sous-dossiers chargés avec exclusions");
+    var skillFolder = Path.Combine(workspace, "custom-skills"); var customSkills = new CustomSkills(skillFolder);
+    customSkills.EnsureTemplate();
+    Check(customSkills.Discover().Single().Name == "exemple-revue", "Modèle SKILL.md créé et découvert");
+    Check(customSkills.Catalog("custom:exemple-revue").Contains("exemple-revue") && !customSkills.Catalog("custom:exemple-revue").Contains("# Exemple"), "Catalogue de skills sans injection de tout le contenu");
+    Check((await customSkills.ReadAsync("exemple-revue", null, "custom:exemple-revue", default)).Contains("# Exemple"), "Chargement du skill à la demande");
+    Check((await customSkills.ReadAsync("exemple-revue", "resources/checklist.md", "custom:exemple-revue", default)).Contains("Checklist"), "Ressources relatives du skill lisibles");
+    await Throws<UnauthorizedAccessException>(() => customSkills.ReadAsync("exemple-revue", "../outside.md", "custom:exemple-revue", default), "Ressource hors du skill refusée");
+    await Throws<UnauthorizedAccessException>(() => customSkills.ReadAsync("exemple-revue", null, "", default), "Skill désactivé inaccessible");
+    var originalTemplate = await File.ReadAllTextAsync(Path.Combine(skillFolder, "exemple-revue", "SKILL.md"));
+    await File.AppendAllTextAsync(Path.Combine(skillFolder, "exemple-revue", "SKILL.md"), "\nUSER-CUSTOMIZATION"); customSkills.EnsureTemplate();
+    Check((await File.ReadAllTextAsync(Path.Combine(skillFolder, "exemple-revue", "SKILL.md"))).Contains("USER-CUSTOMIZATION"), "Le modèle de skill ne remplace pas les personnalisations");
+    var runtimeChat = new Chat { Id = 1234, ExecutionMode = "plan", OrchestrationMode = "forced" };
+    var runtimeProject = new Project { SourceFolder = featureRoot };
+    using (var session = new ConversationSession(runtimeChat, runtimeProject, new Provider(), new AppState { EnabledSkills = "sources,write_sources,custom:exemple-revue" }, "Analyze", [], Path.Combine(workspace, "runtime.sqlite")))
+    {
+        runtimeChat.ExecutionMode = "execute";
+        Check(session.Chat.ExecutionMode == "plan", "Le mode est figé pour la génération en cours");
+        var childRequests = 0; var policyDenials = 0;
+        var runtime = new AgentRuntime(session, customSkills, (wire, tools, ct) => {
+            Interlocked.Increment(ref childRequests);
+            Check(!tools.Any(x => x?["function"]?["name"]?.GetValue<string>() is "write_source" or "delegate_tasks"), "Sous-agent Plan sans écriture ni récursion");
+            if (wire.Count == 2) return Task.FromResult(new Completion(new JsonObject { ["role"] = "assistant", ["tool_calls"] = new JsonArray(new JsonObject {
+                ["id"] = "bad-child", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "write_source", ["arguments"] = "{\"path\":\"forbidden.md\",\"content\":\"bad\"}" } }) }, 1, 1, 1));
+            if (wire.Last()?["content"]?.GetValue<string>().Contains("Mode Plan") == true) Interlocked.Increment(ref policyDenials);
+            return Task.FromResult(new Completion(new JsonObject { ["role"] = "assistant", ["content"] = "Analysis complete" }, 1, 1, 1));
+        }, (_, _, _) => throw new Exception("No permission dialog should be needed."), _ => Task.CompletedTask);
+        Check((await runtime.InitializeAsync(default)).Contains("ROOT-CONVENTION"), "Instructions transmises à l’orchestrateur");
+        var report = await runtime.ForcedAsync(default);
+        Check(childRequests == 4 && policyDenials == 2 && !File.Exists(Path.Combine(featureRoot, "forbidden.md")) && report.Contains("Exploration") && report.Contains("Validation"), "Forced lance deux sous-agents et bloque leurs écritures malgré un appel forgé");
+    }
+
     var chatSpeedStats = SpeedStats.Compute(new[] { (300, 10.0), (600, 10.0) });
     Check(chatSpeedStats.HasValue && chatSpeedStats.Value.Min == 30.0 && chatSpeedStats.Value.Max == 60.0 && Math.Abs(chatSpeedStats.Value.Avg - 45.0) < 0.01, "SpeedStats : Min, Max et Moyenne sur historique");
     Check(SpeedStats.Compute(Array.Empty<(int, double)>()) == null, "SpeedStats : Résultat null sur historique vide");
@@ -405,6 +536,8 @@ finally
     foreach (var file in Directory.EnumerateFiles(workspace, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
     Directory.Delete(workspace, true);
 }
+await WorkflowChecks.Run(Check);
+await SandboxChecks.Run(Check);
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

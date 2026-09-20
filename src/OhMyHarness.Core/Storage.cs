@@ -31,6 +31,9 @@ public sealed class Chat
     public int Id { get; set; }
     public int ProjectId { get; set; }
     public string Title { get; set; } = "Nouvelle conversation";
+    public string ExecutionMode { get; set; } = "execute";
+    public string OrchestrationMode { get; set; } = "disabled";
+    public bool SandboxEnabled { get; set; }
     public List<Message> Messages { get; set; } = [];
     public override string ToString() => Title;
 }
@@ -90,6 +93,8 @@ public sealed class AppState
     public string EnabledSkills { get; set; } = "sources,web";
     public string ThinkingLevel { get; set; } = "auto";
     public string PermissionMode { get; set; } = PermissionModes.Ask;
+    public bool AutoContinue { get; set; }
+    public bool ShowReasoningDetails { get; set; } = true;
 }
 public static class PermissionModes
 {
@@ -147,6 +152,7 @@ public sealed class HarnessDb : DbContext
     public DbSet<PromptTemplate> Templates => Set<PromptTemplate>();
     public DbSet<PermissionGrant> PermissionGrants => Set<PermissionGrant>();
     public DbSet<ExternalChatSession> ExternalChatSessions => Set<ExternalChatSession>();
+    public DbSet<McpServer> McpServers => Set<McpServer>();
     protected override void OnConfiguring(DbContextOptionsBuilder options) =>
         options.UseSqlite(new SqliteConnectionStringBuilder { DataSource = path }.ToString())
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));

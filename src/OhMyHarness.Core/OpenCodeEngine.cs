@@ -155,7 +155,7 @@ public sealed class OpenCodeEngine(HttpClient http)
 
     public async Task<Completion> PromptAsync(Provider provider, string password, string directory, string sessionId, string prompt,
         string systemPrompt, IReadOnlyList<OpenCodeAttachment> attachments, Action<GenerationUpdate> update, CancellationToken ct,
-        Func<OpenCodePermission, CancellationToken, Task<string>>? authorize = null)
+        Func<OpenCodePermission, CancellationToken, Task<string>>? authorize = null, OpenCodeRunPolicy? policy = null, WorkflowTools? workflow = null)
     {
         var separator = provider.Model.IndexOf('/');
         if (separator <= 0 || separator == provider.Model.Length - 1) throw new ArgumentException("Le modèle OpenCode doit être au format fournisseur/modèle.");
@@ -170,28 +170,58 @@ public sealed class OpenCodeEngine(HttpClient http)
             ["parts"] = parts
         };
         payload["tools"] = provider.OpenCodeTools
-            ? new JsonObject { ["question"] = false }
+            ? new JsonObject { ["question"] = workflow != null }
             : await DisabledToolsAsync(provider, password, directory, ct);
+        if (policy != null)
+        {
+            if (AgentPolicy.ReadOnly(policy.Mode))
+            {
+                // OpenCode converts this ordered map into session permission rules. Deny every
+                // native/custom/MCP tool, then allow only its built-in source-reading operations.
+                payload["tools"] = new JsonObject { ["*"] = false, ["read"] = provider.OpenCodeTools,
+                    ["glob"] = provider.OpenCodeTools, ["grep"] = provider.OpenCodeTools, ["list"] = provider.OpenCodeTools, ["todowrite"] = provider.OpenCodeTools && workflow != null, ["question"] = provider.OpenCodeTools && workflow != null };
+            }
+            else if (provider.OpenCodeTools) payload["tools"]!["task"] = policy.Orchestration != "disabled";
+        }
+        // Use explicit session rules so the loop guard remains "ask", even with automatic tool permissions.
+        // prompt_async.tools would overwrite these rules with boolean allow/deny entries.
+        if (workflow != null && provider.OpenCodeTools)
+        {
+            var rules = new JsonArray();
+            foreach (var rule in (JsonObject)payload["tools"]!) rules.Add(new JsonObject { ["permission"] = rule.Key, ["pattern"] = "*", ["action"] = rule.Value!.GetValue<bool>() ? "allow" : "deny" });
+            rules.Add(new JsonObject { ["permission"] = "doom_loop", ["pattern"] = "*", ["action"] = "ask" });
+            await JsonAsync(provider, password, HttpMethod.Patch, $"session/{Uri.EscapeDataString(sessionId)}", directory, new JsonObject { ["permission"] = rules }, ct);
+            payload.Remove("tools");
+        }
         var before = await MessagesAsync(provider, password, directory, sessionId, ct);
         var known = before.Select(MessageId).Where(x => x.Length > 0).ToHashSet(StringComparer.Ordinal);
         var timer = Stopwatch.StartNew();
         try
         {
             await JsonAsync(provider, password, HttpMethod.Post, $"session/{Uri.EscapeDataString(sessionId)}/prompt_async", directory, payload, ct);
-            string lastText = "", lastReasoning = "";
+            string lastText = "", lastReasoning = "", lastTodos = "";
+            var lastWorkflowPoll = DateTime.MinValue;
             while (true)
             {
                 await Task.Delay(180, ct);
-                if (provider.OpenCodeTools && authorize != null)
+                if (provider.OpenCodeTools && (authorize != null || policy != null || workflow != null))
                 {
                     foreach (var permission in await PermissionsAsync(provider, password, directory, sessionId, ct))
                     {
-                        var response = await authorize(permission, ct);
+                        var response = permission.Action == "doom_loop"
+                            ? workflow != null && await workflow.DecideLoopAsync(permission.Details + "\n" + string.Join("\n", permission.Resources), ct) ? "once" : "reject"
+                            : authorize == null || policy != null && AgentPolicy.ReadOnly(policy.Mode) ? "reject" : await authorize(permission, ct);
+                        if (permission.Action == "doom_loop" && response == "reject") throw new OperationCanceledException("Boucle OpenCode arrêtée / OpenCode loop stopped.", ct);
                         if (response is not ("once" or "always" or "reject")) response = "reject";
                         await JsonAsync(provider, password, HttpMethod.Post,
                             $"session/{Uri.EscapeDataString(sessionId)}/permissions/{Uri.EscapeDataString(permission.Id)}",
                             directory, new JsonObject { ["response"] = response }, ct);
                     }
+                }
+                if (provider.OpenCodeTools && workflow != null && (DateTime.UtcNow - lastWorkflowPoll).TotalMilliseconds >= 600)
+                {
+                    lastWorkflowPoll = DateTime.UtcNow;
+                    lastTodos = await PollWorkflowAsync(provider, password, directory, sessionId, workflow, lastTodos, ct);
                 }
                 var messages = await MessagesAsync(provider, password, directory, sessionId, ct);
                 var assistant = messages.LastOrDefault(x => IsAssistant(x) && !known.Contains(MessageId(x)));
@@ -203,13 +233,19 @@ public sealed class OpenCodeEngine(HttpClient http)
                     update(new(parsed.Text, parsed.Reasoning, parsed.InputTokens, parsed.OutputTokens, timer.Elapsed.TotalSeconds));
                 }
                 if (!parsed.Completed) continue;
+                if (provider.OpenCodeTools && workflow != null)
+                {
+                    var status = await JsonAsync(provider, password, HttpMethod.Get, "session/status", directory, null, ct);
+                    if (status?[sessionId]?["type"]?.GetValue<string>() is "busy" or "retry") continue;
+                }
+                if (provider.OpenCodeTools && workflow != null) await PollWorkflowAsync(provider, password, directory, sessionId, workflow, lastTodos, ct);
                 if (parsed.Error.Length > 0) throw new IOException("OpenCode : " + parsed.Error);
                 var message = new JsonObject { ["role"] = "assistant", ["content"] = parsed.Text };
                 if (parsed.Reasoning.Length > 0) message["reasoning_content"] = parsed.Reasoning;
                 return new Completion(message, parsed.InputTokens, parsed.OutputTokens, timer.Elapsed.TotalSeconds);
             }
         }
-        catch (OperationCanceledException)
+        catch
         {
             using var abort = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await JsonAsync(provider, password, HttpMethod.Post, $"session/{Uri.EscapeDataString(sessionId)}/abort", directory, new JsonObject(), abort.Token); } catch { }
@@ -217,9 +253,27 @@ public sealed class OpenCodeEngine(HttpClient http)
         }
     }
 
+    async Task<string> PollWorkflowAsync(Provider provider, string password, string directory, string sessionId, WorkflowTools workflow, string previous, CancellationToken ct)
+    {
+        var requests = await JsonAsync(provider, password, HttpMethod.Get, "question", directory, null, ct) as JsonArray ?? [];
+        foreach (var request in requests.OfType<JsonObject>().Where(x => String(x, "sessionID", "sessionId") == sessionId))
+        {
+            var id = String(request, "id", "requestID");
+            if (id.Length == 0) continue;
+            var items = WorkflowTools.ParseQuestions(request["questions"] as JsonArray ?? []);
+            var answer = await workflow.AskAsync(items, ct);
+            var payload = answer.Cancelled ? new JsonObject() : new JsonObject { ["answers"] = System.Text.Json.JsonSerializer.SerializeToNode(answer.Answers) };
+            await JsonAsync(provider, password, HttpMethod.Post, $"question/{Uri.EscapeDataString(id)}/{(answer.Cancelled ? "reject" : "reply")}", directory, payload, ct);
+        }
+        var todos = await JsonAsync(provider, password, HttpMethod.Get, $"session/{Uri.EscapeDataString(sessionId)}/todo", directory, null, ct) as JsonArray ?? [];
+        var current = WorkflowTools.ValidateTasks(todos).ToJsonString();
+        if (current != previous) await workflow.SaveTasksAsync(todos, ct);
+        return current;
+    }
+
     async Task<JsonObject> DisabledToolsAsync(Provider provider, string password, string directory, CancellationToken ct)
     {
-        var disabled = new JsonObject();
+        var disabled = new JsonObject { ["*"] = false };
         try
         {
             var json = await JsonAsync(provider, password, HttpMethod.Get, "experimental/tool/ids", directory, null, ct);

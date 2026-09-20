@@ -23,6 +23,9 @@ namespace OhMyHarness.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("AutoContinue")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("BrowserUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -46,6 +49,9 @@ namespace OhMyHarness.Core.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<int>("ProviderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("ShowReasoningDetails")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ThinkingLevel")
@@ -91,7 +97,18 @@ namespace OhMyHarness.Core.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ExecutionMode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OrchestrationMode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("ProjectId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SandboxEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Title")
@@ -129,6 +146,48 @@ namespace OhMyHarness.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("ExternalChatSessions");
+                });
+
+            modelBuilder.Entity("OhMyHarness.Core.McpServer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ArgumentsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Command")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("ProtectedSecrets")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("Transport")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkingDirectory")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("McpServers");
                 });
 
             modelBuilder.Entity("OhMyHarness.Core.Message", b =>

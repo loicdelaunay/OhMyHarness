@@ -11,3 +11,4 @@ desktop/sidecar/
 desktop/dist/
 desktop/.smoke/
 desktop/.data/
+**/sandboxes/
