@@ -248,13 +248,14 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             run.Tracker = new GenerationSpeedTracker();
             var completion = await openCodeEngine.PromptAsync(provider, password, directory, link.SessionId, prompt, system, images, update =>
             {
+                run.ExportProgress = new(active.Id, update);
                 active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
                 var tokens = update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning);
                 run.Tracker?.AddSample(update.Seconds, tokens);
                 if (update.Reasoning.Length > 0) assistantUi.UpdateThinking(update.Reasoning, update.Text.Length > 0);
                 assistantUi.UpdateContent(update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…");
                 UpdateMetrics(run, update, inputEstimate);
-                if (IsVisible(run) && scroll.ScrollableHeight - scroll.VerticalOffset < 300) scroll.ChangeView(null, scroll.ScrollableHeight, null, true);
+                if (IsVisible(run)) ScrollToBottom();
             }, ct, (permission, token) => AuthorizeOpenCodePermissionAsync(provider, directory, permission, token), new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
             active.Content = completion.Message["content"]?.GetValue<string>() ?? "";
             active.InputTokens = completion.InputTokens; active.OutputTokens = completion.OutputTokens; active.Seconds = completion.Seconds;

@@ -7,11 +7,12 @@ namespace OhMyHarness.Core;
 /// <summary>Named, conversation-scoped command terminals; one job per tab, many tabs may run concurrently.</summary>
 public sealed class TerminalHub : IDisposable
 {
-    public record View(string Id, int ChatId, bool Sandbox, string Name, string Directory, string Shell, string Status, string? JobId, string Command, string Output);
-    sealed class Job(string command, CancellationToken ct)
+    public record View(string Id, int ChatId, bool Sandbox, string Name, string Directory, string Shell, string Status, string? JobId, string Command, string Output, int TimeoutSeconds);
+    sealed class Job(string command, int timeoutSeconds, CancellationToken ct)
     {
         public string Id { get; } = Guid.NewGuid().ToString("N");
         public string Command { get; } = command;
+        public int TimeoutSeconds { get; } = timeoutSeconds;
         public string Status { get; set; } = "running";
         public StringBuilder Output { get; } = new();
         public CancellationTokenSource Cancel { get; } = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -42,7 +43,7 @@ public sealed class TerminalHub : IDisposable
     {
         job ??= t.Jobs.LastOrDefault();
         return new(t.Id, t.ChatId, t.Sandbox, t.Name, t.Directory, t.Sandbox ? "Linux sh (sandbox)" : PlatformSupport.ShellName,
-            job?.Status ?? "idle", job?.Id, job?.Command ?? "", job?.Output.ToString() ?? "");
+            job?.Status ?? "idle", job?.Id, job?.Command ?? "", job?.Output.ToString() ?? "", job?.TimeoutSeconds ?? 30);
     }
     public List<View> List(int chatId, bool? sandbox = null)
     { lock (sync) return terminals.Values.Where(t => t.ChatId == chatId && (!sandbox.HasValue || t.Sandbox == sandbox) && !t.Closing).Select(t => Snapshot(t)).ToList(); }
@@ -66,8 +67,9 @@ public sealed class TerminalHub : IDisposable
             return Snapshot(t, job);
         }
     }
-    public View Start(int chatId, bool sandbox, string id, string command, Func<string, Action<string>, CancellationToken, Task<string>> execute, CancellationToken ct)
+    public View Start(int chatId, bool sandbox, string id, string command, Func<string, Action<string>, CancellationToken, Task<string>> execute, CancellationToken ct, int timeoutSeconds = 30)
     {
+        ValidateTimeout(timeoutSeconds);
         if (string.IsNullOrWhiteSpace(command) || command.Length > 100000) throw new ArgumentException("Commande requise, maximum 100 000 caractères.");
         ct.ThrowIfCancellationRequested();
         lock (sync)
@@ -76,14 +78,17 @@ public sealed class TerminalHub : IDisposable
             var t = Find(chatId, sandbox, id);
             if (t.Jobs.LastOrDefault()?.Status == "running") throw new InvalidOperationException("Ce terminal travaille déjà. Créez un autre terminal pour exécuter en parallèle.");
             if (terminals.Values.Count(x => x.Jobs.LastOrDefault()?.Status == "running") >= 16) throw new InvalidOperationException("16 commandes simultanées maximum.");
-            var job = new Job(command, ct); t.Jobs.Add(job);
+            var job = new Job(command, timeoutSeconds, ct); t.Jobs.Add(job);
             if (t.Jobs.Count > 10) t.Jobs.RemoveAt(0);
             // Execute outside the UI thread and independently of the tool dispatcher.
             _ = Task.Run(async () => {
                 void Append(string value) { lock (sync) { var room = 100000 - job.Output.Length; if (room > 0) job.Output.Append(value.AsSpan(0, Math.Min(room, value.Length))); } }
                 try
                 {
-                    var result = await execute(command, Append, job.Cancel.Token);
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(job.Cancel.Token);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                    var result = await execute(command, Append, deadline.Token);
+                    deadline.Token.ThrowIfCancellationRequested();
                     lock (sync) { job.Output.Clear(); job.Output.Append(result.AsSpan(0, Math.Min(100000, result.Length))); job.Status = "completed"; }
                 }
                 catch (OperationCanceledException) { lock (sync) { job.Status = job.Cancel.IsCancellationRequested ? "cancelled" : "timed_out"; } Append("\n[Arrêt ou délai atteint / Stopped or timed out]"); }
@@ -144,6 +149,8 @@ public sealed class TerminalHub : IDisposable
         try { var milliseconds = JsonNode.Parse(arguments)?["timeout_ms"]?.GetValue<int>() ?? 10000; return milliseconds is >= 1000 and <= 30000; }
         catch { return false; }
     }
+    public static int ValidateTimeout(int seconds) => seconds is >= 1 and <= 600 ? seconds
+        : throw new ArgumentOutOfRangeException(nameof(seconds), "timeout_seconds: 1..600 (default 30).");
     public static void AddDefinitions(JsonArray definitions)
     {
         void Add(string name, string description, JsonObject properties, params string[] required) => definitions.Add(new JsonObject {
@@ -155,7 +162,12 @@ public sealed class TerminalHub : IDisposable
         Add("create_terminal", "Create a named terminal tab in the project directory. Max 12 per conversation. Commands are noninteractive, fresh shell sessions; cwd and environment changes are not retained between commands.", new() { ["name"] = Text() });
         Add("delete_terminal", "Stop the terminal's process tree and close its tab. Output is discarded.", Id(), "terminal_id");
         var start = Id(); start["command"] = Text();
-        Add("start_terminal", "Request approval, then launch a command and return immediately with jobId. Run commands in different terminals in parallel, then use read_terminal/wait_terminal. One active command per terminal, 60 second command limit. Output is bounded. completed means process ended; inspect the reported exit code.", start, "terminal_id", "command");
+        JsonObject Timeout() => new() { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 600, ["default"] = 30 };
+        start["timeout_seconds"] = Timeout();
+        foreach (var definition in definitions)
+            if (definition?["function"]?["name"]?.GetValue<string>() == "run_terminal")
+            { definition["function"]!["parameters"]!["properties"]!["timeout_seconds"] = Timeout(); definition["function"]!["description"] = "Run a command and wait for completion. timeout_seconds defaults to 30, maximum 600. For background servers use start_terminal instead, then read_terminal/wait_terminal without relaunching."; }
+        Add("start_terminal", "Request approval, then launch a command and return immediately with jobId. Run commands in different terminals in parallel, then use read_terminal/wait_terminal. One active command per terminal. timeout_seconds defaults to 30, maximum 600 (10 minutes). For servers, launch the server directly without shell detachment; this tool returns immediately while the process stays managed in background until timeout or stop. Output is bounded. completed means process ended; inspect the reported exit code.", start, "terminal_id", "command");
         var read = Id(); read["job_id"] = Text();
         Add("read_terminal", "Read status and current output without waiting. Optional job_id selects one of the last 10 jobs. Never rerun a command just to check progress.", read, "terminal_id");
         var wait = Id(); wait["job_id"] = Text(); wait["timeout_ms"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 30000 };
@@ -174,27 +186,28 @@ public sealed class TerminalHub : IDisposable
             case "run_terminal":
                 var directory = run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? throw new InvalidOperationException("Associez un dossier source.");
                 var legacy = List(chat, sandbox).FirstOrDefault(t => t.Name == "Terminal" && t.Status != "running" && PlatformSupport.PathComparer.Equals(t.Directory, directory)) ?? Create(chat, sandbox, "Terminal", directory);
-                var started = await CallAsync(run, "start_terminal", new JsonObject { ["terminal_id"] = legacy.Id, ["command"] = args["command"]?.GetValue<string>() ?? "" }, skills, approve, ct);
+                var started = await CallAsync(run, "start_terminal", new JsonObject { ["terminal_id"] = legacy.Id, ["command"] = args["command"]?.GetValue<string>() ?? "", ["timeout_seconds"] = args["timeout_seconds"]?.DeepClone() }, skills, approve, ct);
                 if (!started.StartsWith('{')) return started;
                 var current = Read(chat, sandbox, legacy.Id);
                 while (current.Status == "running") current = await WaitAsync(chat, sandbox, legacy.Id, current.JobId, 30000, ct);
                 return current.Output;
-            case "list_terminals": return Serialize(List(chat, sandbox).Select(t => new { t.Id, t.Name, t.Shell, t.Directory, t.Status, t.JobId, t.Sandbox }));
+            case "list_terminals": return Serialize(List(chat, sandbox).Select(t => new { t.Id, t.Name, t.Shell, t.Directory, t.Status, t.JobId, t.Sandbox, t.TimeoutSeconds }));
             case "create_terminal": return Serialize(Create(chat, sandbox, args["name"]?.GetValue<string>() ?? "", run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? throw new InvalidOperationException("Associez un dossier source.")));
             case "delete_terminal": await DeleteAsync(chat, sandbox, id); return "Terminal fermé / Terminal closed.";
             case "stop_terminal": Stop(chat, sandbox, id); return Serialize(Read(chat, sandbox, id));
             case "read_terminal": return Serialize(Read(chat, sandbox, id, args["job_id"]?.GetValue<string>()));
             case "wait_terminal": return Serialize(await WaitAsync(chat, sandbox, id, args["job_id"]?.GetValue<string>(), args["timeout_ms"]?.GetValue<int>() ?? 10000, ct));
             case "start_terminal":
+                var timeoutSeconds = ValidateTimeout(args["timeout_seconds"]?.GetValue<int>() ?? 30);
                 var terminal = Read(chat, sandbox, id);
                 var command = args["command"]?.GetValue<string>() ?? "";
                 // A terminal created on a previously linked root cannot silently retain access after it is detached.
                 if (!run.Project.GetSourceFolders().Any(root => PlatformSupport.PathComparer.Equals(Path.GetFullPath(root), terminal.Directory))) throw new UnauthorizedAccessException("Le dossier de ce terminal n'est plus associé au projet.");
-                if (!await approve((sandbox ? "sandbox-terminal|" : "terminal|") + terminal.Directory, run.Chat.Title + " · " + terminal.Name, terminal.Directory + "\n\n" + command, ct)) return "Accès refusé / Access denied.";
+                if (!await approve((sandbox ? "sandbox-terminal|" : "terminal|") + terminal.Directory, run.Chat.Title + " · " + terminal.Name, terminal.Directory + "\nTimeout: " + timeoutSeconds + " s\n\n" + command, ct)) return "Accès refusé / Access denied.";
                 Check(); ct.ThrowIfCancellationRequested();
                 return Serialize(Start(chat, sandbox, id, command, (cmd, output, token) => sandbox
-                    ? SandboxContainer.ExecuteIsolatedAsync(run.Sandbox ?? throw new InvalidOperationException("Sandbox inactive."), run.SandboxEngine!, cmd, token)
-                    : WorkspaceTools.ShellAsync(cmd, terminal.Directory, token, output), ct));
+                    ? SandboxContainer.ExecuteIsolatedAsync(run.Sandbox ?? throw new InvalidOperationException("Sandbox inactive."), run.SandboxEngine!, cmd, token, timeoutSeconds)
+                    : WorkspaceTools.ShellAsync(cmd, terminal.Directory, token, output, timeoutSeconds), ct, timeoutSeconds));
             default: throw new ArgumentException("Unknown terminal tool.");
         }
     }

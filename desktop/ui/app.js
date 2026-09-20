@@ -1,6 +1,9 @@
 const $ = id => document.getElementById(id), api = window.harness;
 let snapshot, chatId, projectId, providerId, tab='web', settingsTab='general', projectEdit=null, projectFolders=[], fileSelected='';
 const pendingQuestions=new Map();
+let followChatTail=true;
+$('messages').addEventListener('scroll',()=>{const box=$('messages');followChatTail=box.scrollHeight-box.scrollTop-box.clientHeight<=8;});
+function followMessages(){if(followChatTail)$('messages').scrollTop=$('messages').scrollHeight;}
 let contextDetail=null,contextDetailChat=null,contextCloseTimer;
 const drafts=new Map(), histories=new Map(), running=new Set(), inflight=new Set(), metrics=new Map(), statuses=new Map();
 const L=(fr,en)=>snapshot?.state.language==='en'?en:fr;
@@ -13,12 +16,13 @@ function saveDraft(){if(chatId)currentDraft().text=$('composer').value;}
 function selectedProject(){return snapshot.projects.find(x=>x.id===projectId);}
 function option(value,text){const node=el('option',text);node.value=value;return node;}
 function translate(){
+  $('export-chat').textContent=L('Exporter','Export');
   document.documentElement.lang=snapshot.state.language;
   $('new-chat').textContent=L('＋ Nouvelle conversation','＋ New conversation');$('settings-open').textContent=L('⚙ Réglages','⚙ Settings');
   $('tools-toggle').textContent=L('▤ Outils','▤ Tools');$('tools-title').textContent=L('Outils','Tools');$('composer').placeholder=L('Posez une question…','Ask a question…');
   $('shortcut').textContent=L('Entrée ↵ · Ctrl+Entrée : nouvelle ligne','Enter ↵ · Ctrl+Enter: new line');
   $('terminal-run').textContent=L('Exécuter','Run');$('git-refresh').textContent=L('Actualiser','Refresh');
-  $('shell-info').textContent=snapshot.shell+' · '+L('Dossier du projet · nouvelle session, 60 s maximum','Project directory · fresh session, 60 s maximum');
+  $('shell-info').textContent=snapshot.shell+' · '+L('Dossier du projet · nouvelle session','Project directory · fresh session');
   $('file-preview').textContent=L('Ouvrir dans Web','Open in browser');
   const settingNames={general:L('Général','General'),providers:L('Fournisseurs','Providers'),skills:'Skills',mcp:'MCP',permissions:L('Autorisations','Permissions'),templates:'Templates'};
   document.querySelectorAll('[data-settings]').forEach(button=>button.textContent=settingNames[button.dataset.settings]);
@@ -48,12 +52,17 @@ function renderChats(){
 }
 async function selectChat(id){
   saveDraft();chatId=id;closeContextPopover();closeSpeedPopover();renderQuestions();if(tab==='terminal')guard(refreshTerminals);
+  gitRevision++;fileRevision++;fileSelected='';$('git-files').replaceChildren();$('git-diff').replaceChildren();$('git-summary').textContent='';
+  $('file-list').replaceChildren();$('file-content').textContent='';$('file-preview').hidden=true;$('file-path').value='.';
+  $('address').value='about:blank';
+  api.host('browser.select',{chatId:id}).then(state=>{if(chatId===id){$('address').value=state.url||'about:blank';updateBrowserBounds();}}).catch(error=>status(error.message,true));
   $('chat-title').textContent=snapshot.chats.find(x=>x.id===id)?.title||L('Créez une conversation','Create a conversation');
   $('composer').value=currentDraft().text;renderAssets();renderChats();updateControls();renderMetrics();
   status(statuses.get(id)||'');
   if(!id){$('messages').replaceChildren(el('p',L('Créez une conversation pour commencer.','Create a conversation to start.'),'empty'));return;}
   if(!histories.has(id)||!running.has(id))histories.set(id,await call('history',{chatId:id}));
   if(chatId!==id)return;renderMessages(true);
+  if(!$('tools').hidden){if(tab==='git')guard(refreshGit);if(tab==='files'&&selectedProject()?.sourceFolder)guard(loadFiles);}
   await call('state.save',{chatId:id,projectId});
 }
 function updateControls(){$('send').disabled=!chatId||!providerId||running.has(chatId);$('stop').disabled=!running.has(chatId);$('rename-chat').disabled=$('delete-chat').disabled=!chatId;$('new-chat').disabled=!projectId;}
@@ -70,16 +79,18 @@ function renderMessage(message){
   return node;
 }
 function renderMessages(bottom=false){
+  const position=$('messages').scrollTop;
+  if(bottom)followChatTail=true;
   const list=histories.get(chatId)||[];
   $('messages').replaceChildren(...[...list.filter(x=>x.role==='tasks'),...list.filter(x=>x.role!=='tasks')].map(renderMessage));
   if(!list.length)$('messages').append(el('p',L('Un espace pour vos idées.\nDes outils pour aller plus loin.','A space for your ideas.\nTools to go further.'),'empty'));
-  if(bottom)$('messages').scrollTop=$('messages').scrollHeight;
+  $('messages').scrollTop=position;followMessages();
 }
 function updateMessage(id,message){
   if(!histories.has(id))histories.set(id,[]);const list=histories.get(id);const index=list.findIndex(x=>x.id===message.id);
   if(index<0)list.push(message);else list[index]={...list[index],...message};
   if(id!==chatId)return;
-  const scroll=$('messages'),bottom=scroll.scrollHeight-scroll.scrollTop-scroll.clientHeight<220;
+  const scroll=$('messages'),bottom=followChatTail;
   const old=scroll.querySelector(`[data-message="${message.id}"]`),node=renderMessage(index<0?message:list[index]);
   const oldThinking=old?.querySelector('details'),newThinking=node.querySelector('details');if(oldThinking&&newThinking)newThinking.open=oldThinking.open;
   if(old)old.replaceWith(node);else{scroll.querySelector('.empty')?.remove();message.role==='tasks'?scroll.prepend(node):scroll.append(node);}
@@ -99,13 +110,13 @@ async function send(){
   inflight.add(id);running.add(id);renderChats();updateControls();statuses.set(id,L('Le modèle réfléchit…','Model is thinking…'));status(statuses.get(id));
   try{await call('send',{chatId:id,providerId,text,images});}
   catch(error){status(error.message,true);if(!(histories.get(id)||[]).some(x=>x.role==='user'&&x.content===text)){const next=drafts.get(id);next.text=text+(next.text?'\n'+next.text:'');next.images.unshift(...images);if(chatId===id){$('composer').value=next.text;renderAssets();}}}
-  finally{inflight.delete(id);running.delete(id);renderChats();updateControls();if(chatId===id){histories.set(id,await call('history',{chatId:id}));renderMessages(true);}}
+  finally{inflight.delete(id);running.delete(id);renderChats();updateControls();if(chatId===id){histories.set(id,await call('history',{chatId:id}));renderMessages();}}
 }
 api.onEvent(event=>{
   if(event.event==='question'){pendingQuestions.set(event.id,event);renderQuestions();renderChats();return;}
   if(event.event==='question.closed'){pendingQuestions.delete(event.id);renderQuestions();renderChats();return;}
   if(event.event==='fatal'){status(event.error,true);return;}
-  if(event.event==='browser'){$('address').value=event.url;return;}
+  if(event.event==='browser'){if(event.chatId===chatId)$('address').value=event.url;return;}
   if(event.event==='stream'){
     running.add(event.chatId);metrics.set(event.chatId,event);updateMessage(event.chatId,{id:event.messageId,role:'assistant',content:event.text,html:event.html,reasoning:event.reasoning,state:'streaming'});if(event.chatId===chatId)renderMetrics();
   }else if(event.event==='message'){
@@ -160,13 +171,21 @@ document.addEventListener('keydown',event=>{
   }
 });
 function showTools(visible){$('tools').hidden=!visible;document.body.classList.toggle('with-tools',visible);if(!visible)document.body.classList.remove('tools-full');updateBrowserBounds();}
+$('export-chat').onclick=()=>guard(async()=>{
+  if(!chatId)return;
+  $('export-chat').disabled=true;
+  try {
+    const result=await api.host('conversation.export',{chatId,providerId});
+    status(result.action==='copied'?L('Conversation copiée en Markdown.','Conversation copied as Markdown.'):result.action==='saved'?L('Conversation enregistrée : ','Conversation saved: ')+result.path:L('Export annulé.','Export cancelled.'));
+  } finally {$('export-chat').disabled=false;}
+});
 $('tools-toggle').onclick=()=>showTools($('tools').hidden);$('tools-close').onclick=()=>showTools(false);$('tools-full').onclick=()=>{document.body.classList.toggle('tools-full');updateBrowserBounds();};
 function selectTab(next){tab=next;if(next==='terminal')guard(refreshTerminals);if(next==='git')guard(refreshGit);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===tab));for(const name of ['web','terminal','git','files'])$(name+'-tool').hidden=name!==tab;updateBrowserBounds();}
 document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>selectTab(button.dataset.tab));
-function updateBrowserBounds(){const r=$('browser-surface').getBoundingClientRect();api.host('browser.bounds',{x:r.x,y:r.y,width:r.width,height:r.height,visible:!$('tools').hidden&&tab==='web'&&!document.querySelector('dialog[open]')}).catch(()=>{});}
+function updateBrowserBounds(){if(!chatId)return;const r=$('browser-surface').getBoundingClientRect();api.host('browser.bounds',{chatId,x:r.x,y:r.y,width:r.width,height:r.height,visible:!$('tools').hidden&&tab==='web'&&!document.querySelector('dialog[open]')}).catch(()=>{});}
 new ResizeObserver(updateBrowserBounds).observe($('browser-surface'));window.addEventListener('resize',updateBrowserBounds);
-$('web-go').onclick=()=>guard(()=>api.host('browser.navigate',{url:$('address').value}));$('address').onkeydown=e=>{if(e.key==='Enter')$('web-go').click();};$('web-back').onclick=()=>guard(()=>api.host('browser.back'));
-$('web-file').onclick=()=>guard(async()=>{const files=await api.host('pick.file');if(files[0])await call('preview',{projectId,path:files[0]});});
+$('web-go').onclick=()=>guard(()=>api.host('browser.navigate',{chatId,url:$('address').value}));$('address').onkeydown=e=>{if(e.key==='Enter')$('web-go').click();};$('web-back').onclick=()=>guard(()=>api.host('browser.back',{chatId}));
+$('web-file').onclick=()=>guard(async()=>{const id=chatId;const files=await api.host('pick.file');if(files[0])await call('preview',{chatId:id,path:files[0]});});
 
 let terminalRows=[],terminalScope=null,terminalSelected=null,terminalPolling=false,terminalTabSignature='';
 const terminalDrafts=new Map(),terminalSelections=new Map();
@@ -175,7 +194,7 @@ function renderTerminalTabs(){
   if(signature!==terminalTabSignature){terminalTabSignature=signature;$('terminal-tabs').replaceChildren();
     for(const t of terminalRows){const group=el('div',null,'terminal-tab'),choose=el('button',t.name+(t.sandbox?' · Sandbox':'')+(t.status==='running'?' ●':'')),close=el('button','×');choose.classList.toggle('selected',t.id===terminalSelected);choose.onclick=()=>{if(terminalSelected)terminalDrafts.set(terminalSelected,$('command').value);terminalSelected=t.id;terminalSelections.set(chatId,t.id);$('command').value=terminalDrafts.get(t.id)||'';renderTerminalTabs();};close.setAttribute('aria-label',L('Fermer ','Close ')+t.name);close.onclick=()=>guard(async()=>{await call('terminals.delete',{chatId:t.chatId,terminalId:t.id});terminalDrafts.delete(t.id);await refreshTerminals();});group.append(choose,close);$('terminal-tabs').append(group);}}
   const selected=terminalRows.find(t=>t.id===terminalSelected);
-  $('shell-info').textContent=selected?selected.shell+' · '+selected.status+'\n'+selected.directory+'\n'+L('Commande indépendante · 60 s max · utilisez + pour exécuter en parallèle.','Independent command · 60s max · use + to run in parallel.'):L('Cliquez sur + pour ouvrir un terminal dans cette conversation.','Click + to open a terminal in this conversation.');
+  $('shell-info').textContent=selected?selected.shell+' · '+selected.status+'\n'+selected.directory:L('Cliquez sur + pour ouvrir un terminal dans cette conversation.','Click + to open a terminal in this conversation.');
   const output=selected?'> '+selected.command+'\n'+selected.output:'';if($('terminal-output').textContent!==output)$('terminal-output').textContent=output;
   $('terminal-run').disabled=!selected||selected.status==='running'||selected.sandbox;$('terminal-stop').disabled=selected?.status!=='running';$('command').disabled=!selected||selected.sandbox;
   $('terminal-add').disabled=!chatId;$('terminal-stop').textContent=L('Arrêter','Stop');
@@ -191,7 +210,7 @@ $('terminal-run').onclick=()=>guard(async()=>{const selected=terminalRows.find(t
 $('terminal-stop').onclick=()=>guard(async()=>{const selected=terminalRows.find(t=>t.id===terminalSelected);if(selected)await call('terminals.stop',{chatId:selected.chatId,terminalId:selected.id});await refreshTerminals();});
 setInterval(()=>{if(tab==='terminal'&&!$('tools').hidden)guard(refreshTerminals);},500);
 
-let gitRevision=0;
+let gitRevision=0,fileRevision=0;
 async function refreshGit(){
   const revision=++gitRevision,selectedProjectId=projectId;
   $('git-files').replaceChildren();$('git-diff').replaceChildren();$('git-summary').textContent=L('Chargement…','Loading…');
@@ -206,9 +225,26 @@ async function refreshGit(){
   }
 }
 $('git-refresh').onclick=()=>guard(refreshGit);
-async function loadFiles(){const text=await call('files.list',{projectId,path:$('file-path').value});$('file-list').replaceChildren();$('file-content').textContent='';$('file-preview').hidden=true;for(const line of text.split('\n').filter(Boolean)){const directory=line.startsWith('[dossier] '),name=directory?line.slice(10):line;const button=el('button',(directory?'📁 ':'📄 ')+name);button.onclick=()=>guard(async()=>{if(directory){$('file-path').value=name;await loadFiles();}else{fileSelected=name;$('file-content').textContent=await call('files.read',{projectId,path:name});$('file-preview').hidden=false;}});$('file-list').append(button);}}
-$('files-go').onclick=()=>guard(loadFiles);$('files-root').onclick=()=>{$('file-path').value='.';guard(loadFiles);};$('file-preview').onclick=()=>guard(async()=>{await call('preview',{projectId,path:fileSelected});selectTab('web');});
-document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(a){e.preventDefault();guard(async()=>{showTools(true);selectTab('web');const href=a.getAttribute('href');if(href.startsWith('omh-file:'))await call('preview',{projectId:Number(a.closest('[data-project]')?.dataset.project)||projectId,path:decodeURIComponent(href.slice(9))});else await api.host('browser.navigate',{url:a.href});});}});
+async function loadFiles(){
+  const id=chatId,project=projectId,revision=++fileRevision;
+  const text=await call('files.list',{projectId:project,path:$('file-path').value});
+  if(id!==chatId||project!==projectId||revision!==fileRevision)return;
+  $('file-list').replaceChildren();$('file-content').textContent='';$('file-preview').hidden=true;
+  for(const line of text.split('\n').filter(Boolean)){
+    const directory=line.startsWith('[dossier] '),name=directory?line.slice(10):line;
+    const button=el('button',(directory?'📁 ':'📄 ')+name);
+    button.onclick=()=>guard(async()=>{
+      if(id!==chatId||project!==projectId)return;
+      if(directory){$('file-path').value=name;await loadFiles();}
+      else {const request=++fileRevision;const content=await call('files.read',{projectId:project,path:name});
+        if(id!==chatId||project!==projectId||request!==fileRevision)return;
+        fileSelected=name;$('file-content').textContent=content;$('file-preview').hidden=false;
+      }
+    });$('file-list').append(button);
+  }
+}
+$('files-go').onclick=()=>guard(loadFiles);$('files-root').onclick=()=>{$('file-path').value='.';guard(loadFiles);};$('file-preview').onclick=()=>guard(async()=>{await call('preview',{chatId,path:fileSelected});selectTab('web');});
+document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(a){e.preventDefault();guard(async()=>{showTools(true);selectTab('web');const href=a.getAttribute('href');if(href.startsWith('omh-file:'))await call('preview',{chatId,path:decodeURIComponent(href.slice(9))});else await api.host('browser.navigate',{chatId,url:a.href});});}});
 
 function field(form,label,type,value){const container=el('label',label),input=el(type==='textarea'?'textarea':type==='select'?'select':'input');if(type!=='textarea'&&type!=='select')input.type=type;if(type==='checkbox')input.checked=!!value;else input.value=value??'';container.append(input);form.append(container);return input;}
 function button(parent,label,fn){const b=el('button',label);b.type='button';b.onclick=()=>guard(fn);parent.append(b);return b;}
@@ -370,7 +406,7 @@ function addSandboxMenu(menu, selectedChat){
   toggle.onchange=()=>guard(async()=>{await call('chat.modes',{id:selectedChat.id,sandboxEnabled:toggle.checked});await refresh();status(L('Sandbox appliquée au prochain envoi','Sandbox applies to the next message'));});
   label.append(toggle,document.createTextNode(' Sandbox'));
   const info=el('button','ⓘ');info.type='button';info.setAttribute('aria-label',L('Fonctionnement de la sandbox','How sandbox works'));
-  const explanation=el('p',L('Copie privée par conversation. Commandes Linux dans Docker/Podman sans réseau ni accès aux dossiers du PC. Image requise : node:22-bookworm, à télécharger au préalable. 1 CPU, 512 Mio, 128 processus, 60 s/commande, 30 min/génération ; sources limitées à 64 Mio. Clés API et SQLite hors du conteneur. Navigateur, bureau, MCP et OpenCode désactivés. Secrets connus, dépendances et .git exclus ; vérifiez les secrets présents dans votre code. Les modifications ne sont appliquées au projet réel qu’après votre revue. Le panneau outils manuel reste local. Aucun repli local automatique.', 'Private copy per conversation. Linux commands in Docker/Podman with no network or host folders. Required image: node:22-bookworm, download beforehand. 1 CPU, 512 MiB, 128 processes, 60 s/command, 30 min/generation; sources limited to 64 MiB. API keys and SQLite outside the container. Browser, desktop, MCP and OpenCode disabled. Known secrets, dependencies and .git excluded; check for secrets embedded in code. Changes reach the original project only after review. Manual tools remain local. Never falls back to local execution.'),'sandbox-info');explanation.hidden=true;
+  const explanation=el('p',L('Copie privée par conversation. Commandes Linux dans Docker/Podman sans réseau ni accès aux dossiers du PC. Image requise : node:22-bookworm, à télécharger au préalable. 1 CPU, 512 Mio, 128 processus, 30 s par défaut, jusqu’à 10 min/commande, 30 min/génération ; sources limitées à 64 Mio. Clés API et SQLite hors du conteneur. Navigateur, bureau, MCP et OpenCode désactivés. Secrets connus, dépendances et .git exclus ; vérifiez les secrets présents dans votre code. Les modifications ne sont appliquées au projet réel qu’après votre revue. Le panneau outils manuel reste local. Aucun repli local automatique.', 'Private copy per conversation. Linux commands in Docker/Podman with no network or host folders. Required image: node:22-bookworm, download beforehand. 1 CPU, 512 MiB, 128 processes, 30 s default, up to 10 min/command, 30 min/generation; sources limited to 64 MiB. API keys and SQLite outside the container. Browser, desktop, MCP and OpenCode disabled. Known secrets, dependencies and .git excluded; check for secrets embedded in code. Changes reach the original project only after review. Manual tools remain local. Never falls back to local execution.'),'sandbox-info');explanation.hidden=true;
   info.onclick=()=>{explanation.hidden=!explanation.hidden;info.setAttribute('aria-expanded',String(!explanation.hidden));};info.setAttribute('aria-expanded','false');row.append(label,info);menu.append(row,explanation);
   const review=el('button',L('Examiner les modifications sandbox…','Review sandbox changes…'));review.disabled=running.has(selectedChat.id);review.onclick=()=>guard(()=>reviewSandbox(selectedChat.id));menu.append(review);
 }

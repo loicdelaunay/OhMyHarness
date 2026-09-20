@@ -8,7 +8,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   child.stderr.on('data',data=>stderr+=data);
   child.on('error',readyReject);child.on('exit',code=>{readyReject(new Error(stderr||`Exit ${code}`));for(const p of replies.values())p.reject(new Error(stderr||'Service exited'));});
-  let choice='deny';
+  let choice='deny';const browserCalls=[];
   function write(value){child.stdin.write(JSON.stringify(value)+'\n');}
   readline.createInterface({input:child.stdout}).on('line',line=>{
     const item=JSON.parse(line);if(item.ready)return readyResolve();
@@ -17,6 +17,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
       if(item.method==='permission')result=choice;
       else if(item.method==='key.encrypt')result=Buffer.from(item.parameters.text).toString('base64');
       else if(item.method==='key.decrypt')result=Buffer.from(item.parameters.data,'base64').toString();
+      else if(item.method==='read_page'){browserCalls.push(item.parameters);result={text:'Page for chat '+item.parameters.chatId};}
       else return write({hostResponse:item.hostRequest,error:'Unexpected host action '+item.method});
       return write({hostResponse:item.hostRequest,result});
     }
@@ -28,7 +29,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
     if(req.url.endsWith('/models')){res.setHeader('Content-Type','application/json');res.end('{"data":[{"id":"test-model"}]}');return;}
     const buffers=[];for await(const chunk of req)buffers.push(chunk);const body=JSON.parse(Buffer.concat(buffers));requests++;active++;peak=Math.max(peak,active);
     const last=body.messages.at(-1),tool=body.model==='tool-model'&&last.role!=='tool',isSummary=body.messages[0].content.startsWith('Summarize');
-    const delta=tool?{tool_calls:[{index:0,id:'test-call',type:'function',function:{name:'run_terminal',arguments:JSON.stringify({command:'echo terminal-ok'})}}]}:{content:isSummary?'Résumé conservant la demande.':`Reply: ${last.content}`};
+    const delta=body.model==='browser-model'&&last.role!=='tool'?{tool_calls:[{index:0,id:'browser-call',type:'function',function:{name:'read_page',arguments:'{"chatId":999999}'}}]}:tool?{tool_calls:[{index:0,id:'test-call',type:'function',function:{name:'run_terminal',arguments:JSON.stringify({command:'echo terminal-ok'})}}]}:{content:isSummary?'Résumé conservant la demande.':`Reply: ${last.content}`};
     res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: '+JSON.stringify({choices:[{delta}]})+'\n\n');
     setTimeout(()=>{active--;res.end('data: '+JSON.stringify({choices:[],usage:{prompt_tokens:50,completion_tokens:8}})+'\n\ndata: [DONE]\n\n');},250);
   });
@@ -44,6 +45,9 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   assert.ok(peak>=2,'Both HTTP streams overlap');
   const historyA=await rpc('history',{chatId:chatA.id}),historyB=await rpc('history',{chatId:chatB.id});
   assert.equal(historyA.at(-1).content,'Reply: alpha');assert.equal(historyB.at(-1).content,'Reply: beta');
+  const exported=await rpc('chat.export',{chatId:chatA.id,providerId:provider.id});
+  assert.equal(exported.useClipboard,true);assert.ok(exported.fileName.endsWith('.md'));
+  assert.ok(exported.markdown.includes('Reply: alpha'));assert.ok(!exported.markdown.includes('Reply: beta'));
   const stopped=rpc('send',{chatId:chatA.id,providerId:provider.id,text:'cancel me'});stopped.catch(()=>{});
   while(!(await rpc('snapshot')).running.includes(chatA.id))await new Promise(r=>setTimeout(r,5));
   const other=rpc('send',{chatId:chatB.id,providerId:provider.id,text:'keep going'});
@@ -63,4 +67,8 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   await fs.writeFile(path.join(directory,'hello.swift'),'print("hello")');assert.equal(await rpc('files.read',{projectId:project.id,path:'hello.swift'}),'print("hello")');
   await fs.writeFile(path.join(directory,'.env'),'sensitive');await assert.rejects(rpc('files.read',{projectId:project.id,path:'.env'}));
   assert.ok(events.some(x=>x.event==='stream')&&events.some(x=>x.event==='done'));assert.ok(requests>=6);assert.equal((await rpc('snapshot')).running.length,0);
+  await rpc('browser.access',{enabled:true,dom:true});await rpc('state.save',{enabledSkills:'web'});
+  await rpc('provider.save',{...provider,model:'browser-model'});
+  await Promise.all([rpc('send',{chatId:chatA.id,providerId:provider.id,text:'browser A'}),rpc('send',{chatId:chatB.id,providerId:provider.id,text:'browser B'})]);
+  assert.deepEqual(browserCalls.map(x=>x.chatId).sort((a,b)=>a-b),[chatA.id,chatB.id].sort((a,b)=>a-b),'Host browser routing uses run identity, ignoring a forged chatId');
 });

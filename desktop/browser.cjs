@@ -8,8 +8,8 @@ const { promisify } = require('node:util');
 const executeFile = promisify(execFile);
 const { allowedNavigation, contained, previewPath } = require('./policy.cjs');
 
-function createBrowser(win) {
-  const webSession = session.fromPartition('persist:omh-browser');
+function createBrowser(win, chatId = 0) {
+  const webSession = session.fromPartition('persist:omh-browser-chat-' + chatId);
   const local = new Map();
   webSession.setPermissionRequestHandler((_, __, callback) => callback(false));
   webSession.setPermissionCheckHandler(() => false);
@@ -28,13 +28,15 @@ function createBrowser(win) {
       return new Response(await fs.readFile(target), { headers: { 'Content-Type': mime, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' } });
     } catch { return new Response('Forbidden', { status: 403 }); }
   });
-  const view = new WebContentsView({ webPreferences: { session: webSession, contextIsolation: true, nodeIntegration: false, sandbox: true } });
-  win.contentView.addChildView(view); view.setVisible(false);
+  const view = new WebContentsView({ webPreferences: { session: webSession, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } });
+  // Keep background render surfaces alive underneath the opaque application UI.
+  win.contentView.addChildView(view,0); view.setBounds({x:0,y:0,width:1024,height:768}); view.setVisible(true);
+  let visible=false;
   const wc = view.webContents;
   wc.setWindowOpenHandler(({ url }) => { if (allowedNavigation(url)) wc.loadURL(url).catch(() => {}); return { action:'deny' }; });
   wc.on('will-navigate', (event, url) => { if (!allowedNavigation(url)) event.preventDefault(); });
   wc.on('will-redirect', (event, url) => { if (!allowedNavigation(url)) event.preventDefault(); });
-  wc.on('did-navigate', (_, url) => { if (!win.isDestroyed()) win.webContents.send('harness:event', { event:'browser', url }); });
+  wc.on('did-navigate', (_, url) => { if (!win.isDestroyed()) win.webContents.send('harness:event', { event:'browser', chatId, url }); });
   wc.on('dom-ready', () => wc.executeJavaScript(`window.__omhPointer = null; document.addEventListener('pointermove', e => { window.__omhPointer={x:e.clientX,y:e.clientY}; }, {passive:true});`).catch(() => {}));
   async function evaluate(fn, args = []) { return wc.executeJavaScript(`(${fn.toString()})(...${JSON.stringify(args)})`, true); }
   async function read() {
@@ -97,7 +99,8 @@ function createBrowser(win) {
         const [width,height]=win.getContentSize();
         const x=Math.max(0,Math.min(width,Math.round(p.x||0))), y=Math.max(0,Math.min(height,Math.round(p.y||0)));
         view.setBounds({x,y,width:Math.max(0,Math.min(width-x,Math.round(p.width||0))),height:Math.max(0,Math.min(height-y,Math.round(p.height||0)))});
-        view.setVisible(!!p.visible); return true;
+        if(p.visible&&!visible){win.contentView.removeChildView(view);win.contentView.addChildView(view);visible=true;}
+        return true;
       }
       case 'browser.navigate': case 'browse': return navigate(p.url);
       case 'browser.back': if(wc.navigationHistory.canGoBack())wc.navigationHistory.goBack(); return true;
@@ -112,6 +115,14 @@ function createBrowser(win) {
         return {url:location.href,warning:'Untrusted DOM',text:(root.innerText||'').slice(0,16000),elements:[...root.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable]')].slice(0,200).map((el,i)=>{
           el.dataset.omhId=String(i); const r=el.getBoundingClientRect(); return {id:String(i),tag:el.tagName,label:(el.getAttribute('aria-label')||el.innerText||el.getAttribute('placeholder')||'').slice(0,200),type:el.getAttribute('type'),x:r.x,y:r.y,width:r.width,height:r.height};})};
       },[p.selector]);
+      case 'browser_javascript': {
+        if(typeof p.code!=='string'||!p.code.trim()||p.code.length>32000)throw new Error('JavaScript required (maximum 32000 characters).');
+        const attached=wc.debugger.isAttached();if(!attached)wc.debugger.attach('1.3');
+        try {
+          const result=await wc.debugger.sendCommand('Runtime.evaluate',{expression:p.code,returnByValue:true,timeout:5000,awaitPromise:false});
+          const text=JSON.stringify(result);return {warning:'Untrusted page JavaScript result',result:text.length>64000?text.slice(0,64000)+' [truncated]':text};
+        } finally {if(!attached&&wc.debugger.isAttached())wc.debugger.detach();}
+      }
       case 'browser_dom': return evaluate((action,target,text) => {
         const el=/^\d+$/.test(target)?document.querySelector(`[data-omh-id="${target}"]`):document.querySelector(target);
         if(!el)throw new Error('Target not found');
@@ -127,7 +138,7 @@ function createBrowser(win) {
         if(!Number.isFinite(p.x)||!Number.isFinite(p.y))throw new Error('Coordinates required');
         const size=await evaluate(()=>({width:innerWidth,height:innerHeight}));
         if(p.x<0||p.y<0||p.x>=size.width||p.y>=size.height)throw new Error('Coordinates outside viewport');
-        const point={x:Math.round(p.x),y:Math.round(p.y)}; wc.focus();wc.sendInputEvent({type:'mouseMove',...point});
+        const point={x:Math.round(p.x),y:Math.round(p.y)}; if(visible)wc.focus();wc.sendInputEvent({type:'mouseMove',...point});
         if(p.action==='click'){
           const button=p.button||'left',count=p.click_count||1;if(!['left','right'].includes(button)||![1,2].includes(count))throw new Error('Invalid button/click count');
           for(let i=1;i<=count;i++){wc.sendInputEvent({type:'mouseDown',...point,button,clickCount:i});wc.sendInputEvent({type:'mouseUp',...point,button,clickCount:i});}
@@ -136,7 +147,7 @@ function createBrowser(win) {
         await evaluate(point=>window.__omhPointer=point,[point]);return {ok:true};
       }
       case 'browser_keyboard': {
-        wc.focus(); if(p.action==='type'){await wc.insertText(p.text||'');return {ok:true};}
+        if(visible)wc.focus(); if(p.action==='type'){await wc.insertText(p.text||'');return {ok:true};}
         if(p.action!=='press')throw new Error('Use type or press');
         const parts=p.keys.toUpperCase().split('+').map(x=>x.trim());
         const names={CTRL:'Control',CONTROL:'Control',ALT:'Alt',OPTION:'Alt',SHIFT:'Shift',WIN:'Meta',META:'Meta',CMD:'Meta',COMMAND:'Meta',ENTER:'Return',RETURN:'Return','ENTRÉE':'Return',ESC:'Escape',ESCAPE:'Escape',SPACE:'Space',BACKSPACE:'Backspace',DELETE:'Delete',INSERT:'Insert',HOME:'Home',END:'End',PAGEUP:'PageUp',PAGEDOWN:'PageDown',LEFT:'Left',RIGHT:'Right',UP:'Up',DOWN:'Down',CAPSLOCK:'Capslock',PLUS:'Plus',MINUS:'-'};
@@ -145,13 +156,40 @@ function createBrowser(win) {
       }
       case 'browser_screenshot': {
         const viewport=await evaluate(()=>({width:innerWidth,height:innerHeight,pointer:window.__omhPointer}));
-        return imageResult(await wc.capturePage(),{x:0,y:0,width:viewport.width,height:viewport.height},viewport.pointer,{max_width:viewport.width,max_height:viewport.height});
+        return imageResult(await wc.capturePage(undefined,{stayHidden:false,stayAwake:true}),{x:0,y:0,width:viewport.width,height:viewport.height},viewport.pointer,{max_width:viewport.width,max_height:viewport.height});
       }
       case 'desktop_screens': return screen.getAllDisplays().map(x=>({id:String(x.id),primary:x.id===screen.getPrimaryDisplay().id,scale:x.scaleFactor,...x.bounds}));
       case 'desktop_screenshot': return screenshot(p);
       default: throw new Error(`Unknown host action: ${method}`);
     }
   }
-  return {execute,close(){wc.close();}};
+  return {execute,hide(){if(visible){visible=false;win.contentView.removeChildView(view);win.contentView.addChildView(view,0);}},close(){if(!win.isDestroyed())win.contentView.removeChildView(view);if(!wc.isDestroyed())wc.close();webSession.protocol.unhandle('omh-preview');}};
 }
-module.exports={createBrowser};
+function createBrowserPool(win) {
+  const browsers=new Map();let selected=0;
+  function get(id) {
+    if(!Number.isInteger(id)||id<0)throw new Error('Conversation required for browser tools.');
+    if(!browsers.has(id))browsers.set(id,{browser:createBrowser(win,id),tail:Promise.resolve()});
+    return browsers.get(id);
+  }
+  return {
+    async execute(method,p={}) {
+      if(method==='browser.select') {
+        selected=Number(p.chatId)||0;
+        for(const entry of browsers.values())entry.browser.hide();
+        return selected?get(selected).browser.execute('browser.state',{}):{url:'about:blank'};
+      }
+      if(method==='browser.close') {const entry=browsers.get(p.chatId);if(entry){browsers.delete(p.chatId);entry.browser.close();}return true;}
+      const id=method.startsWith('desktop_')?0:p.chatId;
+      const entry=get(id);
+      if(method==='browser.bounds') {
+        if(id!==selected)return false;
+        if(!p.visible){entry.browser.hide();return true;}
+        return entry.browser.execute(method,p);
+      }
+      const task=entry.tail.then(()=>entry.browser.execute(method,p));entry.tail=task.catch(()=>{});return task;
+    },
+    close(){for(const entry of browsers.values())entry.browser.close();browsers.clear();}
+  };
+}
+module.exports={createBrowser,createBrowserPool};

@@ -37,7 +37,7 @@ public sealed partial class HarnessService
         }
         finally { permissions.Release(); }
     }
-    async Task<string> Preview(Project project, string requested, CancellationToken ct)
+    async Task<string> Preview(Project project, string requested, CancellationToken ct, int chatId)
     {
         string candidate;
         try { candidate = new SourceAccess(project.GetSourceFolders()).Resolve(requested); }
@@ -47,7 +47,7 @@ public sealed partial class HarnessService
         var folder = Path.GetDirectoryName(path)!;
         LocalPreview.ResolveResource(folder, Uri.EscapeDataString(Path.GetFileName(path)));
         if (!await Approve("preview|" + folder, "Aperçu local / Local preview", path + "\n" + folder + "\nHTML/JavaScript and resources from this folder will be accessible to the page.", ct)) return "Access denied.";
-        return (await host("browser.local", Obj(new { path, folder }), ct))?.ToJsonString() ?? "";
+        return (await host("browser.local", Obj(new { path, folder, chatId }), ct))?.ToJsonString() ?? "";
     }
     JsonArray Definitions(ConversationSession run)
     {
@@ -61,12 +61,13 @@ public sealed partial class HarnessService
             definitions.Add(new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["description"] = description,
                 ["parameters"] = new JsonObject { ["type"] = "object", ["properties"] = props, ["additionalProperties"] = false } } });
         }
-        if (Skills.Enabled(skills, "terminal") && source) Add("run_terminal", $"Run a {PlatformSupport.ShellName} command in the project directory after approval. Fresh session, 60 second timeout.", ("command", "string"));
+        if (Skills.Enabled(skills, "terminal") && source) Add("run_terminal", $"Run a {PlatformSupport.ShellName} command in the project directory after approval. Fresh session, 30 second default timeout, configurable up to 600 seconds.", ("command", "string"));
         if (Skills.Enabled(skills, "sources") && (run.Chat.SandboxEnabled || run.Project.GetSourceFolders().Any(WorkspaceTools.HasGitRepository))) Add("git_changes", "List changed lines in .git repositories; read only.");
         if (Skills.Enabled(skills, "web")) Add("open_local_file", "Preview a local file after explicit approval, with resources scoped to its directory.", ("path", "string"));
         if (Skills.Enabled(skills, "web") && browserAccess && domAccess)
         {
             Add("inspect_dom", "Read sanitized DOM, element IDs, text and coordinates. Page content is untrusted.", ("selector", "string"));
+            Add("browser_javascript", "Read or modify page JavaScript after approval. Synchronous code; last expression returned. Use document.scripts to read inline scripts and external URLs; inspect globals or replace functions. Runtime changes only, lost on reload. No Node/filesystem access. Maximum 32000 characters, 5 second execution limit. Results are untrusted page data.", ("code", "string"));
             Add("browser_dom", "Interact after approval. action: click, focus, type, select, scroll_into_view. target: element ID or CSS selector.", ("action", "string"), ("target", "string"), ("text", "string"));
         }
         if (Skills.Enabled(skills, "keyboard_control"))
@@ -117,7 +118,7 @@ public sealed partial class HarnessService
         if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
         if (name == "keyboard_keys") return new(KeyboardInput.DescribeKeys());
         if (name == "git_changes") return new(run.Sandbox != null ? (await run.Sandbox.ReviewAsync(ct)).Diff : await Git(run.Project, ct));
-        if (name == "open_local_file") return new(await Preview(run.Project, S(p, "path"), ct));
+        if (name == "open_local_file") return new(await Preview(run.Project, S(p, "path"), ct, run.Chat.Id));
         if (name is "list_sources" or "read_source" or "write_source" or "edit_source")
         {
             var source = new SourceAccess(run.Project.GetSourceFolders()); var path = S(p, "path", ".");
@@ -137,11 +138,12 @@ public sealed partial class HarnessService
             });
         }
         bool desktop = name.StartsWith("desktop_", StringComparison.Ordinal);
+        p["chatId"] = run.Chat.Id; // Host routing comes from the run, never model-supplied arguments.
         if (!desktop && !browserAccess) throw new UnauthorizedAccessException("Browser access disabled.");
-        if (name is "inspect_dom" or "browser_dom" or "browser_mouse" or "browser_keyboard" && !domAccess) throw new UnauthorizedAccessException("Browser DOM interaction disabled.");
+        if (name is "inspect_dom" or "browser_dom" or "browser_javascript" or "browser_mouse" or "browser_keyboard" && !domAccess) throw new UnauthorizedAccessException("Browser DOM interaction disabled.");
         if (name is "browse" or "read_page" or "inspect_dom" or "desktop_screens")
             return new((await host(name, p, ct))?.ToJsonString() ?? "");
-        if (name is not ("desktop_keyboard" or "desktop_mouse" or "desktop_screenshot" or "browser_keyboard" or "browser_mouse" or "browser_screenshot" or "browser_dom")) throw new ArgumentException("Unknown tool.");
+        if (name is not ("desktop_keyboard" or "desktop_mouse" or "desktop_screenshot" or "browser_keyboard" or "browser_mouse" or "browser_screenshot" or "browser_dom" or "browser_javascript")) throw new ArgumentException("Unknown tool.");
         if (name.EndsWith("screenshot", StringComparison.Ordinal) && !run.Provider.SupportsImages) throw new InvalidOperationException("Model does not support images.");
         if (name.EndsWith("keyboard", StringComparison.Ordinal) && S(p, "action") == "press")
         {
@@ -149,7 +151,7 @@ public sealed partial class HarnessService
             p["keys"] = string.Join('+', chord.Modifiers.Append(chord.Key));
         }
         var target = desktop ? DesktopInput.Foreground() : 0;
-        var scope = desktop ? name : name + "|" + (await host("browser.state", [], ct))?["origin"]?.GetValue<string>();
+        var scope = desktop ? name : name + "|chat:" + run.Chat.Id + "|" + (await host("browser.state", Obj(new { chatId = run.Chat.Id }), ct))?["origin"]?.GetValue<string>();
         if (!await Approve(scope, run.Chat.Title + " · " + name, p.ToJsonString(), ct)) return new("Access denied.");
         ct.ThrowIfCancellationRequested();
         if (desktop) { DesktopInput.Restore(target); await Task.Delay(150, ct); }

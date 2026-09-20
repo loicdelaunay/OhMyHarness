@@ -6,6 +6,7 @@ namespace OhMyHarness.Core;
 /// <summary>A generation's captured inputs and private persistence context, independent of UI selection.</summary>
 public class ConversationSession : IDisposable
 {
+    public volatile ConversationExport.Progress? ExportProgress;
     public WorkflowTools? Workflow { get; set; }
     public ToolLoopGuard LoopGuard { get; } = new();
     public SandboxWorkspace? Sandbox { get; private set; }

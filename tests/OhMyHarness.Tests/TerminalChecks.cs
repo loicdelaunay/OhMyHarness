@@ -6,12 +6,20 @@ static class TerminalChecks
     {
         using var hub = new TerminalHub();
         var root = Path.GetTempPath();
+        check(TerminalHub.ValidateTimeout(600) == 600, "Terminal accepte dix minutes");
+        foreach (var invalid in new[] { 0, -1, 601 })
+        {
+            bool denied = false;
+            try { TerminalHub.ValidateTimeout(invalid); } catch (ArgumentOutOfRangeException) { denied = true; }
+            check(denied, "Terminal refuse délai hors limites : " + invalid);
+        }
         var a = hub.Create(1, false, "Build", root); var b = hub.Create(1, false, "Tests", root);
         var enteredA = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var enteredB = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var first = hub.Start(1, false, a.Id, "a", async (_, output, ct) => { output("A running"); enteredA.SetResult(); await release.Task.WaitAsync(ct); return "Exit code: 0\nA done"; }, default);
         var second = hub.Start(1, false, b.Id, "b", async (_, output, ct) => { output("B running"); enteredB.SetResult(); await release.Task.WaitAsync(ct); return "Exit code: 0\nB done"; }, default);
+        check(first.TimeoutSeconds == 30, "Terminal utilise trente secondes par défaut");
         await Task.WhenAll(enteredA.Task, enteredB.Task).WaitAsync(TimeSpan.FromSeconds(5));
         check(hub.List(1).Count(x => x.Status == "running") == 2, "Deux terminaux exécutent réellement en parallèle");
         check(hub.Read(1, false, a.Id).Output == "A running", "Sortie terminal disponible avant la fin");
@@ -42,5 +50,11 @@ static class TerminalChecks
         await hub.StopChatAsync(3);
         var stopped = hub.Read(3, false, actual.Id, started.JobId);
         check(stopped.Status == "cancelled" && !stopped.Output.Contains("should-not-finish"), "Annulation du processus shell sans attendre sa fin normale");
+        var timed = hub.Start(3, false, actual.Id, cmd, (command, output, ct) => WorkspaceTools.ShellAsync(command, root, ct, output, 1), default, 1);
+        var expired = await hub.WaitAsync(3, false, actual.Id, timed.JobId, 8000, default);
+        check(expired.Status == "timed_out" && !expired.Output.Contains("should-not-finish"), "Délai choisi arrête le vrai processus en arrière-plan sans annuler la conversation");
+        var longJob = hub.Start(3, false, actual.Id, "server", async (_, _, ct) => { await Task.Delay(Timeout.Infinite, ct); return ""; }, default, 600);
+        check(longJob.Status == "running" && longJob.TimeoutSeconds == 600, "Serveur dix minutes rend immédiatement la main");
+        await hub.StopChatAsync(3);
     }
 }

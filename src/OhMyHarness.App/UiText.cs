@@ -5,6 +5,10 @@ public static class UiText
     public static string Language { get; set; } = "fr";
     public static readonly Dictionary<string, string> English = new()
     {
+        ["Exporter"] = "Export",
+        ["Conversation copiée en Markdown."] = "Conversation copied as Markdown.",
+        ["Export annulé."] = "Export cancelled.",
+        ["Conversation enregistrée : "] = "Conversation saved: ",
         ["Touche invalide. Appelez keyboard_keys pour lister les touches et exemples acceptés."] = "Invalid key. Call keyboard_keys to list supported keys and examples.",
         ["Arrêtez les conversations en cours avant de supprimer leur projet."] = "Stop the running conversations before deleting their project.",
         ["Arrêtez cette conversation avant de la supprimer."] = "Stop this conversation before deleting it.",

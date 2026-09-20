@@ -35,6 +35,7 @@ Check(PermissionModes.AutomaticDecision("deny") == false && PermissionModes.Auto
 Check(PermissionModes.Normalize("inconnu") == PermissionModes.Ask, "Politique d’autorisation invalide ramenée au mode Demander");
 Check(HarnessDb.DatabasePath == Path.Combine(Path.GetDirectoryName(Environment.ProcessPath!)!, "database.sqlite"), "Base SQLite par défaut placée à côté du processus exécutable");
 PortableStorageChecks.Run(Check);
+ConversationExportChecks.Run(Check);
 var saveChord = KeyboardInput.ParseChord("ctrl+s");
 Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Raccourci clavier CTRL+S normalisé");
 var aliasChord = KeyboardInput.ParseChord("control+return");
@@ -504,6 +505,7 @@ try
     foreach (var blockedTool in new[] { "write_source", "edit_source", "patch_sources", "run_terminal", "browser_dom", "desktop_keyboard", "browse", "mcp_fake", "new_unknown_tool" })
         await Throws<UnauthorizedAccessException>(() => { AgentPolicy.Demand("plan", blockedTool); return Task.CompletedTask; }, "Plan interdit " + blockedTool);
     Check(AgentPolicy.Allowed("plan", "read_source") && AgentPolicy.Allowed("plan", "delegate_tasks") && AgentPolicy.Allowed("execute", "write_source"), "Plan autorise lecture et délégation contrôlée ; Exécution autorise édition");
+    Check(!AgentPolicy.Allowed("plan", "browser_javascript") && AgentPolicy.Allowed("execute", "browser_javascript"), "JavaScript arbitraire interdit en Plan");
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "AGENTS.md"), "ROOT-CONVENTION");
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "nested", "AGENTS.md"), "NESTED-CONVENTION");
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "node_modules", "AGENTS.md"), "IGNORED-CONVENTION");

@@ -44,7 +44,7 @@ public sealed partial class MainWindow
             {
                 var panel = new Grid { RowSpacing = 8, Padding = new Thickness(4) };
                 foreach (var height in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) panel.RowDefinitions.Add(new() { Height = height });
-                var info = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11 };
+                var info = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 11, Visibility = Visibility.Collapsed };
                 var output = OutputBox();
                 var command = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 60, MaxHeight = 140, PlaceholderText = row.Shell + "…" };
                 var start = new Button { Content = WorkflowText("Exécuter", "Run") };
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
             }
             if (!terminalTabs.TabItems.Contains(ui.Tab)) terminalTabs.TabItems.Add(ui.Tab);
             ui.Tab.Header = row.Name + (row.Status == "running" ? " ●" : "") + (row.Sandbox ? " · Sandbox" : "");
-            ui.Info.Text = row.Shell + " · " + row.Status + "\n" + row.Directory + "\n" + WorkflowText("Commande indépendante · 60 s max · utilisez + pour exécuter en parallèle.", "Independent command · 60s max · use + to run in parallel.");
+            ui.Info.Text = row.Shell + " · " + row.Status + "\n" + row.Directory;
             var text = (row.Command.Length == 0 ? "" : "> " + row.Command + "\n") + row.Output;
             if (ui.Output.Text != text) ui.Output.Text = text;
             ui.Run.IsEnabled = row.Status != "running" && !row.Sandbox;

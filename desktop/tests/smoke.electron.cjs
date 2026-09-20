@@ -1,5 +1,5 @@
 // Run only through the Electron executable; uses a disposable database and local fixture server.
-const {app,BrowserWindow,webContents}=require('electron');
+const {app,BrowserWindow,webContents,clipboard,dialog}=require('electron');
 const fs=require('node:fs/promises'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const directory=path.resolve(__dirname,'../.smoke');
 process.env.OHMYHARNESS_TEST_DATA=path.join(directory,'run-'+Date.now());
@@ -19,7 +19,7 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   const git=args=>execFileSync('git',args,{cwd:gitFixture,windowsHide:true});
   git(['init','--quiet']);await fs.writeFile(path.join(gitFixture,'sample.txt'),'before\n');git(['add','sample.txt']);git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Initial']);await fs.writeFile(path.join(gitFixture,'sample.txt'),'after\n');
   server=http.createServer(async(req,res)=>{
-    if(req.url==='/page'){res.setHeader('Content-Type','text/html');res.end('<!doctype html><h1>Browser fixture</h1><input id="name"><button id="click" onclick="this.textContent=\'Clicked\'">Click me</button>');return;}
+    if(req.url.startsWith('/page')){res.setHeader('Content-Type','text/html');res.end('<!doctype html><h1>Browser fixture</h1><input id="name"><button id="click" onclick="this.textContent=\'Clicked\'">Click me</button>');return;}
     const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks));
     if(body.messages[0].content.startsWith('Summarize this conversation segment')){
       res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'Résumé : rapport HTML demandé et validé.'}}]})+'\n\ndata: [DONE]\n\n');return;
@@ -61,6 +61,14 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await evaluate(`selectChat(${chat.id})`);
   assert.ok((await evaluate(`document.getElementById('messages').textContent`)).includes('streamed response'));
   assert.ok((await evaluate(`document.getElementById('messages').textContent`)).includes('Completed while settings are open'));
+  await evaluate(`window.savedHistory=histories.get(chatId);histories.set(chatId,Array.from({length:30},(_,i)=>({id:9000+i,role:'assistant',content:'History '+i+' long text '.repeat(100)})));renderMessages(true);`);
+  await evaluate(`$('messages').scrollTop=100`);
+  await waitFor(()=>evaluate('!followChatTail'));
+  assert.equal(await evaluate(`updateMessage(chatId,{id:9030,role:'tool',content:'Incoming tool'});renderMessages();Math.round($('messages').scrollTop)`),100);
+  await evaluate(`$('messages').scrollTop=$('messages').scrollHeight`);
+  await waitFor(()=>evaluate('followChatTail'));
+  assert.equal(await evaluate(`updateMessage(chatId,{id:9031,role:'assistant',content:'Streaming tail '.repeat(500)});$('messages').scrollHeight-$('messages').scrollTop-$('messages').clientHeight<=8`),true);
+  await evaluate('histories.set(chatId,window.savedHistory);renderMessages(true);delete window.savedHistory');
   await evaluate('showSettings()');
   assert.equal(await evaluate(`document.querySelector('[data-settings="skills"]').nextElementSibling.dataset.settings`),'mcp');
   await evaluate(`settingsTab='general';renderSettings();document.querySelectorAll('#settings-content input[type="checkbox"]')[1].checked=true;document.querySelectorAll('#settings-content input[type="checkbox"]')[0].checked=false;document.querySelector('#settings-content button').click()`);
@@ -96,7 +104,7 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   assert.equal(await localReport.executeJavaScript('typeof window.harness'),'undefined');
   await new Promise(r=>setTimeout(r,250));
   await fs.writeFile(path.join(directory,'desktop-chat.png'),(await win.webContents.capturePage()).toPNG());
-  await evaluate(`(async()=>{showTools(true);selectTab('web');await window.harness.host('browser.navigate',{url:${JSON.stringify(base+'/page')}})})()`);
+  await evaluate(`(async()=>{showTools(true);selectTab('web');await window.harness.host('browser.navigate',{chatId,url:${JSON.stringify(base+'/page')}})})()`);
   const remote=webContents.getAllWebContents().find(x=>x.getURL()===base+'/page');assert.ok(remote);
   assert.equal(await remote.executeJavaScript('typeof window.harness'), 'undefined');
   assert.equal(await remote.executeJavaScript('typeof require'), 'undefined');
@@ -152,7 +160,69 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   assert.ok(await evaluate(`document.getElementById('terminal-output').textContent.includes('second finished')`));
   await evaluate(`document.querySelector('#terminal-tabs .terminal-tab button:last-child').click()`);
   await waitFor(()=>evaluate(`terminalRows.length===1`));
-  console.log('SMOKE OK: background streaming, auto-continue settings, MCP creation/editing/quick toggle, isolated browser.');
+  assert.equal(await evaluate(`document.getElementById('export-chat').nextElementSibling.id`),'tools-toggle');
+  let copied='';const originalCopy=clipboard.writeText,originalSave=dialog.showSaveDialog;
+  try {
+    clipboard.writeText=text=>{copied=text;};
+    await evaluate(`document.getElementById('export-chat').click()`);
+    await waitFor(()=>copied.length>0);
+    assert.ok(copied.includes('workflow smoke') && copied.includes('Workflow finished'));
+    await waitFor(()=>evaluate(`!document.getElementById('export-chat').disabled`));
+    clipboard.writeText=()=>{throw new Error('Clipboard unavailable');};
+    const exportPath=path.join(process.env.OHMYHARNESS_TEST_DATA,'export.md');
+    dialog.showSaveDialog=async()=>({canceled:false,filePath:exportPath});
+    await evaluate(`document.getElementById('export-chat').click()`);
+    await waitFor(async()=>{try{return(await fs.readFile(exportPath,'utf8')).includes('Workflow finished');}catch{return false;}});
+    await waitFor(()=>evaluate(`!document.getElementById('export-chat').disabled`));
+    dialog.showSaveDialog=async()=>({canceled:true});
+    await evaluate(`document.getElementById('export-chat').click()`);
+    await waitFor(()=>evaluate(`/Export annulé|Export cancelled/.test(document.getElementById('status').textContent)`));
+  } finally {clipboard.writeText=originalCopy;dialog.showSaveDialog=originalSave;}
+  const isolatedWindow=new BrowserWindow({show:false,opacity:0,skipTaskbar:true,focusable:false,width:1024,height:768});
+  await isolatedWindow.loadURL('data:text/html,<html></html>');
+  isolatedWindow.showInactive();
+  const pool=require('../browser.cjs').createBrowserPool(isolatedWindow);
+  try {
+    await Promise.all([pool.execute('browse',{chatId:901,url:base+'/page?a'}),pool.execute('browse',{chatId:902,url:base+'/page?b'})]);
+    const a=webContents.getAllWebContents().find(w=>w.getURL()===base+'/page?a');
+    const b=webContents.getAllWebContents().find(w=>w.getURL()===base+'/page?b');
+    assert.ok(a&&b&&a.id!==b.id);
+    await pool.execute('browser_dom',{chatId:901,action:'type',target:'#name',text:'conversation A'});
+    assert.equal(await a.executeJavaScript('document.querySelector("#name").value'),'conversation A');
+    assert.equal(await b.executeJavaScript('document.querySelector("#name").value'),'');
+    await a.executeJavaScript('localStorage.setItem("isolation","A");document.cookie="isolation=A;path=/"');
+    assert.equal(await b.executeJavaScript('localStorage.getItem("isolation")'),null);
+    assert.ok(!(await b.executeJavaScript('document.cookie')).includes('isolation=A'));
+    const js=await pool.execute('browser_javascript',{chatId:901,code:'window.testValue=42; window.testValue'});
+    assert.equal(JSON.parse(js.result).result.value,42);
+    assert.equal(await b.executeJavaScript('typeof window.testValue'),'undefined');
+    const jsError=await pool.execute('browser_javascript',{chatId:901,code:'throw new Error("test error")'});
+    assert.ok(JSON.parse(jsError.result).exceptionDetails);
+    await assert.rejects(pool.execute('browser_javascript',{chatId:901,code:' '.repeat(32001)}));
+    await pool.execute('browser.select',{chatId:902});
+    assert.equal(await pool.execute('browser.bounds',{chatId:901,visible:true,width:500,height:500}),false);
+    await pool.execute('browser_dom',{chatId:901,action:'click',target:'#click'});
+    assert.ok((await pool.execute('read_page',{chatId:901})).text.includes('Clicked'));
+    assert.ok((await pool.execute('read_page',{chatId:902})).text.includes('Click me'));
+    await pool.execute('browser_dom',{chatId:901,action:'focus',target:'#name'});
+    await pool.execute('browser_keyboard',{chatId:901,action:'type',text:' keyboard'});
+    assert.ok((await a.executeJavaScript('document.querySelector("#name").value')).includes('keyboard'));
+    assert.equal(await b.executeJavaScript('document.querySelector("#name").value'),'');
+    await a.executeJavaScript('document.querySelector("#click").textContent="Click me"');
+    const dom=await pool.execute('inspect_dom',{chatId:901});const button=dom.elements.find(e=>e.tag==='BUTTON');
+    await pool.execute('browser_mouse',{chatId:901,action:'click',x:button.x+button.width/2,y:button.y+button.height/2});
+    await waitFor(async()=>(await pool.execute('read_page',{chatId:901})).text.includes('Clicked'));
+    assert.ok((await pool.execute('read_page',{chatId:902})).text.includes('Click me'));
+    const shot=await pool.execute('browser_screenshot',{chatId:901});assert.ok(shot.data.length>0);
+    const localPage=await pool.execute('browser.local',{chatId:901,path:path.join(directory,'report.html'),folder:directory});
+    assert.ok(localPage.text.includes('Local report opened from chat'));
+    try { await pool.execute('browse',{chatId:902,url:localPage.url}); } catch { }
+    assert.ok(!(await pool.execute('read_page',{chatId:902})).text.includes('Local report opened from chat'));
+    await assert.rejects(pool.execute('read_page',{}));
+    await pool.execute('browser.close',{chatId:901});
+    assert.ok(!b.isDestroyed());
+  } finally {pool.close();isolatedWindow.close();}
+  console.log('SMOKE OK: browser conversations isolate DOM, cookies, storage, previews and background screenshots; export and terminals pass.');
   server.closeAllConnections();server.close();win.close();
 })().catch(error=>{console.error(error);server?.closeAllConnections();server?.close();app.exit(1);});
 setTimeout(()=>{console.error('Smoke timeout');app.exit(1);},45000).unref();

@@ -57,6 +57,10 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                     questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }), browserAccess, domAccess, skillsDirectory = CustomSkills.DefaultRoot };
             case "history":
                 return (await db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == I(p, "chatId")).OrderBy(x => x.Id).ToListAsync(ct)).Select(MessageView);
+            case "chat.export":
+                runs.TryGetValue(I(p, "chatId"), out var exportingRun);
+                return await ConversationExport.CreateAsync(db, I(p, "chatId"), I(p, "providerId"), exportingRun != null,
+                    browserAccess, domAccess, exportingRun?.ExportProgress);
             case "project.save":
                 var project = I(p, "id") == 0 ? new Project() : await db.Projects.SingleAsync(x => x.Id == I(p, "id"), ct);
                 project.Name = S(p, "name", "Projet").Trim();
@@ -146,8 +150,9 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 }
                 return await WorkspaceTools.ShellAsync(S(p, "command"), Root(workspace), ct);
             case "preview":
-                var previewProject = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
-                return await Preview(previewProject, S(p, "path"), ct);
+                var previewChat = await db.Chats.SingleAsync(x => x.Id == I(p, "chatId"), ct);
+                var previewProject = await db.Projects.SingleAsync(x => x.Id == previewChat.ProjectId, ct);
+                return await Preview(previewProject, S(p, "path"), ct, previewChat.Id);
             case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
             case "send": return await Send(p, ct);
             case "stop": if (runs.TryGetValue(I(p, "chatId"), out var running)) running.Cancellation.Cancel(); await terminals.StopChatAsync(I(p, "chatId")); return true;

@@ -8,7 +8,7 @@
   <button id="new-chat" class="wide accent">＋ Nouvelle conversation</button><div id="chats"></div>
   <button id="settings-open" class="wide">⚙ Réglages</button>
 </aside>
-<main id="chat"><header class="chat-header"><h1 id="chat-title">OhMyHarness</h1><button id="rename-chat" title="Renommer">✎</button><button id="delete-chat" title="Supprimer">⌫</button><button id="tools-toggle">▤ Outils</button></header>
+<main id="chat"><header class="chat-header"><h1 id="chat-title">OhMyHarness</h1><button id="rename-chat" title="Renommer">✎</button><button id="delete-chat" title="Supprimer">⌫</button><button id="export-chat">Exporter</button><button id="tools-toggle">▤ Outils</button></header>
   <div id="messages" aria-live="polite"></div>
   <section id="questions" aria-live="polite" hidden></section>
   <div id="status" role="status"></div>
@@ -20,7 +20,7 @@
 <section id="tools" hidden><header><strong id="tools-title">Outils</strong><button id="tools-full" title="Agrandir">⛶</button><button id="tools-close" title="Fermer">×</button></header>
   <nav id="tool-tabs"><button data-tab="web" class="selected">Web</button><button data-tab="terminal">Terminal</button><button data-tab="git">Git</button><button data-tab="files">Fichiers</button></nav>
   <div id="web-tool" class="tool-content"><div class="browser-controls"><button id="web-back">←</button><input id="address" placeholder="https://…"><button id="web-go">↵</button><button id="web-file">📁</button></div><div id="browser-surface"></div></div>
-  <div id="terminal-tool" class="tool-content" hidden><div class="terminal-toolbar"><nav id="terminal-tabs" aria-label="Terminaux"></nav><button id="terminal-add" aria-label="Nouveau terminal">＋</button></div><p id="shell-info"></p><textarea id="command" rows="4" spellcheck="false"></textarea><button id="terminal-run">Exécuter</button><button id="terminal-stop">Arrêter</button><pre id="terminal-output"></pre></div>
+  <div id="terminal-tool" class="tool-content" hidden><div class="terminal-toolbar"><nav id="terminal-tabs" aria-label="Terminaux"></nav><button id="terminal-add" aria-label="Nouveau terminal">＋</button></div><p id="shell-info" hidden></p><textarea id="command" rows="4" spellcheck="false"></textarea><button id="terminal-run">Exécuter</button><button id="terminal-stop">Arrêter</button><pre id="terminal-output"></pre></div>
   <div id="git-tool" class="tool-content" hidden><button id="git-refresh">Actualiser</button><p id="git-summary"></p><div id="git-files"></div><pre id="git-diff"></pre></div>
   <div id="files-tool" class="tool-content" hidden><div class="browser-controls"><button id="files-root">⌂</button><input id="file-path" value="."><button id="files-go">↵</button></div><div id="file-list"></div><button id="file-preview" hidden>Ouvrir dans Web</button><pre id="file-content"></pre></div>
 </section>

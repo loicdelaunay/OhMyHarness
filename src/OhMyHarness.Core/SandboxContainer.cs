@@ -7,7 +7,7 @@ namespace OhMyHarness.Core;
 public static class SandboxContainer
 {
     public const string Image = "node:22-bookworm";
-    public static async Task<string> ExecuteIsolatedAsync(SandboxWorkspace shared, string executable, string command, CancellationToken ct)
+    public static async Task<string> ExecuteIsolatedAsync(SandboxWorkspace shared, string executable, string command, CancellationToken ct, int timeoutSeconds = 30)
     {
         // Each concurrent job starts from a separate copy. Merge only its changed files with preimage checks.
         var temporary = Path.Combine(PortableStorage.Temporary, "sandbox-terminal-" + Guid.NewGuid().ToString("N"));
@@ -15,7 +15,7 @@ public static class SandboxContainer
         try
         {
             using var isolated = await SandboxWorkspace.OpenAsync(Path.Combine(temporary, "scope.sqlite"), 1, shared.WorkRoots, ct);
-            var result = await ExecuteAsync(isolated, executable, command, ct);
+            var result = await ExecuteAsync(isolated, executable, command, ct, timeoutSeconds);
             var review = await isolated.ReviewAsync(ct);
             try { if (review.Count > 0) await isolated.ApplyAsync(review, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -48,28 +48,29 @@ public static class SandboxContainer
         }
         throw new InvalidOperationException("Sandbox indisponible. Installez/démarrez Docker Desktop ou Podman (conteneurs Linux), puis téléchargez l'image avec « docker pull " + Image + " » ou « podman pull " + Image + " ». Aucun outil local n'a été lancé.\n" + string.Join('\n', errors));
     }
-    public static IReadOnlyList<string> StartArguments(string name) =>
+    public static IReadOnlyList<string> StartArguments(string name, int timeoutSeconds = 30) =>
         ["run", "--detach", "--rm", "--name", name, "--pull=never", "--network=none", "--cap-drop=ALL", "--security-opt=no-new-privileges",
          "--cpus=1", "--memory=512m", "--memory-swap=512m", "--pids-limit=128", "--read-only", "--user=65534:65534",
          "--tmpfs", "/workspace:rw,nosuid,nodev,size=128m,uid=1000,gid=1000,mode=0700", "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700",
-         "--workdir=/", "--env=HOME=/tmp", "--log-driver=none", "--entrypoint=node", Image, "-e", "setTimeout(()=>process.exit(0),120000)"];
+         "--workdir=/", "--env=HOME=/tmp", "--log-driver=none", "--entrypoint=node", Image, "-e", $"setTimeout(()=>process.exit(0),{(TerminalHub.ValidateTimeout(timeoutSeconds) + 60) * 1000})"];
 
-    public static async Task<string> ExecuteAsync(SandboxWorkspace workspace, string executable, string command, CancellationToken ct)
+    public static async Task<string> ExecuteAsync(SandboxWorkspace workspace, string executable, string command, CancellationToken ct, int timeoutSeconds = 30)
     {
+        TerminalHub.ValidateTimeout(timeoutSeconds);
         if (command.Length > 100000) throw new ArgumentException("Command too long.");
         var name = "ohmyharness-" + Guid.NewGuid().ToString("N");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        deadline.CancelAfter(TimeSpan.FromSeconds(100));
+        deadline.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds + 40));
         var token = deadline.Token;
         try
         {
-            await RunAsync(executable, StartArguments(name), null, 10000, token);
+            await RunAsync(executable, StartArguments(name, timeoutSeconds), null, 10000, token);
             var archive = await workspace.ExportAsync(token);
             await RunAsync(executable, ["exec", "--user=1000:1000", "-i", name, "tar", "--no-same-owner", "--no-same-permissions", "-xf", "-", "-C", "/workspace"], archive, 10000, token);
             // argv carries untrusted command text only to sh INSIDE the container, never to a host shell.
-            const string supervisor = "const{spawn}=require('node:child_process');const fs=require('node:fs');const dir=process.argv[1];fs.mkdirSync(dir,{recursive:true});const p=spawn('/bin/sh',['-c',process.argv[2]],{cwd:dir,env:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',LANG:'C.UTF-8',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0'},detached:true,stdio:'inherit'});const t=setTimeout(()=>{try{process.kill(-p.pid,'SIGKILL')}catch{};process.exit(124)},60000);p.on('error',e=>{console.error(e.message);process.exit(127)});p.on('exit',c=>{clearTimeout(t);process.exit(c??1)});";
+            const string supervisor = "const{spawn}=require('node:child_process');const fs=require('node:fs');const dir=process.argv[1];fs.mkdirSync(dir,{recursive:true});const p=spawn('/bin/sh',['-c',process.argv[2]],{cwd:dir,env:{PATH:'/usr/local/bin:/usr/bin:/bin',HOME:'/tmp',LANG:'C.UTF-8',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_TERMINAL_PROMPT:'0'},detached:true,stdio:'inherit'});const t=setTimeout(()=>{try{process.kill(-p.pid,'SIGKILL')}catch{};process.exit(124)},Number(process.argv[3]));p.on('error',e=>{console.error(e.message);process.exit(127)});p.on('exit',c=>{clearTimeout(t);process.exit(c??1)});";
             var alias = Path.GetFileName(workspace.WorkRoots[0]);
-            var result = await RunAsync(executable, ["exec", "--user=1000:1000", name, "node", "-e", supervisor, "/workspace/" + alias, command], null, 100000, token, allowFailure: true);
+            var result = await RunAsync(executable, ["exec", "--user=1000:1000", name, "node", "-e", supervisor, "/workspace/" + alias, command, (timeoutSeconds * 1000).ToString(System.Globalization.CultureInfo.InvariantCulture)], null, 100000, token, allowFailure: true, timeoutSeconds: timeoutSeconds + 10);
             // Export only regular source files. Validate archive names/types/size before touching host files.
             // No .git or dependency tree is retained. Background processes are destroyed below.
             var output = await RunAsync(executable, ["exec", "--user=1000:1000", name, "tar", "--exclude=.git", "--exclude=node_modules", "--exclude=bin", "--exclude=obj", "--exclude=dist", "--exclude=build", "-cf", "-", "-C", "/workspace", "."], null, (int)SandboxWorkspace.MaxBytes + 16 * 1024 * 1024, token);
@@ -81,14 +82,14 @@ public static class SandboxContainer
         {
             // An independent bounded cleanup token still runs after cancellation or timeout.
             try { await RunAsync(executable, ["rm", "--force", name], null, 10000, CancellationToken.None); }
-            catch { /* PID 1's fixed 120s lifetime also destroys abandoned containers (--rm). */ }
+            catch { /* PID 1's bounded lifetime also destroys abandoned containers (--rm). */ }
         }
     }
     sealed record Result(int ExitCode, byte[] Bytes, string Error);
-    static async Task<Result> RunAsync(string executable, IReadOnlyList<string> arguments, byte[]? input, int maxOutput, CancellationToken ct, bool allowFailure = false)
+    static async Task<Result> RunAsync(string executable, IReadOnlyList<string> arguments, byte[]? input, int maxOutput, CancellationToken ct, bool allowFailure = false, int timeoutSeconds = 85)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(arguments.Contains("--force") ? 10 : 85));
+        timeout.CancelAfter(TimeSpan.FromSeconds(arguments.Contains("--force") ? 10 : timeoutSeconds));
         var token = timeout.Token;
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var arg in arguments) start.ArgumentList.Add(arg);

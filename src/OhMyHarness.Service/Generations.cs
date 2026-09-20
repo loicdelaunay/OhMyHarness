@@ -78,6 +78,7 @@ public sealed partial class HarnessService
                 var speedTracker = new GenerationSpeedTracker();
                 void Update(GenerationUpdate update)
                 {
+                    run.ExportProgress = new(active.Id, update);
                     speedTracker.AddSample(update.Seconds, update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning));
                     active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
                     if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 80) return;

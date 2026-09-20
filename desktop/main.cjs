@@ -1,10 +1,10 @@
-const { app, BrowserWindow, ipcMain, dialog, safeStorage, protocol, session, systemPreferences } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, clipboard, safeStorage, protocol, session, systemPreferences } = require('electron');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
-const { createBrowser } = require('./browser.cjs');
+const { createBrowserPool } = require('./browser.cjs');
 // Set Chromium paths before ready: never use the per-user AppData profile.
 const directory = app.isPackaged ? (process.platform === 'darwin' ? path.resolve(path.dirname(process.execPath), '../../..') : path.dirname(process.execPath)) : (process.env.OHMYHARNESS_TEST_DATA || path.join(__dirname, '.data'));
 let storageError;
@@ -21,9 +21,9 @@ let win, service, browser, readyResolve, readyReject, closing = false;
 const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
 const requests = new Map(); let sequence = 0, dialogs = Promise.resolve();
 const uiUrl = pathToFileURL(path.join(__dirname, 'ui/index.html')).href;
-const serviceMethods = new Set(['snapshot','history','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
+const serviceMethods = new Set(['snapshot','history','chat.export','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
   'sandbox.review','sandbox.apply','sandbox.close','terminals.list','terminals.create','terminals.delete','terminals.start','terminals.stop','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop']);
-const uiHostMethods = new Set(['pick.folders','pick.images','pick.file','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
+const uiHostMethods = new Set(['conversation.export','pick.folders','pick.images','pick.file','browser.select','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
 function trusted(event) {
   if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || event.senderFrame.url !== uiUrl) throw new Error('Untrusted IPC sender.');
 }
@@ -34,6 +34,16 @@ async function rpc(method, parameters) {
   return new Promise((resolve, reject) => { requests.set(id, { resolve, reject }); try { write({ id, method, parameters }); } catch (error) { requests.delete(id); reject(error); } });
 }
 async function host(method, p) {
+  if (method === 'conversation.export') {
+    const document = await rpc('chat.export', {chatId:p.chatId,providerId:p.providerId});
+    if (document.useClipboard) {
+      try { clipboard.writeText(document.markdown); return {action:'copied'}; } catch { /* Offer file export if clipboard is unavailable. */ }
+    }
+    const choice = await dialog.showSaveDialog(win, {defaultPath:path.join(directory,document.fileName),filters:[{name:'Markdown',extensions:['md']}]});
+    if (choice.canceled || !choice.filePath) return {action:'cancelled'};
+    await fs.writeFile(choice.filePath, document.markdown, 'utf8');
+    return {action:'saved',path:choice.filePath};
+  }
   if (method === 'permission') {
     const show = async () => {
       const answer = await dialog.showMessageBox(win, { type: 'question', title: 'OhMyHarness · Autorisation / Permission', message: p.title,
@@ -73,7 +83,7 @@ async function start() {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
-  browser = createBrowser(win);
+  browser = createBrowserPool(win);
   const executable = process.platform === 'win32' ? 'OhMyHarness.Service.exe' : 'OhMyHarness.Service';
   const serviceFile = app.isPackaged ? path.join(process.resourcesPath, 'service', executable)
     : path.join(__dirname, 'sidecar', `${process.platform === 'darwin' ? 'mac' : 'win'}-${process.arch}`, executable);
@@ -100,7 +110,13 @@ async function start() {
       const request = requests.get(item.id); requests.delete(item.id); item.error ? request.reject(new Error(item.error)) : request.resolve(item.result);
     }
   });
-  ipcMain.handle('harness:call', (event, method, parameters) => { trusted(event); if (!serviceMethods.has(method)) throw new Error('Method not exposed.'); return rpc(method, parameters); });
+  ipcMain.handle('harness:call', async (event, method, parameters) => {
+    trusted(event); if (!serviceMethods.has(method)) throw new Error('Method not exposed.');
+    const removed=method==='chat.delete'?[parameters.id]:method==='project.delete'?(await rpc('snapshot',{})).chats.filter(c=>c.projectId===parameters.id).map(c=>c.id):[];
+    const result=await rpc(method, parameters);
+    for(const chatId of removed)await browser.execute('browser.close',{chatId});
+    return result;
+  });
   ipcMain.handle('harness:host', (event, method, parameters) => { trusted(event); if (!uiHostMethods.has(method)) throw new Error('Host method not exposed.'); return host(method, parameters); });
   win.on('closed', () => { closing = true; browser.close(); service?.stdin.end(); setTimeout(() => service?.kill(), 5000).unref(); app.quit(); });
   await win.loadFile(path.join(__dirname, 'ui/index.html'));
