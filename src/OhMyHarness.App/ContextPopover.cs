@@ -17,9 +17,6 @@ public sealed partial class MainWindow
         var compact = new Button { Content = WorkflowText("Compacter maintenant", "Compact now"), HorizontalAlignment = HorizontalAlignment.Stretch };
         body.Children.Add(details); body.Children.Add(compact);
         var flyout = new Flyout { Content = body };
-        bool opened = false;
-        var dismiss = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
-        var refresh = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         void Update()
         {
             var limit = ActiveRun?.Provider.ContextLimit ?? provider?.ContextLimit ?? 128000;
@@ -43,15 +40,7 @@ public sealed partial class MainWindow
                 (ActiveRun == null ? "" : "\n\n" + WorkflowText("Compactage disponible après la réponse.", "Compaction available after the response."));
             compact.IsEnabled = chat != null && provider != null && ActiveRun == null && VisibleHistory().Any(x => x.State == "complete" && x.Role != "compaction");
         }
-        dismiss.Tick += (_, _) => { dismiss.Stop(); flyout.Hide(); };
-        refresh.Tick += (_, _) => Update();
-        anchor.PointerEntered += (_, _) => { dismiss.Stop(); if (!opened) { Update(); flyout.ShowAt(anchor); } };
-        anchor.Tapped += (_, _) => { if (!opened) { Update(); flyout.ShowAt(anchor); } };
-        anchor.PointerExited += (_, _) => dismiss.Start();
-        body.PointerEntered += (_, _) => dismiss.Stop();
-        body.PointerExited += (_, _) => dismiss.Start();
-        flyout.Opened += (_, _) => { opened = true; refresh.Start(); };
-        flyout.Closed += (_, _) => { opened = false; dismiss.Stop(); refresh.Stop(); };
+        AttachHoverPopover(anchor, body, flyout, Update);
         compact.Click += async (_, _) => { flyout.Hide(); await Guard(CompactCurrentChat); };
     }
 

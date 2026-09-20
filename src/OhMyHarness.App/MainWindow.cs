@@ -116,7 +116,7 @@ public sealed partial class MainWindow : Window
         BuildSidebar(); BuildWorkspace();
         root.Loaded += async (_, _) => await Guard(InitializeAsync);
         root.SizeChanged += (_, _) => ResizeLayout();
-        Closed += (_, _) => { settingsWindow?.Close(); foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); terminalRun?.Cancel(); StopOpenCodeProcesses(); http.Dispose(); };
+        Closed += (_, _) => { settingsWindow?.Close(); foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); terminals.Dispose(); StopOpenCodeProcesses(); http.Dispose(); };
     }
     void BuildSidebar()
     {
@@ -262,7 +262,7 @@ public sealed partial class MainWindow : Window
             }
             else if (send.IsEnabled) await Guard(SendAsync);
         };
-        stop.Click += (_, _) => generation?.Cancel();
+        stop.Click += async (_, _) => { generation?.Cancel(); if (chat != null) await terminals.StopChatAsync(chat.Id); };
         BuildToolsPane();
     }
     Border BuildFloatingInfoBar()
@@ -331,6 +331,7 @@ public sealed partial class MainWindow : Window
         speedStack.Children.Add(speedOutputText);
         Grid.SetColumn(speedStack, 2);
         grid.Children.Add(speedStack);
+        AttachSpeedPopover();
         RefreshSpeedTooltip();
 
         var sep2 = MakeSeparator();
@@ -644,6 +645,7 @@ public sealed partial class MainWindow : Window
     {
         SaveConversationDraft();
         chat = chats.SelectedItem as Chat; state.ChatId = chat?.Id;
+        RefreshTerminals();
         RestoreConversationDraft();
         title.Text = chat?.Title ?? T("Créez une conversation");
         ToolTipService.SetToolTip(title, title.Text);
@@ -1254,6 +1256,7 @@ public sealed partial class MainWindow : Window
         else if (result == ContentDialogResult.Secondary && await Confirm(T("Supprimer le projet et toutes ses conversations ? Les fichiers sources restent sur le disque.")))
         {
             if (conversationRuns.Values.Any(x => x.Project.Id == project.Id)) throw new InvalidOperationException(T("Arrêtez les conversations en cours avant de supprimer leur projet."));
+            foreach (var terminalChat in await db.Chats.Where(x => x.ProjectId == project.Id).Select(x => x.Id).ToListAsync()) await terminals.RemoveChatAsync(terminalChat);
             db.Projects.Remove(project);
         }
         else return;
@@ -1284,6 +1287,7 @@ public sealed partial class MainWindow : Window
     {
         if (!await Confirm(T("Supprimer cette conversation et ses images ?"))) return;
         if (conversationRuns.ContainsKey(target.Id)) throw new InvalidOperationException(T("Arrêtez cette conversation avant de la supprimer."));
+        await terminals.RemoveChatAsync(target.Id);
         db.Chats.Remove(target);
         if (state.ChatId == target.Id) state.ChatId = null;
         await db.SaveChangesAsync();
@@ -1605,6 +1609,8 @@ public sealed partial class MainWindow : Window
         AgentPolicy.Demand(run.Chat.ExecutionMode, name);
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         SetRunStatus(run, T("Outil : ") + name);
+        if (TerminalHub.Handles(name)) return await terminals.CallAsync(run, name, argsObj, () => state.EnabledSkills,
+            (scope, title, detail, token) => RequestAccessAsync(scope, title, detail, "Terminal", token), ct);
         if (SourceTools.Handles(name)) return await SourceTools.ExecuteAsync(source, name, argsObj, () => state.EnabledSkills,
             (scope, diff, token) => RequestAccessAsync(scope, "Patch multi-fichiers / Multi-file patch", diff, "Patch des sources / Source patch", token), ct);
         switch (name)
@@ -1612,15 +1618,6 @@ public sealed partial class MainWindow : Window
             case "open_local_file":
                 if (!Skills.Enabled(state.EnabledSkills, "web")) return T("Outil non autorisé.");
                 return await OpenLocalPreviewAsync(argsObj["path"]?.GetValue<string>() ?? "", ct, project);
-            case "run_terminal":
-                if (!Skills.Enabled(state.EnabledSkills, "terminal")) return T("Outil non autorisé.");
-                if (run.Sandbox != null)
-                {
-                    var command = argsObj["command"]?.GetValue<string>() ?? "";
-                    if (!await RequestAccessAsync("sandbox-terminal|" + run.Chat.Id, "Sandbox Linux", command, "Terminal sandbox", ct)) return T("Outil non autorisé.");
-                    return await SandboxContainer.ExecuteAsync(run.Sandbox, run.SandboxEngine!, command, ct);
-                }
-                return await RunTerminalAsync(argsObj["command"]?.GetValue<string>() ?? "", true, ct, project);
             case "git_changes":
                 if (!Skills.Enabled(state.EnabledSkills, "sources")) return T("Outil non autorisé.");
                 if (run.Sandbox != null) return (await run.Sandbox.ReviewAsync(ct)).Diff;
@@ -1639,8 +1636,8 @@ public sealed partial class MainWindow : Window
                 var readPath = argsObj["path"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(readPath))
                     return T("Erreur : le chemin relatif du fichier à lire est obligatoire.");
-                try { return await source.ReadAsync(readPath, ct); }
-                catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await ReadWithApprovalAsync(readPath, ct, project); }
+                try { return await source.ReadAsync(readPath, ct, argsObj["start_line"]?.GetValue<int>(), argsObj["end_line"]?.GetValue<int>()); }
+                catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await ReadWithApprovalAsync(readPath, ct, project, argsObj["start_line"]?.GetValue<int>(), argsObj["end_line"]?.GetValue<int>()); }
 
             case "write_source":
                 if (!Skills.Enabled(state.EnabledSkills, "write_sources") || project?.GetSourceFolders().Count is not > 0)
@@ -1855,15 +1852,15 @@ public sealed partial class MainWindow : Window
             var lastMsg = assistantMessages[^1];
             double lastAvg = lastMsg.OutputTokens!.Value / Math.Max(0.1, lastMsg.Seconds);
             messageTrackers.TryGetValue(lastMsg.Id, out var lastTracker);
-            double lastMin = lastTracker?.MinSpeed ?? lastAvg;
-            double lastMax = lastTracker?.MaxSpeed ?? lastAvg;
+            var lastMin = lastTracker?.MinSpeed?.ToString("F1") ?? "—";
+            var lastMax = lastTracker?.MaxSpeed?.ToString("F1") ?? "—";
 
             if (assistantMessages.Count > 1)
             {
                 var stats = SpeedStats.Compute(assistantMessages.Select(m => (m.OutputTokens!.Value, m.Seconds)));
                 sb.AppendLine(T("Dernière réponse (tok/s) :"));
-                sb.AppendLine($"• {T("Minimum")} : {lastMin:F1} {T("tok/s")}");
-                sb.AppendLine($"• {T("Maximum")} : {lastMax:F1} {T("tok/s")}");
+                sb.AppendLine($"• {T("Minimum")} : {lastMin} {T("tok/s")}");
+                sb.AppendLine($"• {T("Maximum")} : {lastMax} {T("tok/s")}");
                 sb.AppendLine($"• {T("Moyenne")} : {lastAvg:F1} {T("tok/s")}");
 
                 if (stats.HasValue)
@@ -1879,8 +1876,8 @@ public sealed partial class MainWindow : Window
             else
             {
                 sb.AppendLine(T("Débit (tok/s) :"));
-                sb.AppendLine($"• {T("Minimum")} : {lastMin:F1} {T("tok/s")}");
-                sb.AppendLine($"• {T("Maximum")} : {lastMax:F1} {T("tok/s")}");
+                sb.AppendLine($"• {T("Minimum")} : {lastMin} {T("tok/s")}");
+                sb.AppendLine($"• {T("Maximum")} : {lastMax} {T("tok/s")}");
                 sb.AppendLine($"• {T("Moyenne")} : {lastAvg:F1} {T("tok/s")}");
             }
         }
@@ -1892,11 +1889,10 @@ public sealed partial class MainWindow : Window
             sb.AppendLine($"• {T("Moyenne")} : —");
         }
 
+        sb.AppendLine();
+        sb.AppendLine(WorkflowText("Les mesures en cours peuvent être estimées. Les extrema de la dernière réponse ne sont pas conservés après redémarrage.", "Live measurements may be estimated. Last-response extrema are not retained after restart."));
         var tooltipText = sb.ToString().TrimEnd();
-        ToolTipService.SetToolTip(speedStack, tooltipText);
-        ToolTipService.SetToolTip(speedValueText, tooltipText);
-        ToolTipService.SetToolTip(speedHeaderLabel, tooltipText);
-        ToolTipService.SetToolTip(speedOutputText, tooltipText);
+        speedPopoverDetails.Text = tooltipText;
     }
     void RefreshContextInfo()
     {
@@ -2068,8 +2064,8 @@ public sealed partial class MainWindow : Window
                         string result;
                         var toolName = call!["function"]!["name"]!.GetValue<string>();
                         (byte[] Data, string Label, string Mime, int Width, int Height)? screenshot;
-                        await run.LoopGuard.CheckAsync(toolName, call["function"]?["arguments"]?.GetValue<string>() ?? "{}", run.Workflow, ct);
-                        var ownsToolQueue = !AgentRuntime.Handles(toolName);
+                        if (!TerminalHub.IsBoundedWait(toolName, call["function"]?["arguments"]?.GetValue<string>() ?? "{}")) await run.LoopGuard.CheckAsync(toolName, call["function"]?["arguments"]?.GetValue<string>() ?? "{}", run.Workflow, ct);
+                        var ownsToolQueue = !AgentRuntime.Handles(toolName) && !TerminalHub.Handles(toolName);
                         if (ownsToolQueue) await toolQueue.WaitAsync(ct);
                         try
                         {

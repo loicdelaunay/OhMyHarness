@@ -211,10 +211,29 @@ public sealed partial class SourceAccess
             }));
     }
 
-    public async Task<string> ReadAsync(string relative, CancellationToken ct)
+    public async Task<string> ReadAsync(string relative, CancellationToken ct, int? startLine = null, int? endLine = null)
     {
+        if (startLine.HasValue != endLine.HasValue || startLine is < 1 || endLine < startLine || (long?)endLine - startLine >= 2000)
+            throw new ArgumentException("Indiquez start_line et end_line ensemble : lignes à partir de 1, bornes incluses, 2 000 lignes maximum.");
         var full = Resolve(relative);
         if (!Extensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Format source non pris en charge.");
+        if (startLine.HasValue)
+        {
+            if (new FileInfo(full).Length > 16 * 1024 * 1024) throw new InvalidOperationException("Lecture partielle : fichier >16 Mio.");
+            using var reader = new StreamReader(full);
+            var result = new System.Text.StringBuilder();
+            int lineNumber = 0;
+            while (lineNumber < endLine && await reader.ReadLineAsync(ct) is { } line)
+            {
+                lineNumber++;
+                if (lineNumber < startLine) continue;
+                if ((long)result.Length + line.Length + 24 > 128000)
+                    throw new InvalidOperationException("Extrait trop volumineux (128 000 caractères maximum). Demandez une plage plus courte.");
+                result.Append(lineNumber).Append(": ").Append(line).Append('\n');
+            }
+            if (lineNumber < startLine) return $"Plage hors fichier : {lineNumber} ligne(s), début demandé : {startLine}.";
+            return $"{relative} — lignes {startLine} à {lineNumber} (incluses)\n" + result;
+        }
         if (new FileInfo(full).Length > 128_000) throw new InvalidOperationException("Fichier trop volumineux (128 Ko maximum).");
         return await File.ReadAllTextAsync(full, ct);
     }

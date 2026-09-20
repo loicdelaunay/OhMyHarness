@@ -75,20 +75,27 @@ public sealed partial class HarnessService
                 active = new Message { ChatId = chat.Id, Role = "assistant", State = "interrupted" };
                 run.Db.Messages.Add(active); await run.Db.SaveChangesAsync(ct);
                 var lastUpdate = DateTime.MinValue;
+                var speedTracker = new GenerationSpeedTracker();
                 void Update(GenerationUpdate update)
                 {
+                    speedTracker.AddSample(update.Seconds, update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning));
                     active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
                     if ((DateTime.UtcNow - lastUpdate).TotalMilliseconds < 80) return;
                     lastUpdate = DateTime.UtcNow;
                     // The stdout writer serializes events; blocking here preserves ordering without unobserved tasks.
                     emit(new { @event = "stream", chatId = chat.Id, messageId = active.Id, text = update.Text, reasoning = update.Reasoning,
-                        html = Html(update.Text), speed = update.TokensPerSecond, tokens = (update.InputTokens ?? input) + (update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning)),
+                        html = Html(update.Text), speed = update.TokensPerSecond,
+                        speedMin = speedTracker.MinSpeed, speedMax = speedTracker.MaxSpeed, speedAverage = speedTracker.AverageSpeed,
+                        speedEstimated = !update.OutputTokens.HasValue,
+                        tokens = (update.InputTokens ?? input) + (update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning)),
                         limit = provider.ContextLimit, estimated = !update.InputTokens.HasValue || !update.OutputTokens.HasValue }).GetAwaiter().GetResult();
                 }
                 var completion = provider.IsOpenCode
                     ? await OpenCode(run, secret, history, system, Update, ct)
                     : await engine.StreamAsync(provider, secret, wire, definitions, Update, ct, options.ThinkingLevel);
                 active.Content = completion.Message["content"]?.GetValue<string>() ?? "";
+                lastUpdate = DateTime.MinValue;
+                Update(new GenerationUpdate(active.Content, completion.Message["reasoning_content"]?.GetValue<string>() ?? "", completion.InputTokens, completion.OutputTokens, completion.Seconds));
                 active.WireJson = completion.Message.ToJsonString(); active.InputTokens = completion.InputTokens; active.OutputTokens = completion.OutputTokens; active.Seconds = completion.Seconds;
                 if (provider.IsOpenCode) active.State = "complete";
                 await emit(new { @event = "message", chatId = chat.Id, message = MessageView(active) });
@@ -99,8 +106,8 @@ public sealed partial class HarnessService
                         var name = call!["function"]!["name"]!.GetValue<string>();
                         var arguments = call["function"]?["arguments"]?.GetValue<string>() ?? "{}";
                         ToolResult result;
-                        await run.LoopGuard.CheckAsync(name, arguments, run.Workflow, ct);
-                        var ownsToolQueue = !AgentRuntime.Handles(name);
+                        if (!TerminalHub.IsBoundedWait(name, arguments)) await run.LoopGuard.CheckAsync(name, arguments, run.Workflow, ct);
+                        var ownsToolQueue = !AgentRuntime.Handles(name) && !TerminalHub.Handles(name);
                         if (ownsToolQueue) await tools.WaitAsync(ct);
                         try
                         {
@@ -153,7 +160,7 @@ public sealed partial class HarnessService
                 await run.Db.SaveChangesAsync();
                 if (active != null) await emit(new { @event = "message", chatId = chat.Id, message = MessageView(active) });
             }
-            finally { runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status = completionStatus }); }
+            finally { if (run.Sandbox != null) await terminals.StopChatAsync(chat.Id, true); runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status = completionStatus }); }
         }
         return true;
     }

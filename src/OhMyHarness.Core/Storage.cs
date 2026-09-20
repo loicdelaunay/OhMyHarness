@@ -134,9 +134,9 @@ public sealed class PermissionGrant
 }
 public sealed class HarnessDb : DbContext
 {
-    public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OhMyHarness");
-    public static string DatabasePath => Path.Combine(AppContext.BaseDirectory, "database.sqlite");
-    public static string LegacyDatabasePath => Path.Combine(DataDirectory, "harness.db");
+    public static string DataDirectory => PortableStorage.Root;
+    public static string DatabasePath => Path.Combine(DataDirectory, "database.sqlite");
+    public static string LegacyDatabasePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OhMyHarness", "harness.db");
     readonly string path;
     readonly bool usesDefaultPath;
     public HarnessDb(string? path = null)

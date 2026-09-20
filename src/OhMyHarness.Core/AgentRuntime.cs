@@ -124,7 +124,7 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
                         {
                             var path = args["path"]?.GetValue<string>() ?? ".";
                             result = tool switch {
-                                "list_sources" => source.List(path), "read_source" => await source.ReadAsync(path, ct),
+                                "list_sources" => source.List(path), "read_source" => await source.ReadAsync(path, ct, args["start_line"]?.GetValue<int>(), args["end_line"]?.GetValue<int>()),
                                 "write_source" => await source.WriteAsync(path, args["content"]!.GetValue<string>(), ct),
                                 "edit_source" => await source.ModifyAsync(path, args["old_text"]!.GetValue<string>(), args["new_text"]!.GetValue<string>(), ct),
                                 _ => throw new UnauthorizedAccessException("Outil non disponible.") };

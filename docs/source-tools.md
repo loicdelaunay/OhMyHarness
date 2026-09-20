@@ -13,3 +13,15 @@ Les chemins hors projet, secrets et liens symboliques sont exclus. Grep et patch
 Les chemins reconnus dans les réponses (par exemple `docs/rapport.html`), les chemins entre backticks et les liens Markdown deviennent cliquables, y compris dans l'historique. Pour les chemins contenant des espaces, utilisez `[Rapport](<docs/mon rapport.html>)`. Le clic ouvre l'aperçu local dans le navigateur intégré, avec les autorisations habituelles, dans le projet de la conversation. Les blocs de code et les liens web restent inchangés.
 
 Les outils `write_source` et `edit_source` existants sont conservés pour compatibilité. Le nouveau patch n'accepte pas une chaîne de diff en entrée : il produit le diff à partir des remplacements exacts validés.
+
+## Lecture partielle dans Exploration des sources
+
+`read_source` accepte deux paramètres optionnels entiers : `start_line` et `end_line`, à fournir ensemble. Les numéros commencent à 1 et les deux bornes sont incluses.
+
+```json
+{"path":"src/app.cs","start_line":40,"end_line":80}
+```
+
+Le résultat indique la plage réellement lue et numérote les lignes, y compris les lignes vides. Si la fin dépasse le fichier, la lecture s'arrête à la dernière ligne. Un début au-delà du fichier est signalé explicitement. Sans bornes, la lecture complète reste inchangée.
+
+Limites : 2 000 lignes et 128 000 caractères par extrait, fichier jusqu'à 16 Mio (contre 128 Ko pour une lecture complète). Les protections de chemins, les permissions et les restrictions sandbox restent applicables. Disponible sur Windows, macOS et pour les sous-agents utilisant les outils internes.

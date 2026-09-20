@@ -5,13 +5,24 @@ const fs = require('node:fs/promises');
 const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
 const { createBrowser } = require('./browser.cjs');
+// Set Chromium paths before ready: never use the per-user AppData profile.
+const directory = app.isPackaged ? (process.platform === 'darwin' ? path.resolve(path.dirname(process.execPath), '../../..') : path.dirname(process.execPath)) : (process.env.OHMYHARNESS_TEST_DATA || path.join(__dirname, '.data'));
+let storageError;
+try {
+  for (const [name, folder] of Object.entries({userData:'browser',sessionData:'browser',temp:'temp',crashDumps:'crashes'})) {
+    const target = path.join(directory, folder);
+    require('node:fs').mkdirSync(target, {recursive:true});
+    app.setPath(name, target);
+  }
+  app.setAppLogsPath(path.join(directory, 'logs'));
+} catch (error) { storageError = error; }
 protocol.registerSchemesAsPrivileged([{ scheme: 'omh-preview', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 let win, service, browser, readyResolve, readyReject, closing = false;
 const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
 const requests = new Map(); let sequence = 0, dialogs = Promise.resolve();
 const uiUrl = pathToFileURL(path.join(__dirname, 'ui/index.html')).href;
 const serviceMethods = new Set(['snapshot','history','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
-  'sandbox.review','sandbox.apply','sandbox.close','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop']);
+  'sandbox.review','sandbox.apply','sandbox.close','terminals.list','terminals.create','terminals.delete','terminals.start','terminals.stop','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop']);
 const uiHostMethods = new Set(['pick.folders','pick.images','pick.file','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
 function trusted(event) {
   if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || event.senderFrame.url !== uiUrl) throw new Error('Untrusted IPC sender.');
@@ -52,6 +63,7 @@ async function host(method, p) {
   return browser.execute(method, p);
 }
 async function start() {
+  if (storageError) throw storageError;
   if (!['darwin','win32'].includes(process.platform)) throw new Error('Windows and macOS are supported.');
   const profile = session.defaultSession;
   profile.setPermissionRequestHandler((_, __, callback) => callback(false));
@@ -65,12 +77,11 @@ async function start() {
   const executable = process.platform === 'win32' ? 'OhMyHarness.Service.exe' : 'OhMyHarness.Service';
   const serviceFile = app.isPackaged ? path.join(process.resourcesPath, 'service', executable)
     : path.join(__dirname, 'sidecar', `${process.platform === 'darwin' ? 'mac' : 'win'}-${process.arch}`, executable);
-  const directory = app.isPackaged ? (process.platform === 'darwin' ? path.resolve(path.dirname(process.execPath), '../../..') : path.dirname(process.execPath)) : (process.env.OHMYHARNESS_TEST_DATA || path.join(__dirname, '.data'));
   await fs.mkdir(directory, { recursive: true });
   const dbFile = path.join(directory, 'database.sqlite');
   await fs.access(directory, require('node:fs').constants.W_OK);
   service = spawn(serviceFile, ['--database', dbFile], { stdio: ['pipe','pipe','pipe'], windowsHide: true,
-    env: { ...process.env, OHMYHARNESS_SKILLS_DIR: path.join(directory,'skills'), PATH: process.platform === 'darwin' ? `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}` : process.env.PATH } });
+    env: { ...process.env, PATH: process.platform === 'darwin' ? `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}` : process.env.PATH } });
   service.on('error', error => readyReject(error));
   let startupError = '';
   service.stderr.on('data', chunk => { startupError = (startupError + chunk.toString()).slice(-4000); });

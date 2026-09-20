@@ -3,6 +3,7 @@ const {spawn}=require('node:child_process');
 test('structured tasks, interactive questions, concurrent chats and loop decisions',{timeout:60000},async t=>{
   const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'omh-workflow-')));
   await fs.writeFile(path.join(dir,'read.txt'),'test');
+  await fs.writeFile(path.join(dir,'range.txt'),'first\nsecond\nthird\nfourth');
   const process=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.Service/bin/Release/net10.0/OhMyHarness.Service.dll'),'--database',path.join(dir,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...global.process.env,OHMYHARNESS_SKILLS_DIR:path.join(dir,'skills')}});
   let seq=0,readyResolve,readyReject,stderr='',autoAnswer=false,decisions=0,emptySummary=false,holdSummary=false,summaryPending=false,releaseSummary;const pending=new Map(),events=[],payloads=[];
   const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
@@ -27,6 +28,20 @@ test('structured tasks, interactive questions, concurrent chats and loop decisio
     if(prompt==='questions'&&!previous.length)delta=tool('question',{questions});
     if(prompt==='tasks'&&previous.length<2)delta=tool('todowrite',{todos:[{content:'Inspecter',status:previous.length?'completed':'in_progress'},{content:'Valider',status:'pending'}]});
     if(prompt==='loop'&&previous.length<14)delta=tool('read_source',{path:'read.txt'});
+    if(prompt==='range'&&!previous.length)delta=tool('read_source',{path:'range.txt',start_line:2,end_line:3});
+    if(prompt==='terminals'){
+      const id=n=>JSON.parse(previous[n].content).id;
+      const command=global.process.platform==='win32'?"Write-Output 'started'; Start-Sleep -Seconds 5; Write-Output 'finished'":"printf 'started\\n'; sleep 5; printf 'finished\\n'";
+      switch(previous.length){
+        case 0:delta=tool('create_terminal',{name:'Parallel A'});break;
+        case 1:delta=tool('create_terminal',{name:'Parallel B'});break;
+        case 2:delta=tool('start_terminal',{terminal_id:id(0),command});break;
+        case 3:delta=tool('start_terminal',{terminal_id:id(1),command});break;
+        case 4:case 7:delta=tool('list_terminals',{});break;
+        case 5:delta=tool('wait_terminal',{terminal_id:id(0),timeout_ms:30000});break;
+        case 6:delta=tool('wait_terminal',{terminal_id:id(1),timeout_ms:30000});break;
+      }
+    }
     res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n');
   });
   await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{process.stdin.end();process.kill();server.close();});await ready;
@@ -36,6 +51,9 @@ test('structured tasks, interactive questions, concurrent chats and loop decisio
   const create=()=>rpc('chat.save',{projectId:project.id,title:'Test'}),send=(chat,text)=>rpc('send',{chatId:chat.id,providerId:provider.id,text});
   const waitFor=async fn=>{const until=Date.now()+10000;while(Date.now()<until){const result=fn();if(result)return result;await new Promise(r=>setTimeout(r,20));}throw new Error('Timed out');};
   const a=await create();await rpc('chat.modes',{id:a.id,executionMode:'plan',orchestrationMode:'disabled'});
+  const ranged=await create();await send(ranged,'range');
+  const excerpt=(await rpc('history',{chatId:ranged.id})).find(x=>x.role==='tool').content;
+  assert.ok(excerpt.includes('2: second\n3: third\n')&&!excerpt.includes('first')&&!excerpt.includes('fourth'));
   let finished=false;const work=send(a,'questions').then(()=>finished=true);
   const q=await waitFor(()=>events.find(x=>x.event==='question'&&x.chatId===a.id));
   await assert.rejects(rpc('context.compact',{chatId:a.id,providerId:provider.id}),/Wait/);
@@ -89,4 +107,14 @@ test('structured tasks, interactive questions, concurrent chats and loop decisio
   const openCode=await rpc('provider.save',{name:'Unisolated OpenCode',kind:'opencode',baseUrl:'http://127.0.0.1:9',model:'fixture'});
   await assert.rejects(rpc('send',{chatId:sandboxChat.id,providerId:openCode.id,text:'sandbox'}),/OpenCode.*not supported/);
   assert.equal((await rpc('history',{chatId:sandboxChat.id})).length,0,'unsupported provider fails before message/inference');
+  await rpc('state.save',{enabledSkills:'sources,terminal'});
+  const terminalChat=await create(),parallel=send(terminalChat,'terminals');
+  await waitFor(()=>events.find(x=>x.event==='status'&&x.chatId===terminalChat.id&&x.text.includes('wait_terminal')));
+  const tabs=await rpc('terminals.list',{chatId:terminalChat.id});assert.equal(tabs.length,2);assert.ok(tabs.every(t=>t.status==='running'));
+  const other=await create();await send(other,'unrelated conversation');
+  await assert.rejects(rpc('terminals.stop',{chatId:other.id,terminalId:tabs[0].id}));
+  await parallel;
+  const finishedTabs=await rpc('terminals.list',{chatId:terminalChat.id});assert.ok(finishedTabs.every(t=>t.status==='completed'&&t.output.includes('finished')));
+  const terminalHistory=await rpc('history',{chatId:terminalChat.id});assert.ok(terminalHistory.some(m=>m.role==='tool'&&m.content.startsWith('list_terminals')&&(m.content.match(/"status":"running"/g)||[]).length===2));
+  await rpc('terminals.delete',{chatId:terminalChat.id,terminalId:tabs[0].id});assert.equal((await rpc('terminals.list',{chatId:terminalChat.id})).length,1);
 });

@@ -8,6 +8,8 @@ Console.InputEncoding = Console.OutputEncoding = new UTF8Encoding(false);
 var pathIndex = Array.IndexOf(args, "--database");
 if (pathIndex < 0 || pathIndex + 1 >= args.Length) throw new ArgumentException("--database requires an absolute SQLite path.");
 var database = Path.GetFullPath(args[pathIndex + 1]);
+OhMyHarness.Core.PortableStorage.UseDatabase(database);
+OhMyHarness.Core.PortableStorage.EnsureWritable();
 var output = new SemaphoreSlim(1, 1);
 var responses = new ConcurrentDictionary<string, TaskCompletionSource<JsonNode?>>();
 var pending = new ConcurrentDictionary<string, Task>();

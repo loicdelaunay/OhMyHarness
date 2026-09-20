@@ -162,6 +162,7 @@ public sealed partial class MainWindow
             try { await run.Db.SaveChangesAsync(); }
             catch (Exception ex) { SetRunStatus(run, T("Erreur : ") + ex.Message); }
             if (run.Submitted) conversationHistory[run.Chat.Id] = run.Db.Messages.Local.ToList();
+            if (run.Sandbox != null) await terminals.StopChatAsync(run.Chat.Id, true);
             conversationRuns.Remove(run.Chat.Id);
             run.Dispose();
             RefreshGenerationControls();

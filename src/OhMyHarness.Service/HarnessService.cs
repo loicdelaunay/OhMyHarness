@@ -40,6 +40,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         await using var db = Db();
         switch (method)
         {
+            case "terminals.list": case "terminals.create": case "terminals.delete": case "terminals.stop": case "terminals.start":
+                return await DispatchTerminal(method, p, ct);
             case "context.details": return await ReadContext(I(p, "chatId"), I(p, "providerId"), ct);
             case "context.compact": return await CompactManually(p, ct);
             case "question.answer": return AnswerQuestion(p);
@@ -65,6 +67,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 await db.SaveChangesAsync(ct); return new { project.Id };
             case "project.delete":
                 if (runs.Values.Any(x => x.Project.Id == I(p, "id"))) throw new InvalidOperationException("Stop this project's conversations before deleting it.");
+                foreach (var terminalChat in await db.Chats.Where(x => x.ProjectId == I(p, "id")).Select(x => x.Id).ToListAsync(ct)) await terminals.RemoveChatAsync(terminalChat);
                 db.Projects.Remove(await db.Projects.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "chat.save":
                 var chat = I(p, "id") == 0 ? new Chat { ProjectId = I(p, "projectId") } : await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct);
@@ -73,6 +76,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 await db.SaveChangesAsync(ct); return new { chat.Id };
             case "chat.delete":
                 if (runs.ContainsKey(I(p, "id"))) throw new InvalidOperationException("Stop this conversation before deleting it.");
+                await terminals.RemoveChatAsync(I(p, "id"));
                 db.Chats.Remove(await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "sandbox.review": return await ReviewSandbox(p, ct);
             case "sandbox.apply": return await ApplySandbox(p, ct);
@@ -146,7 +150,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 return await Preview(previewProject, S(p, "path"), ct);
             case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
             case "send": return await Send(p, ct);
-            case "stop": if (runs.TryGetValue(I(p, "chatId"), out var running)) running.Cancellation.Cancel(); return true;
+            case "stop": if (runs.TryGetValue(I(p, "chatId"), out var running)) running.Cancellation.Cancel(); await terminals.StopChatAsync(I(p, "chatId")); return true;
             default: throw new ArgumentException("Unknown method: " + method);
         }
     }
@@ -172,7 +176,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     public void CancelAll() { foreach (var run in runs.Values) run.Cancellation.Cancel(); }
     public ValueTask DisposeAsync()
     {
-        CancelAll(); http.Dispose();
+        CancelAll(); terminals.Dispose(); http.Dispose();
         foreach (var process in servers) { try { if (!process.HasExited) process.Kill(true); } catch { } process.Dispose(); }
         return ValueTask.CompletedTask;
     }

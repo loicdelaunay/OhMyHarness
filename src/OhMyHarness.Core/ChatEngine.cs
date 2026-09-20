@@ -135,7 +135,10 @@ public sealed class ChatEngine(HttpClient http)
         if (sources)
         {
             Add("list_sources", "Liste les fichiers du dossier relatif au projet. Utiliser '.' pour la racine.", ("path", "Chemin relatif dans le projet, ex: '.' pour la racine.", true));
-            Add("read_source", "Lit un fichier texte du projet (maximum 128 Ko).", ("path", "Chemin relatif du fichier texte à lire.", true));
+            Add("read_source", "Lit un fichier texte complet (128 Ko max), ou une plage avec start_line ET end_line : numéros à partir de 1, bornes incluses. L'extrait renvoie les numéros de ligne. Maximum 2 000 lignes / 128 000 caractères par extrait ; fichiers jusqu'à 16 Mio. Une fin au-delà du fichier s'arrête à la dernière ligne.", ("path", "Chemin relatif du fichier texte à lire.", true));
+            var readProperties = result.Last()!["function"]!["parameters"]!["properties"]!.AsObject();
+            readProperties["start_line"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["description"] = "Première ligne incluse ; fournir aussi end_line." };
+            readProperties["end_line"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["description"] = "Dernière ligne incluse ; fournir aussi start_line." };
         }
         if (writeSources)
         {
@@ -237,4 +240,3 @@ public static class SpeedStats
         return (min, max, avg);
     }
 }
-

@@ -86,6 +86,7 @@ public sealed partial class HarnessService
             Add("desktop_screenshot", "Capture the desktop with cursor after approval. screen: primary or ID; optional x/y/width/height crop, max_width/max_height and quality 1..100. Read captured_region and image size before clicking; Retina scales differ.", ("screen", "string"), ("x", "integer"), ("y", "integer"), ("width", "integer"), ("height", "integer"), ("max_width", "integer"), ("max_height", "integer"), ("quality", "integer"));
             if (browserAccess) Add("browser_screenshot", "Capture the integrated browser with cursor, after approval.");
         }
+        if (Skills.Enabled(skills, "terminal") && source) TerminalHub.AddDefinitions(definitions);
         return definitions;
     }
     async Task<ToolResult> Tool(ConversationSession run, string name, JsonObject p, CancellationToken ct)
@@ -94,6 +95,11 @@ public sealed partial class HarnessService
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
+        if (TerminalHub.Handles(name)) return new(await terminals.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
+            var approved = await Approve(scope, title, detail, token);
+            skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(token);
+            return approved;
+        }, ct));
         if (SourceTools.Handles(name)) return new(await SourceTools.ExecuteAsync(new SourceAccess(run.Project.GetSourceFolders()), name, p, () => skills,
             async (scope, diff, token) => {
                 var allowed = await Approve(scope, run.Chat.Title + " · Patch multi-fichiers / Multi-file patch", diff, token);
@@ -111,17 +117,6 @@ public sealed partial class HarnessService
         if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
         if (name == "keyboard_keys") return new(KeyboardInput.DescribeKeys());
         if (name == "git_changes") return new(run.Sandbox != null ? (await run.Sandbox.ReviewAsync(ct)).Diff : await Git(run.Project, ct));
-        if (name == "run_terminal")
-        {
-            if (run.Sandbox != null)
-            {
-                if (!await Approve("sandbox-terminal|" + run.Chat.Id, run.Chat.Title + " · Sandbox Linux", S(p, "command"), ct)) return new("Access denied.");
-                return new(await SandboxContainer.ExecuteAsync(run.Sandbox, run.SandboxEngine!, S(p, "command"), ct));
-            }
-            var directory = Root(run.Project);
-            if (!await Approve("terminal|" + directory, run.Chat.Title + " · " + PlatformSupport.ShellName, directory + "\n\n" + S(p, "command"), ct)) return new("Access denied.");
-            return new(await WorkspaceTools.ShellAsync(S(p, "command"), directory, ct));
-        }
         if (name == "open_local_file") return new(await Preview(run.Project, S(p, "path"), ct));
         if (name is "list_sources" or "read_source" or "write_source" or "edit_source")
         {
@@ -137,7 +132,7 @@ public sealed partial class HarnessService
             }
             return new(name switch
             {
-                "read_source" => await source.ReadAsync(path, ct), "write_source" => await source.WriteAsync(path, S(p, "content"), ct),
+                "read_source" => await source.ReadAsync(path, ct, p["start_line"]?.GetValue<int>(), p["end_line"]?.GetValue<int>()), "write_source" => await source.WriteAsync(path, S(p, "content"), ct),
                 _ => await source.ModifyAsync(path, S(p, "old_text"), S(p, "new_text"), ct)
             });
         }

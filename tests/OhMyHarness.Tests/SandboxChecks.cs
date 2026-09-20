@@ -62,7 +62,19 @@ static class SandboxChecks
                 check(File.Exists(Path.Combine(work, "app.js")), "Annulation import conserve la copie");
             }
             using (var reopened = await SandboxWorkspace.OpenAsync(database, 42, [project], default))
+            {
                 check(await File.ReadAllTextAsync(Path.Combine(reopened.WorkRoots[0], "app.js")) == "after\n", "Copie sandbox conservée entre les tours");
+                using var forkA = await SandboxWorkspace.OpenAsync(Path.Combine(root, "fork-a", "db.sqlite"), 1, reopened.WorkRoots, default);
+                using var forkB = await SandboxWorkspace.OpenAsync(Path.Combine(root, "fork-b", "db.sqlite"), 1, reopened.WorkRoots, default);
+                await File.WriteAllTextAsync(Path.Combine(forkA.WorkRoots[0], "app.js"), "job A");
+                await File.WriteAllTextAsync(Path.Combine(forkB.WorkRoots[0], "created.md"), "job B");
+                await forkB.ApplyAsync(await forkB.ReviewAsync(default), default);
+                await forkA.ApplyAsync(await forkA.ReviewAsync(default), default);
+                check(await File.ReadAllTextAsync(Path.Combine(reopened.WorkRoots[0], "app.js")) == "job A" && await File.ReadAllTextAsync(Path.Combine(reopened.WorkRoots[0], "created.md")) == "job B", "Commandes sandbox indépendantes fusionnées sans perte des changements voisins");
+                await File.WriteAllTextAsync(Path.Combine(forkB.WorkRoots[0], "app.js"), "conflicting B");
+                await Reject(async () => await forkB.ApplyAsync(await forkB.ReviewAsync(default), default), "Conflit entre commandes sandbox refusé");
+                check(await File.ReadAllTextAsync(Path.Combine(project, "app.js")) == "after\n", "Fusion des terminaux sandbox ne touche jamais le projet réel");
+            }
             var nested = Path.Combine(project, "nested"); Directory.CreateDirectory(nested);
             await Reject(async () => { using var overlapping = await SandboxWorkspace.OpenAsync(database, 44, [project, nested], default); }, "Racines sources imbriquées refusées");
             foreach (var tool in new[] { "desktop_keyboard", "desktop_mouse", "browse", "open_local_file", "mcp_anything", "unknown" })

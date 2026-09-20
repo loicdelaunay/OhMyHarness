@@ -7,6 +7,26 @@ namespace OhMyHarness.Core;
 public static class SandboxContainer
 {
     public const string Image = "node:22-bookworm";
+    public static async Task<string> ExecuteIsolatedAsync(SandboxWorkspace shared, string executable, string command, CancellationToken ct)
+    {
+        // Each concurrent job starts from a separate copy. Merge only its changed files with preimage checks.
+        var temporary = Path.Combine(PortableStorage.Temporary, "sandbox-terminal-" + Guid.NewGuid().ToString("N"));
+        bool preserve = false;
+        try
+        {
+            using var isolated = await SandboxWorkspace.OpenAsync(Path.Combine(temporary, "scope.sqlite"), 1, shared.WorkRoots, ct);
+            var result = await ExecuteAsync(isolated, executable, command, ct);
+            var review = await isolated.ReviewAsync(ct);
+            try { if (review.Count > 0) await isolated.ApplyAsync(review, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            { preserve = true; throw new IOException("Conflit entre commandes sandbox. Aucune application au projet réel. Copie récupérable : " + isolated.WorkDirectory + "\n" + ex.Message); }
+            return result;
+        }
+        finally
+        {
+            if (!preserve && Directory.Exists(temporary)) { SandboxWorkspace.AssertNoLinks(temporary); Directory.Delete(temporary, true); }
+        }
+    }
     public static async Task<string> CheckAsync(CancellationToken ct)
     {
         var errors = new List<string>();

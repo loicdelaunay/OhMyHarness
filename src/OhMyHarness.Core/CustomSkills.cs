@@ -7,7 +7,7 @@ public sealed record CustomSkill(string Id, string Name, string Description, str
 public sealed class CustomSkills(string root)
 {
     public string Root { get; } = Path.GetFullPath(root);
-    public static string DefaultRoot => Environment.GetEnvironmentVariable("OHMYHARNESS_SKILLS_DIR") is { Length: > 0 } configured ? Path.GetFullPath(configured) : Path.Combine(AppContext.BaseDirectory, "skills");
+    public static string DefaultRoot => PortableStorage.Skills;
     public const string Template = """
         ---
         name: exemple-revue

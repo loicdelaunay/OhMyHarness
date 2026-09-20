@@ -38,7 +38,7 @@ public static class WorkspaceTools
         return "MODIFIED FILES\n" + status + "\nCHANGED LINES (UNSTAGED)\n" + unstaged + "\nCHANGED LINES (STAGED)\n" + staged;
     }
 
-    public static async Task<string> ExecuteAsync(string executable, IEnumerable<string> arguments, string directory, CancellationToken ct)
+    public static async Task<string> ExecuteAsync(string executable, IEnumerable<string> arguments, string directory, CancellationToken ct, Action<string>? output = null)
     {
         if (!Directory.Exists(directory)) throw new DirectoryNotFoundException(directory);
         var start = new ProcessStartInfo(executable) { WorkingDirectory = directory, UseShellExecute = false, CreateNoWindow = true,
@@ -56,7 +56,7 @@ public static class WorkspaceTools
         {
             var result = new StringBuilder(); var buffer = new char[4096]; int count;
             while ((count = await reader.ReadAsync(buffer, timeout.Token)) > 0)
-                if (result.Length < 100_000) result.Append(buffer, 0, Math.Min(count, 100_000 - result.Length));
+                { output?.Invoke(new string(buffer, 0, count)); if (result.Length < 100_000) result.Append(buffer, 0, Math.Min(count, 100_000 - result.Length)); }
             return result.ToString() + (result.Length == 100_000 ? "\n[output truncated]" : "");
         }
         var stdout = ReadBounded(process.StandardOutput); var stderr = ReadBounded(process.StandardError);
@@ -72,11 +72,11 @@ public static class WorkspaceTools
             try { await Task.WhenAll(stdout, stderr); } catch (OperationCanceledException) { }
         }
     }
-    public static Task<string> ShellAsync(string command, string directory, CancellationToken ct) => OperatingSystem.IsWindows()
-        ? PowerShellAsync(command, directory, ct)
-        : ExecuteAsync(OperatingSystem.IsMacOS() ? "/bin/zsh" : "/bin/sh", ["-c", command], directory, ct);
-    public static Task<string> PowerShellAsync(string command, string directory, CancellationToken ct) => ExecuteAsync("powershell.exe",
-        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); " + command], directory, ct);
+    public static Task<string> ShellAsync(string command, string directory, CancellationToken ct, Action<string>? output = null) => OperatingSystem.IsWindows()
+        ? PowerShellAsync(command, directory, ct, output)
+        : ExecuteAsync(OperatingSystem.IsMacOS() ? "/bin/zsh" : "/bin/sh", ["-c", command], directory, ct, output);
+    public static Task<string> PowerShellAsync(string command, string directory, CancellationToken ct, Action<string>? output = null) => ExecuteAsync("powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); " + command], directory, ct, output);
     public static Task<string> GitAsync(string directory, IEnumerable<string> args, CancellationToken ct) => ExecuteAsync("git", args, directory, ct);
 }
 

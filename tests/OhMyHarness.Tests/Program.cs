@@ -33,7 +33,8 @@ await Throws<ArgumentOutOfRangeException>(() => Task.FromResult(MouseInput.Norma
 Check(MouseInput.ToWindowsWheelDelta(240) == -240 && MouseInput.ToWindowsWheelDelta(-120) == 120, "Sens de défilement souris cohérent entre navigateur et Windows");
 Check(PermissionModes.AutomaticDecision("deny") == false && PermissionModes.AutomaticDecision("allow") == true && PermissionModes.AutomaticDecision("ask") == null, "Politique globale des autorisations appliquée avant les dialogues");
 Check(PermissionModes.Normalize("inconnu") == PermissionModes.Ask, "Politique d’autorisation invalide ramenée au mode Demander");
-Check(HarnessDb.DatabasePath == Path.Combine(AppContext.BaseDirectory, "database.sqlite"), "Base SQLite par défaut placée à côté de l’exécutable");
+Check(HarnessDb.DatabasePath == Path.Combine(Path.GetDirectoryName(Environment.ProcessPath!)!, "database.sqlite"), "Base SQLite par défaut placée à côté du processus exécutable");
+PortableStorageChecks.Run(Check);
 var saveChord = KeyboardInput.ParseChord("ctrl+s");
 Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Raccourci clavier CTRL+S normalisé");
 var aliasChord = KeyboardInput.ParseChord("control+return");
@@ -145,6 +146,20 @@ try
     await File.WriteAllTextAsync(Path.Combine(workspace, "outside.cs"), "outside");
     var access = new SourceAccess(sources);
     Check((await access.ReadAsync("a.cs", default)).Contains("Example"), "Lecture source autorisée");
+    await File.WriteAllTextAsync(Path.Combine(sources, "lines.txt"), "première\r\n\r\ntroisième\nquatrième");
+    Check(await access.ReadAsync("lines.txt", default, 2, 3) == "lines.txt — lignes 2 à 3 (incluses)\n2: \n3: troisième\n", "Lecture partielle inclusive, lignes vides et CRLF");
+    Check((await access.ReadAsync("lines.txt", default, 4, 8)).EndsWith("4: quatrième\n"), "Lecture partielle s'arrête en fin de fichier sans saut final");
+    Check((await access.ReadAsync("lines.txt", default, 9, 10)).Contains("hors fichier"), "Début hors fichier signalé");
+    await Throws<ArgumentException>(() => access.ReadAsync("lines.txt", default, 0, 2), "Numérotation commence à 1");
+    await Throws<ArgumentException>(() => access.ReadAsync("lines.txt", default, 3, 2), "Bornes inversées refusées");
+    await Throws<ArgumentException>(() => access.ReadAsync("lines.txt", default, 1), "Bornes partielles manquantes refusées");
+    await Throws<ArgumentException>(() => access.ReadAsync("lines.txt", default, 1, 2001), "Plage trop longue refusée");
+    await File.WriteAllTextAsync(Path.Combine(sources, "large.txt"), string.Concat(Enumerable.Repeat("Une ligne de texte\n", 10000)));
+    Check((await access.ReadAsync("large.txt", default, 9999, 10000)).Contains("10000: Une ligne de texte"), "Extrait possible dans un fichier supérieur à 128 Ko");
+    await Throws<InvalidOperationException>(() => access.ReadAsync("large.txt", default), "Limite de lecture complète conservée");
+    await Throws<UnauthorizedAccessException>(() => access.ReadAsync("../outside.cs", default, 1, 2), "Lecture partielle ne contourne pas le périmètre");
+    var readSchema = ChatEngine.ToolDefinitions(true, false).First(x => x?["function"]?["name"]?.GetValue<string>() == "read_source")!["function"]!["parameters"]!;
+    Check(readSchema["properties"]!["start_line"]!["type"]!.GetValue<string>() == "integer" && readSchema["required"]!.AsArray().Count == 1, "Schéma read_source : bornes entières optionnelles");
     Check(!access.List().Contains(".env"), "Secrets exclus de la liste");
     await access.WriteAsync("sub/b.cs", "class B {}", default);
     Check((await access.ReadAsync("sub/b.cs", default)) == "class B {}", "Écriture de fichier source autorisée");
@@ -538,6 +553,7 @@ finally
 }
 await WorkflowChecks.Run(Check);
 await SandboxChecks.Run(Check);
+await TerminalChecks.Run(Check);
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

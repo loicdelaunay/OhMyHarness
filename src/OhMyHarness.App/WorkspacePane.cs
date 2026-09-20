@@ -20,9 +20,6 @@ public sealed partial class MainWindow
 {
     Grid mainArea = null!;
     readonly Pivot toolTabs = new();
-    readonly TextBox terminalOutput = OutputBox();
-    readonly TextBox terminalCommand = new() { PlaceholderText = "PowerShell…", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 70, MaxHeight = 140 };
-    readonly TextBlock terminalDirectory = Label("", 12);
     readonly TextBlock gitSummary = new() { TextWrapping = TextWrapping.Wrap };
     readonly ListView gitFiles = new() { SelectionMode = ListViewSelectionMode.Single };
     readonly StackPanel gitDiff = new() { Spacing = 0 };
@@ -33,7 +30,6 @@ public sealed partial class MainWindow
     readonly Grid filePanel = new();
     readonly SemaphoreSlim approvalQueue = new(1, 1);
     readonly ToggleSwitch browserDomAccess = new() { Header = T("Accès DOM et interaction IA"), IsOn = false, OnContent = T("Autorisé"), OffContent = T("Désactivé") };
-    CancellationTokenSource? terminalRun;
     byte[]? pendingToolScreenshot;
     string pendingToolScreenshotLabel = "";
     string pendingToolScreenshotMime = "image/png";
@@ -187,14 +183,7 @@ public sealed partial class MainWindow
         idleOnly.Add(address); idleOnly.Add(go);
         toolTabs.Items.Add(new PivotItem { Header = "Web", Content = web });
 
-        var terminal = new Grid { RowSpacing = 8 };
-        foreach (var height in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto, GridLength.Auto }) terminal.RowDefinitions.Add(new() { Height = height });
-        terminal.Children.Add(terminalDirectory); Grid.SetRow(terminalOutput, 1); terminal.Children.Add(terminalOutput); Grid.SetRow(terminalCommand, 2); terminal.Children.Add(terminalCommand);
-        var run = Action("Exécuter", async () => { await RunTerminalAsync(terminalCommand.Text, false, CancellationToken.None); }, true);
-        var cancel = Action("Arrêter", () => { terminalRun?.Cancel(); return Task.CompletedTask; });
-        var terminalActions = Row(run, cancel); Grid.SetRow(terminalActions, 3); terminal.Children.Add(terminalActions);
-        idleOnly.Add(terminalCommand);
-        toolTabs.Items.Add(new PivotItem { Header = "Terminal", Content = terminal });
+        toolTabs.Items.Add(new PivotItem { Header = "Terminal", Content = BuildTerminals() });
 
         var git = new Grid { RowSpacing = 8 }; git.RowDefinitions.Add(new() { Height = GridLength.Auto }); git.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         git.Children.Add(Action("Actualiser les changements", async () => { await RefreshGitAsync(CancellationToken.None); }));
@@ -276,9 +265,7 @@ public sealed partial class MainWindow
             {
                 case 0: await EnsureBrowser(); break;
                 case 1:
-                    var dirs = project?.GetSourceFolders() ?? [];
-                    var termDir = fileDirectory ?? (dirs.Count > 0 ? dirs[0] : "");
-                    terminalDirectory.Text = T("Dossier : ") + termDir + "\n" + T("Chaque commande démarre une session PowerShell indépendante (60 s max).");
+                    RefreshTerminals();
                     break;
                 case 2: await RefreshGitAsync(CancellationToken.None); break;
                 case 3: await LoadFilesAsync(fileDirectory); break;
@@ -299,7 +286,7 @@ public sealed partial class MainWindow
         if (conversationRuns.Count == 0) { previewFolder = null; previewHost = null; }
         fileList.ItemsSource = null; fileContent.Text = ""; gitRevision++; gitDiffRevision++; gitFiles.ItemsSource = null; gitDiff.Children.Clear(); gitSummary.Text = "";
         var dirs = project?.GetSourceFolders() ?? [];
-        if (terminalRun == null) { terminalOutput.Text = ""; terminalDirectory.Text = dirs.Count > 0 ? dirs[0] : ""; }
+        RefreshTerminals();
         if (conversationRuns.Count == 0 && browserReady && browser.CoreWebView2.Source.Contains(".preview.invalid")) browser.CoreWebView2.Navigate("about:blank");
     }
     string RequireDirectory(Project? targetProject = null)
@@ -376,27 +363,6 @@ public sealed partial class MainWindow
         }
         return gitSummary.Text;
     }
-    async Task<string> RunTerminalAsync(string command, bool fromAi, CancellationToken ct, Project? targetProject = null)
-    {
-        if (string.IsNullOrWhiteSpace(command)) throw new ArgumentException(T("Commande requise."));
-        if (terminalRun != null) return T("Une commande est déjà en cours.");
-        var directory = targetProject != null ? RequireDirectory(targetProject) : fileDirectory != null && Directory.Exists(fileDirectory) ? fileDirectory : RequireDirectory();
-        if (fromAi && !await RequestAccessAsync(PermissionScope("terminal", directory), T("Exécuter une commande terminal"), directory + "\n\n" + command + "\n\n" + T("Cette commande peut modifier des fichiers et accéder au réseau avec les droits de votre compte Windows."), T("Commandes terminal dans : ") + directory, ct)) return T("Accès refusé par l’utilisateur.");
-        ct.ThrowIfCancellationRequested();
-        if (terminalRun != null) return T("Une commande est déjà en cours.");
-        using var running = CancellationTokenSource.CreateLinkedTokenSource(ct); terminalRun = running;
-        try
-        {
-            await ShowToolAsync(1);
-            terminalDirectory.Text = directory;
-            terminalOutput.Text = "> " + command + "\n" + T("Exécution en cours…");
-            var result = await WorkspaceTools.PowerShellAsync(command, directory, running.Token);
-            terminalOutput.Text = "> " + command + "\n" + result;
-            return result;
-        }
-        catch (OperationCanceledException) { terminalOutput.Text += "\n" + T("Commande arrêtée ou délai de 60 secondes atteint."); throw; }
-        finally { terminalRun = null; }
-    }
     static string PermissionScope(string kind, string target) => kind + "|" + target.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
     async Task<bool> RequestAccessAsync(string scope, string action, string details, string scopeDescription, CancellationToken ct)
     {
@@ -431,12 +397,12 @@ public sealed partial class MainWindow
         if (Uri.TryCreate(requested, UriKind.Absolute, out var uri) && uri.IsFile) requested = uri.LocalPath;
         return LocalPreview.ValidatePath(Path.IsPathFullyQualified(requested) ? requested : Path.Combine(RequireDirectory(targetProject), requested));
     }
-    async Task<string> ReadWithApprovalAsync(string requested, CancellationToken ct, Project? targetProject = null)
+    async Task<string> ReadWithApprovalAsync(string requested, CancellationToken ct, Project? targetProject = null, int? startLine = null, int? endLine = null)
     {
         var path = ResolveRequestedLocalPath(requested, targetProject);
         new SourceAccess(Path.GetDirectoryName(path)!).Resolve(Path.GetFileName(path));
         if (!await RequestAccessAsync(PermissionScope("read-local", path), T("Lire un fichier hors du périmètre du projet"), path + "\n\n" + T("Le contenu sera transmis au fournisseur IA pour cette demande."), T("Lecture et transmission de : ") + path, ct)) return T("Accès refusé par l’utilisateur.");
-        return await new SourceAccess(Path.GetDirectoryName(path)!).ReadAsync(Path.GetFileName(path), ct);
+        return await new SourceAccess(Path.GetDirectoryName(path)!).ReadAsync(Path.GetFileName(path), ct, startLine, endLine);
     }
     async Task<string> WriteWithApprovalAsync(string requested, string content, string? oldText, CancellationToken ct, Project? targetProject = null)
     {
@@ -1208,6 +1174,7 @@ public sealed partial class MainWindow
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute Windows path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
+        if (Skills.Enabled(state.EnabledSkills, "terminal")) TerminalHub.AddDefinitions(definitions);
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a PowerShell command in the attached project folder. Each invocation is a new session, 60 second timeout. The command runs with the user's Windows privileges.", new() { ["command"] = StringProperty() }, "command");
         if (Skills.Enabled(state.EnabledSkills, "sources") && (run.Chat.SandboxEnabled || (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false))) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
         if (Skills.Enabled(state.EnabledSkills, "web") && browserAccess.IsOn && browserDomAccess.IsOn)

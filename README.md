@@ -1,6 +1,7 @@
 # OhMyHarness
 
 Le mode **+ → Sandbox** et ses prérequis sont décrits dans [docs/sandbox.md](docs/sandbox.md).
+Le panneau de terminaux à onglets et les outils IA asynchrones sont décrits dans [docs/terminals.md](docs/terminals.md).
 
 Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1. La version Windows native reste en **WinUI 3 / .NET 10**. Une nouvelle interface **Electron + service .NET partagé** ajoute macOS Apple Silicon et Intel, et peut aussi être utilisée sous Windows.
 
@@ -8,7 +9,7 @@ Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible 
 
 ## Démarrer
 
-Lancer `artifacts\release\win-x64\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Cet écran gère de zéro à autant de connexions que nécessaire, y compris plusieurs instances OpenAI compatibles ou DeepSeek. Les boutons de création et de duplication sont indépendants du type : chaque instance conserve sa propre clé chiffrée, son nom, son URL, son modèle, sa capacité image et sa limite de contexte. Elles peuvent avoir le même nom ou le même endpoint et être modifiées ou supprimées séparément. Le fournisseur sélectionné dans Réglages devient actif et reste ensuite interchangeable depuis la barre supérieure. **Charger les modèles / tester la clé** interroge `/models` pour l’instance éditée ; certains serveurs compatibles peuvent ne pas exposer cette route, le modèle reste saisissable manuellement.
+Lancer `artifacts\official\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Cet écran gère de zéro à autant de connexions que nécessaire, y compris plusieurs instances OpenAI compatibles ou DeepSeek. Les boutons de création et de duplication sont indépendants du type : chaque instance conserve sa propre clé chiffrée, son nom, son URL, son modèle, sa capacité image et sa limite de contexte. Elles peuvent avoir le même nom ou le même endpoint et être modifiées ou supprimées séparément. Le fournisseur sélectionné dans Réglages devient actif et reste ensuite interchangeable depuis la barre supérieure. **Charger les modèles / tester la clé** interroge `/models` pour l’instance éditée ; certains serveurs compatibles peuvent ne pas exposer cette route, le modèle reste saisissable manuellement.
 
 **Réglages → Général** permet de choisir Français ou English. La langue est appliquée après Enregistrer et conservée entre les lancements ; les noms des projets et le contenu des conversations ne sont pas traduits. Dans le champ de message, **Entrée envoie**, **Ctrl+Entrée insère un saut de ligne** à la position du curseur (ou remplace la sélection).
 
@@ -56,6 +57,10 @@ Le bouton **+ OpenCode** crée une connexion dédiée au serveur local OpenCode.
 
 Le dossier contenant l’exécutable doit donc être accessible en écriture. Pour un usage portable, placer l’EXE dans un dossier utilisateur plutôt que dans `Program Files`.
 
+Les données gérées par OhMyHarness sont regroupées dans ce dossier : `database.sqlite` (et ses journaux SQLite), `skills/`, `WebView2/` pour le navigateur Windows natif, `browser/` pour Electron, `sandboxes/`, `temp/`, et les fichiers de travail `OpenCodeWorkspaces/`/`opencode-runner.mjs`. Electron y place également ses logs et rapports de crash. Aucun repli vers AppData n’est effectué si le dossier n’est pas accessible en écriture. Le service Electron utilise le dossier de la base fourni par le host, pas son dossier interne `Resources`. Sur Mac, les données sont à côté du bundle `.app`, pour préserver sa signature. Les anciens dossiers WinUI `WebView2` et `OpenCodeWorkspaces` d’AppData sont copiés au premier démarrage si leur destination portable n’existe pas, sans supprimer les originaux.
+
+Pour sauvegarder ou déplacer l’application, fermer toutes ses instances puis copier **le dossier complet**. Les dossiers sources associés restent des références à des projets externes. Les logiciels externes (serveur OpenCode, MCP, Docker/Podman et commandes exécutées) conservent leurs propres installations et stockages ; ce mode portable n’est pas une sandbox système. Le runtime .NET de l’EXE unique peut extraire ses composants dans le cache temporaire système. Les clés restent liées au compte système comme indiqué ci-dessous.
+
 Les clés API sont chiffrées avec **Windows DPAPI / CurrentUser**. Copier la base vers un autre compte Windows ne permet pas de récupérer les clés : il faut les ressaisir. Le reste de la base n’est pas chiffré. Les données effectivement utilisées (messages, images, fichiers lus et pages lues) sont transmises au fournisseur sélectionné lors de l’envoi.
 
 Le skill d’édition des sources permet de créer et modifier les fichiers du dossier associé ; sans ce skill, les outils sources restent en lecture seule. Les chemins hors du dossier nécessitent une autorisation ponctuelle. Les liens symboliques/jonctions, `.env*`, `secrets.json`, `.git`, `bin`, `obj`, `node_modules` et certains dossiers de build sont exclus des outils sources et de l’aperçu local. La lecture texte est limitée à 128 Ko, une ressource d’aperçu Web à 32 Mo. Ces restrictions ne constituent pas un sandbox pour les commandes terminal autorisées.
@@ -74,6 +79,8 @@ dotnet run --project tests/OhMyHarness.Tests -c Release
 ```
 
 `run.bat` et `publish.bat` offrent les mêmes actions par double-clic. La publication x64 contient **un seul EXE**, avec .NET et Windows App SDK embarqués. Les composants sont extraits automatiquement au premier lancement. Le navigateur exige le **runtime Microsoft Edge WebView2**, généralement déjà installé sous Windows 11 ; il n’est pas embarqué dans l’EXE. L’application reste utilisable pour le chat si le navigateur ne peut pas s’initialiser.
+
+La destination par défaut est `artifacts\official`. Utiliser `publish.ps1 -OutputDirectory <dossier>` pour la changer. Le stockage utilise le chemin réel du processus, car `IncludeAllContentForSelfExtract` redirige `AppContext.BaseDirectory` vers le cache d’extraction. Le test `tests/verify-portable.ps1` vérifie une vraie publication et le déplacement de son EXE.
 
 `publish.ps1 -Runtime win-arm64` permet de cibler ARM64 (non validé sur matériel ARM64). Ne pas supprimer `IncludeAllContentForSelfExtract` ni `EnableMsixTooling` du profil de publication.
 

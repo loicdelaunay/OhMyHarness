@@ -11,7 +11,7 @@ public static class AgentPolicy
     public static bool Allowed(string mode, string tool) => !ReadOnly(mode) || tool is
         "list_sources" or "read_source" or "glob_sources" or "grep_sources" or "git_changes" or
         "read_page" or "inspect_dom" or "keyboard_keys" or "desktop_screens" or "desktop_screenshot" or "browser_screenshot" or
-        "load_skill" or "read_skill_resource" or "delegate_tasks" or "todowrite" or "question";
+        "load_skill" or "read_skill_resource" or "delegate_tasks" or "todowrite" or "question" or "list_terminals" or "read_terminal" or "wait_terminal";
     public static void Demand(string mode, string tool)
     {
         if (!Allowed(mode, tool)) throw new UnauthorizedAccessException($"Mode Plan : outil '{tool}' interdit. Passez en Exécution au prochain envoi / Plan mode forbids this tool.");
