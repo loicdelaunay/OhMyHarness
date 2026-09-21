@@ -1,0 +1,78 @@
+/* Fluent-inspired surfaces shared by the Windows/macOS Electron host. */
+:root {
+  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #f3f3f3; background: #202020;
+  --line: #ffffff12; --muted: #b6b6b6; --accent: #60cdff;
+}
+button { background: #ffffff0f; border: 1px solid #ffffff12; border-bottom-color: #0005; border-radius: 4px; }
+button:hover { background: #ffffff16; }
+button:active { background: #ffffff09; }
+button.accent { color: #003449; font-weight: 600; }
+button.accent:hover { background: #78d5ff; }
+input, select, textarea { background: #ffffff09; border-color: #ffffff12; border-bottom-color: #ffffff70; border-radius: 4px; }
+input:focus, textarea:focus, select:focus { outline: none; border-bottom: 2px solid var(--accent); }
+button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+input[type=checkbox] { accent-color: var(--accent); }
+label { color: #f3f3f3; } small, .muted, .card p { color: var(--muted); }
+h2 { font-size: 24px; font-weight: 600; letter-spacing: -.3px; }
+#sidebar { background: transparent; border: 0; gap: 22px; padding: 24px 16px 16px; }
+#sidebar > header { font-size: 20px; font-weight: 600; min-height: 36px; }
+#new-chat { min-height: 40px; }
+.chat-row { border: 0; border-radius: 4px; min-height: 42px; padding-left: 14px; }
+.chat-row:hover { background: #ffffff09; }
+.chat-row.selected { background: #ffffff10; }
+.chat-row.selected::before { content: ""; position: absolute; left: 0; height: 18px; width: 3px; border-radius: 3px; background: var(--accent); }
+#settings-open { text-align: left; background: transparent; border-color: transparent; }
+#settings-open:hover { background: #ffffff0e; }
+#chat { background: #272727; border: 1px solid #ffffff0c; border-bottom: 0; border-right: 0; border-radius: 8px 0 0; margin-top: 8px; }
+.chat-header { border-bottom-color: var(--line); min-height: 60px; }
+.chat-header h1 { font-weight: 600; }
+.chat-header button { font-size: 12px; }
+#messages { padding: 24px 12px 24px 0; }
+.message { background: #ffffff05; border-color: var(--line); border-radius: 8px; padding: 20px; max-width: 1120px; margin: 0 auto 20px; }
+.message.user { background: #ffffff0e; margin-left: max(6%, calc((100% - 1000px) / 2)); }
+.message.tool { background: #202020; border-color: var(--line); }
+.message .role { font-size: 11px; letter-spacing: .04em; }
+.body { font-size: 15px; line-height: 1.65; }
+.body a, summary { color: #8cdaff; }
+pre { background: #1c1c1c; border: 1px solid var(--line); border-radius: 6px; }
+.reasoning { color: #c1c1c1; }
+footer { padding-top: 2px; }
+.metrics { background: #ffffff05; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.composer { background: #ffffff08; border: 1px solid #ffffff18; border-bottom-color: #ffffff70; border-radius: 8px; }
+.composer:focus-within { border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+.composer textarea { font-size: 15px; border: 0; min-height: 90px; padding: 16px; }
+.composer textarea:focus { border: 0; }
+.composer-actions { padding: 0 12px 12px; }
+#send, #plus, #stop { width: 36px; min-height: 36px; border-radius: 6px; }
+#status { background: #323232; border-color: var(--line); }
+#auto-scroll[aria-pressed=true] { background: #60cdff1a; border-color: #60cdff40; color: #8cdaff; }
+#tools { background: #202020; border-color: var(--line); }
+nav button.selected { background: #ffffff10; border-color: transparent; }
+.popover, #context-popover, #speed-popover { background: #2c2c2c; border-color: #ffffff20; border-radius: 8px; color: #f3f3f3; box-shadow: 0 8px 24px #0006; }
+dialog { background: #202020; border: 1px solid #ffffff25; border-radius: 8px; box-shadow: 0 24px 64px #0008; }
+dialog::backdrop { background: #0006; }
+#settings { padding: 0; width: min(1040px,96vw); }
+#settings > header { padding: 20px 24px 16px; }
+#settings > header h2 { margin: 0; font-size: 28px; }
+.settings-layout { grid-template-columns: 204px minmax(0,1fr); gap: 0; height: min(700px,70vh); }
+#setting-tabs { border: 0; padding: 8px 12px 20px; gap: 4px; }
+#setting-tabs button { border: 0; position: relative; min-height: 40px; padding: 10px 16px; }
+#setting-tabs button.selected::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--accent); }
+#settings-content { background: #272727; border: 1px solid var(--line); border-bottom: 0; border-right: 0; border-radius: 8px 0 0; padding: 20px 24px 24px; }
+#settings-content > h3 { margin: 0 0 20px; font-size: 22px; font-weight: 600; }
+.card, .skill-card { background: #ffffff06; border: 1px solid var(--line); padding: 16px; border-radius: 8px; margin: 8px 0; }
+.skill-card > label { display: flex; flex-direction: row; justify-content: space-between; align-items: center; gap: 24px; margin: 0; font-weight: 600; }
+.skill-card input[type=checkbox] { flex: none; appearance: none; width: 40px; height: 20px; padding: 0; border: 1px solid #b6b6b6; border-radius: 20px; background: #ffffff09; position: relative; cursor: pointer; }
+.skill-card input[type=checkbox]::before { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; top: 3px; left: 3px; background: #ccc; }
+.skill-card input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+.skill-card input[type=checkbox]:checked::before { left: 23px; background: #003449; }
+.skill-card input[type=checkbox]:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+.skill-card > p { margin: 6px 64px 0 0; line-height: 1.5; }
+.skill-card > .card { margin-top: 16px; background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 16px 0 0; }
+.card button { margin: 8px 6px 0 0; }
+.question-card { background: #303030; }
+@media(max-width:850px) { .chat-header { flex-wrap: wrap; gap: 6px; padding: 8px 0; } .chat-header h1 { flex-basis: 100%; margin: 0; } }
+@media(max-width:650px) { .settings-layout { grid-template-columns: 142px minmax(0,1fr); } #settings { padding: 0; } #settings-content { padding: 16px; } #setting-tabs { padding: 8px; } .skill-card > p { margin-right: 0; } }
+@media(prefers-reduced-motion:reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+@media(forced-colors:active) { .skill-card input[type=checkbox] { appearance: auto; } .skill-card input[type=checkbox]::before { display: none; } button:focus-visible { outline-color: Highlight; } }

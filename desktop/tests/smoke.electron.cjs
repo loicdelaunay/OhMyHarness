@@ -92,6 +92,16 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),true);
   await evaluate(`document.querySelector('[data-skill="rag"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),false);
+  if(process.env.OHMYHARNESS_DESIGN_QA){
+    const output=path.resolve(__dirname,'../../artifacts/design');await fs.mkdir(output,{recursive:true});
+    async function capture(name){await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await new Promise(r=>setTimeout(r,350));await fs.writeFile(path.join(output,name+'.png'),(await win.webContents.capturePage()).toPNG());}
+    await capture('electron-skills');
+    const normalSize=win.getSize();win.setSize(900,700);
+    await capture('electron-skills-compact');
+    assert.equal(await evaluate(`document.getElementById('settings-content').scrollWidth<=document.getElementById('settings-content').clientWidth+1`),true,'Settings remain inside their content viewport');
+    win.setSize(...normalSize);
+    await evaluate(`document.getElementById('settings').close()`);await capture('electron-chat');await evaluate('showSettings()');
+  }
   await evaluate(`settingsTab='providers';compositeForm({});document.querySelector('#settings-content form input').value='UI composite fixture';[...document.querySelectorAll('#settings-content button')].find(x=>x.textContent.includes('＋ Sous-agent')).click();var task=document.querySelector('#settings-content textarea');task.value='Review the source files';task.dispatchEvent(new Event('input'));document.querySelector('#settings-content form').requestSubmit()`);
   await waitFor(()=>evaluate(`snapshot.providers.some(x=>x.name==='UI composite fixture')`));
   assert.equal(await evaluate(`JSON.parse(snapshot.providers.find(x=>x.name==='UI composite fixture').compositeJson).Agents[0].Task`),'Review the source files');

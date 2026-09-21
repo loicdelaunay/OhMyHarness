@@ -20,10 +20,10 @@ public sealed partial class MainWindow : Window
 {
     readonly HarnessDb db = new();
     readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
-    readonly Grid root = new() { Background = Brush(17, 20, 28), RequestedTheme = ElementTheme.Dark };
-    readonly SplitView shell = new() { IsPaneOpen = true, OpenPaneLength = 380, DisplayMode = SplitViewDisplayMode.Inline };
+    readonly Grid root = new() { Background = new SolidColorBrush(Colors.Transparent), RequestedTheme = ElementTheme.Dark };
+    readonly SplitView shell = new() { IsPaneOpen = true, OpenPaneLength = 320, DisplayMode = SplitViewDisplayMode.Inline };
     readonly Grid workspace = new();
-    readonly Border browserPanel = new() { Visibility = Visibility.Collapsed, Background = Brush(24, 28, 39), CornerRadius = new(12), Margin = new(0, 12, 12, 12) };
+    readonly Border browserPanel = new() { Visibility = Visibility.Collapsed, Background = FluentDesign.Resource("LayerFillColorDefaultBrush"), CornerRadius = new(12), Margin = new(0, 12, 12, 12) };
     readonly TextBox address = new() { PlaceholderText = "https://…", HorizontalAlignment = HorizontalAlignment.Stretch };
     readonly ComboBox projects = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
     readonly ListView chats = new() { SelectionMode = ListViewSelectionMode.Single };
@@ -35,8 +35,8 @@ public sealed partial class MainWindow : Window
     readonly Border floatingInfoBar = new()
     {
         MinHeight = 50,
-        Background = Brush(25, 30, 42),
-        BorderBrush = Brush(48, 56, 76),
+        Background = FluentDesign.Card,
+        BorderBrush = FluentDesign.Stroke,
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(10),
         Padding = new Thickness(12, 4, 12, 4),
@@ -66,7 +66,7 @@ public sealed partial class MainWindow : Window
     StackPanel messages = CreateMessagePanel();
     readonly ScrollViewer scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     readonly TextBox composer = new() { PlaceholderText = T("Posez une question, explorez vos sources…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 85, MaxHeight = 190 };
-    readonly TextBlock attachmentLabel = new() { Visibility = Visibility.Collapsed, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = Brush(220, 225, 236) };
+    readonly TextBlock attachmentLabel = new() { Visibility = Visibility.Collapsed, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = FluentDesign.Primary };
     readonly ToggleSwitch browserAccess = new() { Header = T("Accès IA au navigateur"), IsOn = false, OnContent = T("Autorisé"), OffContent = T("Désactivé") };
     readonly Button send = new() { Content = T("Envoyer  ↑"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     readonly Button stop = new() { Content = T("Arrêter"), IsEnabled = false };
@@ -82,7 +82,7 @@ public sealed partial class MainWindow : Window
     bool loading = true, browserVisible;
 
     static SolidColorBrush Brush(byte r, byte g, byte b) => new(ColorHelper.FromArgb(255, r, g, b));
-    static TextBlock Label(string text, double size = 14) => new() { Text = T(text), Tag = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Foreground = Brush(220, 225, 236) };
+    static TextBlock Label(string text, double size = 14) => new() { Text = T(text), Tag = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Foreground = FluentDesign.Primary };
     static StackPanel Row(params UIElement[] elements)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -109,7 +109,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1440, 940));
         var iconFile = Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico");
         if (File.Exists(iconFile)) AppWindow.SetIcon(iconFile);
-        SystemBackdrop = new MicaBackdrop();
+        FluentDesign.WindowChrome(this);
         Content = root;
         root.Children.Add(backgroundBrowsers);
         root.Children.Add(shell);
@@ -120,7 +120,7 @@ public sealed partial class MainWindow : Window
     }
     void BuildSidebar()
     {
-        var panel = new Grid { Padding = new(18), Background = Brush(23, 27, 37), RowSpacing = 16 };
+        var panel = new Grid { Padding = new(16, 20, 16, 16), Background = new SolidColorBrush(Colors.Transparent), RowSpacing = 20 };
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             panel.RowDefinitions.Add(new RowDefinition { Height = height });
         var brand = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
@@ -140,7 +140,7 @@ public sealed partial class MainWindow : Window
         {
             brand.Children.Add(Label("◈", 22));
         }
-        brand.Children.Add(Label("OhMyHarness", 22));
+        brand.Children.Add(Label("OhMyHarness", 20));
         panel.Children.Add(brand);
         var projectBox = new StackPanel { Spacing = 10 };
         projectBox.Children.Add(Label(T("PROJETS"), 11));
@@ -159,6 +159,8 @@ public sealed partial class MainWindow : Window
         Grid.SetRow(projectBox, 1); panel.Children.Add(projectBox);
         var newChat = Action(T("+  Nouvelle conversation"), NewChat, true);
         newChat.HorizontalAlignment = HorizontalAlignment.Stretch;
+        newChat.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+        newChat.MinHeight = 40;
         Grid.SetRow(newChat, 2); panel.Children.Add(newChat);
         var chatLabel = Label(T("CONVERSATIONS"), 11); Grid.SetRow(chatLabel, 3); panel.Children.Add(chatLabel);
         Grid.SetRow(chats, 4); panel.Children.Add(chats);
@@ -178,7 +180,11 @@ public sealed partial class MainWindow : Window
             if (!e.InRecycleQueue) e.RegisterUpdateCallback((_, _) => RefreshConversationProgress());
         };
         var foot = new StackPanel { Spacing = 12 };
-        foot.Children.Add(Action(T("⚙  Réglages"), Settings, true));
+        var settingsButton = Action(T("Réglages"), Settings, true);
+        FluentDesign.IconButton(settingsButton, "\uE713", T("Réglages"));
+        settingsButton.HorizontalAlignment = HorizontalAlignment.Stretch;
+        settingsButton.HorizontalContentAlignment = HorizontalAlignment.Left;
+        foot.Children.Add(settingsButton);
         Grid.SetRow(foot, 5); panel.Children.Add(foot);
         shell.Pane = panel;
         idleOnly.AddRange([projects, chats, providers, modelSelector, refreshModelsBtn, thinkingSelector]);
@@ -220,7 +226,9 @@ public sealed partial class MainWindow : Window
         workspace.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         workspace.RowDefinitions.Add(new() { Height = new(0) });
         shell.Content = workspace;
-        var main = new Grid { Padding = new(24, 18, 24, 16), RowSpacing = 14 };
+        var main = new Grid { Padding = new(24, 16, 24, 20), RowSpacing = 16,
+            Background = FluentDesign.Resource("LayerFillColorDefaultBrush"), CornerRadius = new(8, 0, 0, 0),
+            BorderBrush = FluentDesign.Stroke, BorderThickness = new(1, 1, 0, 0) };
         mainArea = main;
         foreach (var height in new[] { GridLength.Auto, new GridLength(1, GridUnitType.Star), GridLength.Auto })
             main.RowDefinitions.Add(new() { Height = height });
@@ -229,6 +237,7 @@ public sealed partial class MainWindow : Window
         header.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         var menuBtn = Action("☰", () => { shell.IsPaneOpen = !shell.IsPaneOpen; return Task.CompletedTask; });
+        FluentDesign.IconButton(menuBtn, "\uE700", "Navigation", false);
         header.Children.Add(menuBtn);
         Grid.SetColumn(title, 1);
         header.Children.Add(title);
@@ -251,7 +260,7 @@ public sealed partial class MainWindow : Window
         var statusChip = new Border
         {
             Child = status, HorizontalAlignment = HorizontalAlignment.Center, MaxWidth = 760,
-            Background = Brush(25, 30, 42), BorderBrush = Brush(48, 56, 76), BorderThickness = new(1),
+            Background = FluentDesign.Card, BorderBrush = FluentDesign.Stroke, BorderThickness = new(1),
             CornerRadius = new(16), Padding = new(14, 6, 14, 6), Margin = new(12, 0, 12, 0),
             Visibility = string.IsNullOrWhiteSpace(status.Text) ? Visibility.Collapsed : Visibility.Visible
         };
@@ -285,19 +294,19 @@ public sealed partial class MainWindow : Window
     }
     Border BuildFloatingInfoBar()
     {
-        modelHeaderLabel.Foreground = Brush(145, 155, 175);
+        modelHeaderLabel.Foreground = FluentDesign.Secondary;
         modelHeaderLabel.Tag = "MODÈLE";
         modelProviderSubtitle.Foreground = Brush(130, 180, 255);
 
-        speedHeaderLabel.Foreground = Brush(145, 155, 175);
+        speedHeaderLabel.Foreground = FluentDesign.Secondary;
         speedHeaderLabel.Tag = "DÉBIT";
         speedValueText.Foreground = Brush(240, 245, 255);
-        speedOutputText.Foreground = Brush(145, 155, 175);
+        speedOutputText.Foreground = FluentDesign.Secondary;
 
-        contextHeaderLabel.Foreground = Brush(145, 155, 175);
+        contextHeaderLabel.Foreground = FluentDesign.Secondary;
         contextHeaderLabel.Tag = "CONTEXTE";
         contextPercentText.Foreground = Brush(130, 180, 255);
-        contextValueText.Foreground = Brush(145, 155, 175);
+        contextValueText.Foreground = FluentDesign.Secondary;
 
         ToolTipService.SetToolTip(refreshModelsBtn, T("Recharger les modèles de l’API"));
 
@@ -326,7 +335,7 @@ public sealed partial class MainWindow : Window
         modelStack.Children.Add(refreshModelsBtn);
 
         var thinkingTagStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
-        thinkingHeaderLabel.Foreground = Brush(145, 155, 175);
+        thinkingHeaderLabel.Foreground = FluentDesign.Secondary;
         thinkingHeaderLabel.Tag = "THINKING";
         thinkingTagStack.Children.Add(thinkingHeaderLabel);
 
@@ -369,6 +378,18 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(contextStack, 4);
         grid.Children.Add(contextStack);
         AttachContextPopover(contextStack);
+        grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        grid.SizeChanged += (_, e) =>
+        {
+            bool compact = e.NewSize.Width < 920;
+            grid.RowSpacing = compact ? 10 : 0;
+            Grid.SetColumnSpan(modelStack, compact ? 5 : 1);
+            Grid.SetRow(speedStack, compact ? 1 : 0); Grid.SetColumn(speedStack, compact ? 0 : 2);
+            Grid.SetRow(contextStack, compact ? 1 : 0); Grid.SetColumn(contextStack, compact ? 2 : 4);
+            Grid.SetColumnSpan(contextStack, compact ? 3 : 1);
+            sep1.Visibility = sep2.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        };
 
         assetsScroll.Content = assetsBar;
         var infoBarStack = new StackPanel { Spacing = 2 };
@@ -605,7 +626,8 @@ public sealed partial class MainWindow : Window
         composer.PlaceholderText = T("Posez une question, explorez vos sources…");
         ToolTipService.SetToolTip(composer, T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"));
         ToolTipService.SetToolTip(refreshModelsBtn, T("Recharger les modèles de l’API"));
-        send.Content = "↑"; stop.Content = "■";
+        FluentDesign.IconButton(send, "\uE724", T("Envoyer"), false);
+        FluentDesign.IconButton(stop, "\uE71A", T("Arrêter"), false);
         ToolTipService.SetToolTip(send, T("Envoyer  ↑")); ToolTipService.SetToolTip(stop, T("Arrêter"));
         RefreshToolLanguage();
         browserAccess.Header = T("Accès IA au navigateur");
@@ -855,8 +877,8 @@ public sealed partial class MainWindow : Window
         var thinkingCard = new Border
         {
             Visibility = string.IsNullOrEmpty(initialReasoning) ? Visibility.Collapsed : Visibility.Visible,
-            Background = Brush(20, 24, 34),
-            BorderBrush = Brush(48, 56, 76),
+            Background = FluentDesign.Card,
+            BorderBrush = FluentDesign.Stroke,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 8, 10, 8),
@@ -928,7 +950,7 @@ public sealed partial class MainWindow : Window
 
         var container = new Border
         {
-            Background = Brush(26, 31, 43),
+            Background = FluentDesign.Card,
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(18),
             Child = stack
@@ -1106,8 +1128,8 @@ public sealed partial class MainWindow : Window
         bool isError = result.StartsWith(T("Erreur")) || result.StartsWith("Error");
         var card = new Border
         {
-            Background = Brush(22, 26, 36),
-            BorderBrush = isError ? Brush(150, 50, 50) : Brush(48, 62, 82),
+            Background = FluentDesign.Card,
+            BorderBrush = isError ? Brush(150, 50, 50) : FluentDesign.Stroke,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(14, 10, 14, 10)
@@ -1272,7 +1294,7 @@ public sealed partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 10 };
         stack.Children.Add(Label(role switch { "user" => T("VOUS"), "tool" => T("OUTIL"), _ => T("ASSISTANT") }, 10));
         stack.Children.Add(bodyContainer);
-        (target ?? messages).Children.Add(new Border { Background = role == "user" ? Brush(36, 43, 64) : Brush(26, 31, 43), CornerRadius = new(12), Padding = new(18), Child = stack });
+        (target ?? messages).Children.Add(new Border { Background = role == "user" ? FluentDesign.Resource("ControlFillColorSecondaryBrush") : FluentDesign.Card, CornerRadius = new(12), Padding = new(18), Child = stack });
     }
     async Task<string?> AskName(string heading, string value)
     {
@@ -1391,18 +1413,24 @@ public sealed partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
         var general = new StackPanel { Spacing = 14 };
-        general.Children.Add(language);
+        language.Header = null;
+        general.Children.Add(FluentDesign.Setting(T("Langue de l’application"), "", language));
         var autoContinue = new ToggleSwitch { Header = T("Continuer automatiquement après 12 étapes"), IsOn = state.AutoContinue,
             OnContent = T("Activé"), OffContent = T("Désactivé") };
-        general.Children.Add(autoContinue);
+        autoContinue.Header = null;
+        general.Children.Add(FluentDesign.Setting(T("Continuer automatiquement après 12 étapes"),
+            T("Poursuit les appels d’outils jusqu’à la réponse finale ou Arrêter. Des tokens supplémentaires peuvent être consommés ; les autorisations restent applicables."), autoContinue));
         var showReasoning = new CheckBox { Content = T("Afficher les détails du raisonnement"), IsChecked = state.ShowReasoningDetails };
-        general.Children.Add(showReasoning);
-        general.Children.Add(Label(T("Poursuit les appels d’outils jusqu’à la réponse finale ou Arrêter. Des tokens supplémentaires peuvent être consommés ; les autorisations restent applicables."), 12));
+        showReasoning.Content = null;
+        general.Children.Add(FluentDesign.Setting(T("Afficher les détails du raisonnement"),
+            WorkflowText("Déplie le raisonnement pendant la génération.", "Expand reasoning during generation."), showReasoning));
         general.Children.Add(Label(T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"), 13));
 
-        var skillPanel = new StackPanel { Spacing = 16 };
+        var skillPanel = new StackPanel { Spacing = 8 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
-        skillPanel.Children.Add(Label(T("Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Modèle exemple-revue fourni.") + "\n" + CustomSkills.DefaultRoot, 12));
+        skillPanel.Children.Add(new Expander { Header = WorkflowText("Skills personnalisés", "Custom skills"),
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = Label(T("Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Modèle exemple-revue fourni.") + "\n" + CustomSkills.DefaultRoot, 12) });
         var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
         foreach (var skill in Skills.Available())
@@ -1415,13 +1443,15 @@ public sealed partial class MainWindow : Window
                 OffContent = T("Désactivé")
             };
             skillToggles.Add(skill.Id, toggle);
-            skillPanel.Children.Add(toggle);
-            skillPanel.Children.Add(Label(state.Language == "en" ? skill.EnglishDescription : skill.FrenchDescription, 12));
+            var skillTitle = toggle.Header.ToString()!;
+            toggle.Header = null;
+            skillPanel.Children.Add(FluentDesign.Setting(skillTitle,
+                state.Language == "en" ? skill.EnglishDescription : skill.FrenchDescription, toggle, skill.Id == "rag" ? features.Rag : null));
             if(skill.Id=="rag")
             {
                 features.Rag.Visibility=toggle.IsOn?Visibility.Visible:Visibility.Collapsed;
                 toggle.Toggled+=(_,_)=>features.Rag.Visibility=toggle.IsOn?Visibility.Visible:Visibility.Collapsed;
-                skillPanel.Children.Add(features.Rag);
+                features.Rag.Margin = new(0, 8, 0, 0);
             }
         }
 
@@ -1465,7 +1495,7 @@ public sealed partial class MainWindow : Window
         tabs.Add("MCP",mcpEditor.Panel);
         tabs.Add("Templates",templateEditor.Panel);
         tabs.Add(T("Autorisations"),permissionPanel);
-        tabs.Add("Navigateur / Browser",features.Browser);
+        tabs.Add(WorkflowText("Navigateur", "Browser"),features.Browser);
         if (!await ShowSettingsWindowAsync(tabs, () =>
         {
             var valid = true;
@@ -1555,9 +1585,10 @@ public sealed partial class MainWindow : Window
         };
         var language = new ComboBox { Header = T("Langue de l’application"), ItemsSource = new[] { "Français", "English" }, SelectedIndex = state.Language == "en" ? 1 : 0, HorizontalAlignment = HorizontalAlignment.Stretch };
         var general = new StackPanel { Spacing = 14 };
-        general.Children.Add(language);
+        language.Header = null;
+        general.Children.Add(FluentDesign.Setting(T("Langue de l’application"), "", language));
         general.Children.Add(Label(T("Entrée : envoyer · Ctrl+Entrée : nouvelle ligne"), 13));
-        var skillPanel = new StackPanel { Spacing = 16 };
+        var skillPanel = new StackPanel { Spacing = 8 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
         var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
@@ -1565,8 +1596,10 @@ public sealed partial class MainWindow : Window
         {
             var toggle = new ToggleSwitch { Header = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsOn = Skills.Enabled(state.EnabledSkills, skill.Id), OnContent = T("Activé"), OffContent = T("Désactivé") };
             skillToggles.Add(skill.Id, toggle);
-            skillPanel.Children.Add(toggle);
-            skillPanel.Children.Add(Label(state.Language == "en" ? skill.EnglishDescription : skill.FrenchDescription, 12));
+            var skillTitle = toggle.Header.ToString()!;
+            toggle.Header = null;
+            skillPanel.Children.Add(FluentDesign.Setting(skillTitle,
+                state.Language == "en" ? skill.EnglishDescription : skill.FrenchDescription, toggle));
         }
         var panel = new StackPanel { Spacing = 14 };
         panel.Children.Add(Label(T("Fournisseur : ") + target.Name));

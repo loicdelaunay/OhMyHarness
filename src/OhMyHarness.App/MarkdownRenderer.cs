@@ -43,7 +43,7 @@ public sealed class MarkdownRenderer
             {
                 IsTextSelectionEnabled = true,
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = Brush(228, 233, 242),
+                Foreground = FluentDesign.Primary,
                 FontSize = 14.5
             };
             var p = new Paragraph();
@@ -120,7 +120,7 @@ public sealed class MarkdownRenderer
         {
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brush(240, 245, 255),
+            Foreground = FluentDesign.Primary,
             FontSize = fontSize,
             FontWeight = weight,
             Margin = margin
@@ -141,7 +141,7 @@ public sealed class MarkdownRenderer
         {
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brush(224, 230, 240),
+            Foreground = FluentDesign.Primary,
             FontSize = 14.5,
             LineHeight = 22,
             Margin = new Thickness(0, 2, 0, 4)
@@ -178,8 +178,8 @@ public sealed class MarkdownRenderer
     {
         var container = new Border
         {
-            Background = Brush(16, 20, 28),
-            BorderBrush = Brush(45, 54, 72),
+            Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush"),
+            BorderBrush = FluentDesign.Stroke,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8),
             Margin = new Thickness(0, 6, 0, 8)
@@ -190,7 +190,7 @@ public sealed class MarkdownRenderer
         // Header bar with language and copy button
         var header = new Grid
         {
-            Background = Brush(23, 28, 40),
+            Background = FluentDesign.Card,
             Padding = new Thickness(12, 5, 8, 5)
         };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -272,7 +272,7 @@ public sealed class MarkdownRenderer
         {
             BorderThickness = new Thickness(3, 0, 0, 0),
             BorderBrush = Brush(90, 140, 230),
-            Background = Brush(21, 25, 36),
+            Background = FluentDesign.Card,
             CornerRadius = new CornerRadius(0, 6, 6, 0),
             Padding = new Thickness(12, 6, 12, 6),
             Margin = new Thickness(0, 4, 0, 6)

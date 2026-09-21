@@ -30,7 +30,7 @@ public sealed partial class MainWindow
     readonly Dictionary<int, List<Message>> conversationHistory = [];
     readonly SemaphoreSlim toolQueue = new(1, 1);
     ConversationRun? ActiveRun => chat != null ? conversationRuns.GetValueOrDefault(chat.Id) : null;
-    static StackPanel CreateMessagePanel() => new() { Spacing = 14, Padding = new(4, 20, 12, 20) };
+    static StackPanel CreateMessagePanel() => new() { Spacing = 16, Padding = new(4, 20, 12, 20), MaxWidth = 1120, HorizontalAlignment = HorizontalAlignment.Stretch };
     bool IsVisible(ConversationRun run) => selectedSubagent == null && chat?.Id == run.Chat.Id;
     IEnumerable<Message> VisibleHistory() => ActiveRun is { } active ? active.Db.Messages.Local :
         chat != null ? conversationHistory.GetValueOrDefault(chat.Id) ?? [] : [];

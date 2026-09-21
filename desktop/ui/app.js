@@ -261,6 +261,7 @@ function addBrowserSkillControls(area,immediate){
   const browser=field(area,L('Accès IA au navigateur','AI browser access'),'checkbox',snapshot.browserAccess);
   const dom=field(area,L('Accès DOM et interaction IA','AI DOM access and interaction'),'checkbox',snapshot.domAccess);
   browser.dataset.browserSkill='access';dom.dataset.browserSkill='dom';
+  if(!immediate)for(const input of [browser,dom]){const label=input.parentElement,card=el('section',null,'skill-card');label.before(card);card.append(label);}
   if(immediate)for(const input of [browser,dom])input.onchange=()=>guard(async()=>{await call('browser.access',{enabled:browser.checked,dom:dom.checked});await refresh();});
   return {browser,dom};
 }
@@ -268,6 +269,9 @@ async function showSettings(){await refresh();renderSettings();showDialog('setti
 $('settings-open').onclick=()=>guard(showSettings);document.querySelectorAll('[data-settings]').forEach(b=>b.onclick=()=>{settingsTab=b.dataset.settings;renderSettings();});
 function renderSettings(){
   document.querySelectorAll('[data-settings]').forEach(b=>b.classList.toggle('selected',b.dataset.settings===settingsTab));const area=$('settings-content');area.replaceChildren();
+  const selectedTab=document.querySelector('[data-settings="'+settingsTab+'"]');
+  area.append(el('h3',selectedTab?.textContent||''));
+  $('settings').querySelector('h2').textContent=L('Réglages','Settings');
   if(settingsTab==='browser'){renderFeatureSettings(area);
   }else if(settingsTab==='general'){
     const language=field(area,L('Langue','Language'),'select');language.append(option('fr','Français'),option('en','English'));language.value=snapshot.state.language;
@@ -279,7 +283,7 @@ function renderSettings(){
   }else if(settingsTab==='skills'){
     area.append(el('p',L('Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Le modèle exemple-revue est fourni.','Custom skills: copy a folder containing SKILL.md here, then reopen settings. The exemple-revue template is included.')+' '+snapshot.skillsDirectory,'muted'));
     const browserSkills=addBrowserSkillControls(area,false);
-    let ragSave=()=>snapshot.state.featuresJson;for(const skill of snapshot.skills){const label=field(area,L(skill.frenchName,skill.englishName),'checkbox',snapshot.state.enabledSkills.split(',').includes(skill.id));label.dataset.skill=skill.id;area.append(el('p',L(skill.frenchDescription,skill.englishDescription),'muted'));if(skill.id==='rag'){const settings=el('div',null,'card');settings.dataset.ragSettings='';area.append(settings);ragSave=renderFeatureSettings(settings,true);settings.hidden=!label.checked;label.onchange=()=>settings.hidden=!label.checked;}}
+    let ragSave=()=>snapshot.state.featuresJson;for(const skill of snapshot.skills){const card=el('section',null,'skill-card');area.append(card);const label=field(card,L(skill.frenchName,skill.englishName),'checkbox',snapshot.state.enabledSkills.split(',').includes(skill.id));label.dataset.skill=skill.id;card.append(el('p',L(skill.frenchDescription,skill.englishDescription),'muted'));if(skill.id==='rag'){const settings=el('div',null,'card');settings.dataset.ragSettings='';card.append(settings);ragSave=renderFeatureSettings(settings,true);settings.hidden=!label.checked;label.onchange=()=>settings.hidden=!label.checked;}}
     button(area,L('Enregistrer','Save'),async()=>{await call('browser.access',{enabled:browserSkills.browser.checked,dom:browserSkills.dom.checked});await call('state.save',{featuresJson:ragSave(),enabledSkills:[...area.querySelectorAll('[data-skill]:checked')].map(x=>x.dataset.skill).join(',')});await refresh();status(L('Skills enregistrés','Skills saved'));});
   }else if(settingsTab==='mcp'){
     area.append(el('p',L('Outils MCP pour les API compatibles OpenAI/DeepSeek. OpenCode utilise sa propre configuration MCP.','MCP tools for OpenAI/DeepSeek compatible APIs. OpenCode uses its own MCP configuration.'),'muted'));

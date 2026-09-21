@@ -15,8 +15,10 @@ public sealed partial class MainWindow
             OnContent = T("Autorisé"), OffContent = T("Désactivé") };
         var dom = new ToggleSwitch { Header = T("Accès DOM et interaction IA"), IsOn = browserDomAccess.IsOn,
             OnContent = T("Autorisé"), OffContent = T("Désactivé") };
-        panel.Children.Add(access);
-        panel.Children.Add(dom);
+        panel.Children.Add(FluentDesign.Setting(access.Header.ToString()!, "", access));
+        access.Header = null;
+        panel.Children.Add(FluentDesign.Setting(dom.Header.ToString()!, "", dom));
+        dom.Header = null;
         return (access, dom);
     }
 
@@ -41,19 +43,23 @@ public sealed partial class MainWindow
         settingsWindow = window;
         var panel = new Grid
         {
-            RequestedTheme = ElementTheme.Dark, Background = Brush(17, 20, 28),
-            Padding = new Thickness(24), RowSpacing = 16
+            RequestedTheme = ElementTheme.Dark, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            Padding = new Thickness(0), RowSpacing = 0
         };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        panel.Children.Add(Label(T("Réglages"), 24));
+        var heading = Label(T("Réglages"), 28);
+        heading.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        heading.Margin = new(24, 20, 24, 12);
+        panel.Children.Add(heading);
         Grid.SetRow((FrameworkElement)content, 1);
         panel.Children.Add(content);
         var save = new Button { Content = T("Enregistrer"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         var cancel = new Button { Content = T("Annuler") };
         var actions = Row(cancel, save);
         actions.HorizontalAlignment = HorizontalAlignment.Right;
+        actions.Margin = new(24, 16, 24, 16);
         Grid.SetRow(actions, 2);
         panel.Children.Add(actions);
         save.Click += (_, _) =>
@@ -68,8 +74,9 @@ public sealed partial class MainWindow
             if (ReferenceEquals(settingsWindow, window)) settingsWindow = null;
             completed.TrySetResult(false);
         };
+        FluentDesign.WindowChrome(window);
         window.Content = panel;
-        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(900, 800));
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1000, 840));
         window.Activate();
         return await completed.Task;
     }

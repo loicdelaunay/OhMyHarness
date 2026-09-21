@@ -46,6 +46,7 @@ public sealed partial class MainWindow
     UIElement BuildComposer()
     {
         var overlay = new Grid();
+        composer.CornerRadius = new(8); composer.FontSize = 15;
         composer.MinHeight = 124; composer.MaxHeight = 260; composer.Padding = new Thickness(14, 12, 14, 58);
         overlay.Children.Add(composer);
         var plus = new Button { Content = "+", FontSize = 24, Width = 38, Height = 38, Padding = new(0),
@@ -57,6 +58,9 @@ public sealed partial class MainWindow
         send.Content = "↑"; send.Width = 38; send.Height = 38; send.Padding = new(0); send.FontSize = 22;
         stop.Content = "■"; stop.Width = 38; stop.Height = 38; stop.Padding = new(0);
         var right = Row(stop, send); right.HorizontalAlignment = HorizontalAlignment.Right; right.VerticalAlignment = VerticalAlignment.Bottom; right.Margin = new(0, 0, 10, 10);
+        FluentDesign.IconButton(plus, "\uE710", WorkflowText("Joindre et configurer", "Attach and configure"), false);
+        FluentDesign.IconButton(send, "\uE724", T("Envoyer"), false);
+        FluentDesign.IconButton(stop, "\uE71A", T("Arrêter"), false);
         overlay.Children.Add(right);
         return overlay;
     }
