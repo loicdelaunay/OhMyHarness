@@ -43,7 +43,7 @@ public sealed partial class MainWindow
         settingsWindow = window;
         var panel = new Grid
         {
-            RequestedTheme = ElementTheme.Dark, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            RequestedTheme = root.RequestedTheme, Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush"),
             Padding = new Thickness(0), RowSpacing = 0
         };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

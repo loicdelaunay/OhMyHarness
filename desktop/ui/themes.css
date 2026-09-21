@@ -1,0 +1,30 @@
+:root{--background:#202020;--surface:#2d2d2d;--text:#f3f3f3}
+html,body{background:var(--background);color:var(--text)}
+#chat,#tools,#settings-content,dialog,.popover,#context-popover,#speed-popover{background:var(--surface);color:var(--text)}
+#sidebar,dialog#settings{background:var(--background)}
+label,.body,.message .role{color:var(--text)}
+.muted,small,.card p,.reasoning{color:var(--muted)}
+.body a,summary{color:var(--accent)}
+.theme-light{--line:#00000020}
+.theme-light button{background:#00000006;border-color:#00000020}
+.theme-light button:hover,.theme-light .chat-row.selected,.theme-light nav button.selected{background:#0000000b}
+.theme-light button.accent{background:var(--accent);color:#fff;border-color:transparent}
+.theme-light input,.theme-light select,.theme-light textarea{background:#ffffff90;color:var(--text);border-color:#00000030}
+.theme-light .message,.theme-light .card,.theme-light .skill-card,.theme-light #status{background:#ffffff90;border-color:var(--line);color:var(--text)}
+.theme-light .message.user{background:#00000005}
+.theme-light pre,.theme-light .message.tool,.theme-light .question-card{background:#00000004;color:var(--text)}
+.theme-light pre span[class^=code-]{filter:brightness(.55)}
+.theme-light .popover,.theme-light #context-popover,.theme-light #speed-popover{border-color:var(--line)}
+.theme-light button:focus-visible,.theme-light summary:focus-visible,.theme-light [tabindex]:focus-visible{outline-color:var(--accent)}
+.theme-light .skill-card input[type=checkbox]:checked::before{background:white}
+.theme-light .composer textarea{background:transparent}
+.composer-shell{border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:visible}
+#info-toggle{display:block;width:100%;text-align:left;border:0;border-radius:8px 8px 0 0;padding:6px 12px;color:var(--muted);background:transparent;font-size:12px}
+.composer-shell .metrics{border:0;border-radius:0;margin:0;padding:8px 12px;background:transparent}
+.composer-shell .composer{border:0;border-top:1px solid var(--line);border-radius:0 0 8px 8px;background:transparent}
+.composer-shell #inbox,.composer-shell #assets{padding:0 12px}
+.provider-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:16px}
+.provider-card .provider-copy{min-width:0;overflow-wrap:anywhere}
+.provider-card p{margin:6px 0 0}
+.provider-card button{margin:0;width:34px;height:34px}
+#mcp-json{font-family:"Cascadia Code",Consolas,monospace;white-space:pre;min-height:280px;max-height:50vh}

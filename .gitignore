@@ -6,6 +6,8 @@ artifacts/
 *.db*
 *.user
 *.sqlite*
+MCP.json
+**/python-runtime.json
 **/node_modules/
 desktop/sidecar/
 desktop/dist/

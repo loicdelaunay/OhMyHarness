@@ -87,7 +87,10 @@ public sealed partial class HarnessService
             Add("desktop_screenshot", "Capture the desktop with cursor after approval. screen: primary or ID; optional x/y/width/height crop, max_width/max_height and quality 1..100. Read captured_region and image size before clicking; Retina scales differ.", ("screen", "string"), ("x", "integer"), ("y", "integer"), ("width", "integer"), ("height", "integer"), ("max_width", "integer"), ("max_height", "integer"), ("quality", "integer"));
             if (browserAccess) Add("browser_screenshot", "Capture the integrated browser with cursor, after approval.");
         }
+        ApplicationTools.AddDefinitions(definitions, skills);
         RagTools.AddDefinitions(definitions, source, skills);
+        VisionBridge.AddDefinitions(definitions, skills);
+        PythonTools.AddDefinitions(definitions, skills);
         if (Skills.Enabled(skills, "terminal") && source) TerminalHub.AddDefinitions(definitions);
         FeatureSettings.Read(run.Options.FeaturesJson).FilterBrowser(definitions);
         return definitions;
@@ -98,6 +101,12 @@ public sealed partial class HarnessService
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
+        if (VisionBridge.Handles(name)) return new(await VisionFor(run).CallAsync(name, p, ct));
+        if (PythonTools.Handles(name)) return new(await PythonTools.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
+            var allowed = await Approve(scope, title, detail, token);
+            skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(token);
+            return allowed;
+        }, ct));
         if (RagTools.Handles(name)) return new(await RagTools.CallAsync(run,name,p,Decrypt,Approve,ct));
         if (TerminalHub.Handles(name)) return new(await terminals.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
             var approved = await Approve(scope, title, detail, token);
@@ -113,12 +122,19 @@ public sealed partial class HarnessService
         var required = name switch
         {
             "keyboard_keys" or "desktop_keyboard" or "browser_keyboard" => "keyboard_control",
+            "desktop_applications" => "applications",
             "desktop_mouse" or "browser_mouse" => "mouse_control",
             "desktop_screens" or "desktop_screenshot" or "browser_screenshot" => "screenshots",
             "run_terminal" => "terminal", "write_source" or "edit_source" => "write_sources",
             "list_sources" or "read_source" or "git_changes" => "sources", _ => "web"
         };
         if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
+        if (name == "desktop_applications")
+        {
+            if (!await Approve("desktop|applications", "Lister les applications / List applications", "Les titres, positions et tailles des fenêtres seront transmis au modèle.", ct)) return new("Access denied.");
+            ct.ThrowIfCancellationRequested();
+            return new(DesktopApplications.Describe());
+        }
         if (name == "keyboard_keys") return new(KeyboardInput.DescribeKeys());
         if (name == "git_changes") return new(run.Sandbox != null ? (await run.Sandbox.ReviewAsync(ct)).Diff : await Git(run.Project, ct));
         if (name == "open_local_file") return new(await Preview(run.Project, S(p, "path"), ct, run.Chat.Id));
@@ -153,19 +169,48 @@ public sealed partial class HarnessService
         if (name is "browse" or "read_page" or "inspect_dom" or "desktop_screens")
             return new((await host(name, p, ct))?.ToJsonString() ?? "");
         if (name is not ("desktop_keyboard" or "desktop_mouse" or "desktop_screenshot" or "browser_keyboard" or "browser_mouse" or "browser_screenshot" or "browser_dom" or "browser_javascript")) throw new ArgumentException("Unknown tool.");
-        if (name.EndsWith("screenshot", StringComparison.Ordinal) && !run.Provider.SupportsImages) throw new InvalidOperationException("Model does not support images.");
+        if (name.EndsWith("screenshot", StringComparison.Ordinal) && !run.Provider.SupportsImages && !VisionBridge.Enabled(skills)) throw new InvalidOperationException("Enable Bypass image AI or choose a vision model.");
         if (name.EndsWith("keyboard", StringComparison.Ordinal) && S(p, "action") == "press")
         {
             var chord = KeyboardInput.ParseChord(S(p, "keys"));
             p["keys"] = string.Join('+', chord.Modifiers.Append(chord.Key));
         }
-        var target = desktop ? DesktopInput.Foreground() : 0;
+        var windowId = desktop ? p["window_id"]?.GetValue<string>() : null;
+        ApplicationWindow? application = null;
+        if (windowId != null)
+        {
+            application = DesktopApplications.Resolve(windowId);
+            if (name == "desktop_screenshot")
+            {
+                if (new[] { "screen", "x", "y", "width", "height" }.Any(k => p[k] != null)) throw new ArgumentException("window_id cannot be combined with screen/crop.");
+                DesktopApplications.ValidateCapture(application);
+            }
+            p["target_application"] = application.Application + " · " + application.Title;
+        }
+        var target = application == null ? (desktop ? DesktopInput.Foreground() : 0)
+            : OperatingSystem.IsWindows() ? application.NativeId : application.ProcessId;
         var scope = desktop ? name : name + "|chat:" + run.Chat.Id + "|" + (await host("browser.state", Obj(new { chatId = run.Chat.Id }), ct))?["origin"]?.GetValue<string>();
         if (!await Approve(scope, run.Chat.Title + " · " + name, p.ToJsonString(), ct)) return new("Access denied.");
         ct.ThrowIfCancellationRequested();
         if (desktop) { DesktopInput.Restore(target); await Task.Delay(150, ct); }
+        if (application != null)
+        {
+            application = DesktopApplications.Resolve(windowId!);
+            if (name == "desktop_mouse")
+            {
+                var point = application.RelativePoint(p["x"]!.GetValue<double>(), p["y"]!.GetValue<double>());
+                DesktopApplications.DemandPointTarget(application, point.X, point.Y);
+                p["x"] = point.X; p["y"] = point.Y;
+            }
+            else
+            {
+                DesktopApplications.ValidateCapture(application);
+                p["application_window"] = Obj(application);
+            }
+        }
         if (name is "desktop_keyboard" or "desktop_mouse")
         {
+            using var dpi = application == null ? null : DesktopApplications.PhysicalCoordinates();
             DesktopInput.Execute(name, p); return new("Input sent successfully.");
         }
         var response = await host(name, p, ct);

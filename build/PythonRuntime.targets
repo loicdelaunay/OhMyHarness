@@ -1,0 +1,32 @@
+<Project>
+  <!-- Pin both release and SHA256. Download only on the build machine, never at runtime. -->
+  <PropertyGroup>
+    <PythonRuntimeRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</PythonRuntimeRid>
+    <PythonRuntimeRid Condition="'$(PythonRuntimeRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</PythonRuntimeRid>
+    <PythonRuntimeVersion>3.13.15</PythonRuntimeVersion>
+    <PythonRuntimeRelease>20260901</PythonRuntimeRelease>
+    <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'win-x64'">x86_64-pc-windows-msvc</PythonRuntimeTarget>
+    <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'win-x64'">9bcc038a0bf180612ed56dec93d4977d035e80b8d9320ef51a38c287baf134b7</PythonRuntimeHash>
+    <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'win-arm64'">aarch64-pc-windows-msvc</PythonRuntimeTarget>
+    <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'win-arm64'">ce87247378f43f88e0202a0fa6d3cdb5f5fb246a3bc61b2fb604bd49b7862508</PythonRuntimeHash>
+    <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'osx-x64'">x86_64-apple-darwin</PythonRuntimeTarget>
+    <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'osx-x64'">49f0d97f506b855eed60b74a8ac138595c5b39799a6aa5e0d7ca8abe1019a4d4</PythonRuntimeHash>
+    <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'osx-arm64'">aarch64-apple-darwin</PythonRuntimeTarget>
+    <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'osx-arm64'">b9054a9d3d54f4cb5573d44907fddb29874b08909bde73f29f2868cf872223ee</PythonRuntimeHash>
+    <PythonRuntimeCache>$(MSBuildThisFileDirectory)..\artifacts\python-cache\</PythonRuntimeCache>
+    <PythonRuntimeArchive>$(PythonRuntimeCache)$(PythonRuntimeVersion)-$(PythonRuntimeRelease)-$(PythonRuntimeRid).tar.gz</PythonRuntimeArchive>
+    <PythonRuntimeManifest>$(IntermediateOutputPath)python-runtime.json</PythonRuntimeManifest>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PythonRuntimeTarget)' != ''">
+    <EmbeddedResource Include="$(PythonRuntimeArchive)" LogicalName="OhMyHarness.Python.archive.tar.gz" />
+    <EmbeddedResource Include="$(PythonRuntimeManifest)" LogicalName="OhMyHarness.Python.manifest.json" />
+  </ItemGroup>
+  <Target Name="PrepareBundledPython" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(PythonRuntimeTarget)' == ''" Text="No bundled Python for $(PythonRuntimeRid). Supported: win-x64, win-arm64, osx-x64, osx-arm64." />
+    <MakeDir Directories="$(PythonRuntimeCache);$(IntermediateOutputPath)" />
+    <DownloadFile Condition="!Exists('$(PythonRuntimeArchive)')" SourceUrl="https://github.com/astral-sh/python-build-standalone/releases/download/$(PythonRuntimeRelease)/cpython-$(PythonRuntimeVersion)%2B$(PythonRuntimeRelease)-$(PythonRuntimeTarget)-install_only.tar.gz" DestinationFolder="$(PythonRuntimeCache)" DestinationFileName="$(PythonRuntimeVersion)-$(PythonRuntimeRelease)-$(PythonRuntimeRid).tar.gz" />
+    <GetFileHash Files="$(PythonRuntimeArchive)" Algorithm="SHA256"><Output TaskParameter="Hash" PropertyName="ActualPythonHash" /></GetFileHash>
+    <Error Condition="'$(ActualPythonHash.ToLowerInvariant())' != '$(PythonRuntimeHash)'" Text="Python archive SHA256 mismatch. Remove only the corrupt archive $(PythonRuntimeArchive) and retry." />
+    <WriteLinesToFile File="$(PythonRuntimeManifest)" Lines="{ &quot;Version&quot;: &quot;$(PythonRuntimeVersion)&quot;, &quot;Release&quot;: &quot;$(PythonRuntimeRelease)&quot;, &quot;Rid&quot;: &quot;$(PythonRuntimeRid)&quot;, &quot;Sha256&quot;: &quot;$(PythonRuntimeHash)&quot; }" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+</Project>

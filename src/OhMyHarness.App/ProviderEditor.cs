@@ -46,6 +46,10 @@ public sealed partial class MainWindow
         var state = new ProviderEditorState { Panel = new StackPanel(), Drafts = drafts, Error = Label("", 12) };
         state.Error.Tag = null;
 
+        var cards = new StackPanel { Spacing = 8 };
+        var editor = new StackPanel { Spacing = 12, Visibility = Visibility.Collapsed };
+        var back = new Button { Content = WorkflowText("← Fournisseurs", "← Providers") };
+        var editorTitle = Label("", 20); editorTitle.Tag = null;
         var chooser = new ComboBox { Header = T("Fournisseurs configurés"), HorizontalAlignment = HorizontalAlignment.Stretch };
         var name = new TextBox { Header = T("Nom du fournisseur"), MaxLength = 100 };
         var url = new TextBox { Header = T("URL de base de l’API") };
@@ -68,10 +72,10 @@ public sealed partial class MainWindow
         var info = Label(T("Créez autant de connexions que nécessaire. Chaque instance conserve sa propre clé, son URL, son modèle et sa limite de contexte."), 12); info.Tag = null;
         var testConnection = new Button { Content = T("Tester la connexion") };
         var importModels = new Button { Content = T("Importer les modèles OpenCode") };
-        var addOpenAi = new Button { Content = T("+ OpenAI compatible") };
-        var addDeepSeek = new Button { Content = "+ DeepSeek" };
-        var addOpenCode = new Button { Content = "+ OpenCode" };
-        var addComposite = new Button { Content = "+ Modèle composé / Composite" };
+        var addOpenAi = new MenuFlyoutItem { Text = T("+ OpenAI compatible") };
+        var addDeepSeek = new MenuFlyoutItem { Text = "+ DeepSeek" };
+        var addOpenCode = new MenuFlyoutItem { Text = "+ OpenCode" };
+        var addComposite = new MenuFlyoutItem { Text = "+ Modèle composé / Composite" };
         var compositePanel=new StackPanel();
         var duplicate = new Button { Content = T("Dupliquer") };
         var remove = new Button { Content = T("Supprimer le fournisseur") };
@@ -89,6 +93,7 @@ public sealed partial class MainWindow
         void Select(ProviderDraft? draft)
         {
             refreshing = true; state.Selected = draft;
+            editorTitle.Text = draft?.Name ?? "";
             var enabled = draft != null;
             foreach (var control in new Control[] { name, url, key, model, limit, vision, deleteKey, testConnection, importModels, username, executable, browseExecutable, autoStart, openCodeTools }) control.IsEnabled = enabled;
             remove.IsEnabled = duplicate.IsEnabled = enabled;
@@ -110,7 +115,7 @@ public sealed partial class MainWindow
         }
         void Refresh(ProviderDraft? draft)
         {
-            refreshing = true; chooser.ItemsSource = null; chooser.ItemsSource = drafts.ToList(); chooser.SelectedItem = draft; refreshing = false; Select(draft);
+            refreshing = true; chooser.ItemsSource = null; chooser.ItemsSource = drafts.ToList(); chooser.SelectedItem = draft; refreshing = false; Select(draft); RenderCards(); editor.Visibility = draft == null ? Visibility.Collapsed : Visibility.Visible; cards.Visibility = draft == null ? Visibility.Visible : Visibility.Collapsed;
         }
         state.Commit = () =>
         {
@@ -282,10 +287,27 @@ public sealed partial class MainWindow
             finally { importModels.IsEnabled = true; }
         };
 
+        void RenderCards()
+        {
+            cards.Children.Clear();
+            foreach (var draft in drafts)
+            {
+                var gear = new Button { Width = 34, Height = 34, Padding = new(0) };
+                FluentDesign.IconButton(gear, "\uE713", WorkflowText("Réglages de ", "Settings for ") + draft.Name, false);
+                gear.Click += (_, _) => { state.Commit(); Refresh(draft); };
+                cards.Children.Add(FluentDesign.Setting(draft.Name, draft.Kind == "composite" ? WorkflowText("Modèle composé", "Composite model") : draft.Model + " · " + draft.Kind, gear));
+            }
+            if (drafts.Count == 0) cards.Children.Add(Label(WorkflowText("Ajoutez un fournisseur pour commencer.", "Add a provider to get started.")));
+        }
+        back.Click += (_, _) => { state.Commit(); RenderCards(); editor.Visibility = Visibility.Collapsed; cards.Visibility = Visibility.Visible; };
+        var add = new DropDownButton { Content = WorkflowText("＋ Ajouter un fournisseur", "＋ Add provider") };
+        var presets = new MenuFlyout(); add.Flyout = presets;
+        foreach (var item in new[] { addOpenAi, addDeepSeek, addOpenCode, addComposite }) presets.Items.Add(item);
         state.Panel.Spacing = 12;
-        state.Panel.Children.Add(info);
-        foreach (var item in new UIElement[] { Row(addOpenAi, addDeepSeek, addOpenCode), addComposite, chooser, Row(duplicate, remove), name, compositePanel, url, username, key, execGrid, autoStart, openCodeTools, model, Row(testConnection, importModels), limit, vision, deleteKey, state.Error }) state.Panel.Children.Add(item);
+        state.Panel.Children.Add(add); state.Panel.Children.Add(cards); state.Panel.Children.Add(editor); state.Panel.Children.Add(state.Error);
+        foreach (var item in new UIElement[] { back, editorTitle, info, name, compositePanel, url, username, key, execGrid, autoStart, openCodeTools, model, Row(testConnection, importModels), limit, vision, deleteKey, Row(duplicate, remove) }) editor.Children.Add(item);
         Refresh(drafts.FirstOrDefault(x => x.Id == selectedProviderId) ?? drafts.FirstOrDefault());
+        editor.Visibility = Visibility.Collapsed; cards.Visibility = Visibility.Visible;
         return state;
     }
 

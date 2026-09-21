@@ -24,7 +24,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
     const pending=replies.get(item.id);if(pending){replies.delete(item.id);item.error?pending.reject(new Error(item.error)):pending.resolve(item.result);}
   });
   function rpc(method,parameters={}){const id=String(++index);return new Promise((resolve,reject)=>{replies.set(id,{resolve,reject});write({id,method,parameters});});}
-  let requests=0,active=0,peak=0,embeddings=0;const requestLog=[];
+  let requests=0,active=0,peak=0,embeddings=0,visionRequests=0;const requestLog=[];
   const server=http.createServer(async(req,res)=>{
     if(req.url.endsWith('/models')){res.setHeader('Content-Type','application/json');res.end('{"data":[{"id":"test-model"}]}');return;}
     const buffers=[];for await(const chunk of req)buffers.push(chunk);const body=JSON.parse(Buffer.concat(buffers));
@@ -33,6 +33,47 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{embedding:[1,0,0]}]}));return;
     }
     requests++;active++;peak=Math.max(peak,active);requestLog.push({body,authorization:req.headers.authorization});
+    if(body.model==='vision-model'){
+      visionRequests++;active--;assert.equal(req.headers.authorization,'Bearer vision-fixture-key');assert.ok(body.messages.at(-1).content.some(x=>x.type==='image_url'));assert.ok(!body.tools);
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'Visible: red circle, label START.'}}]})+'\n\ndata: [DONE]\n\n');return;
+    }
+    if(body.model==='blind-agent'){
+      active--;assert.ok(!JSON.stringify(body.messages).includes('image_url'),'Non-vision main model receives no raw image');
+      assert.ok(body.messages.some(x=>typeof x.content==='string'&&x.content.includes('red circle')));
+      const last=body.messages.at(-1),previousTool=body.messages.at(-2)?.tool_calls?.[0]?.function?.name;
+      const delta=last.role==='tool'&&previousTool==='analyze_image'?{content:'Vision delegated successfully.'}:{tool_calls:[{index:0,id:previousTool==='list_images'?'analyze':'list',type:'function',function:previousTool==='list_images'?{name:'analyze_image',arguments:JSON.stringify({image_id:JSON.parse(last.content)[0].image_id,question:'Read the label exactly'})}:{name:'list_images',arguments:'{}'}}]};
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n');return;
+    }
+    if(body.model==='handoff-model'){
+      const last=body.messages.at(-1),isChild=body.messages[0].content.includes('You are a bounded subagent');
+      active--;
+      if(last.role==='assistant'){res.writeHead(400,{'Content-Type':'application/json'});res.end('{"error":{"message":"last assistant is not a valid continuation"}}');return;}
+      const delta=isChild?{content:'Analysis completed in Plan mode. No edits.'}:last.role==='tool'?{content:'Parent resumed and finished.'}:{tool_calls:[{index:0,id:'parent-read',type:'function',function:{name:'list_sources',arguments:'{"path":"."}'}}]};
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n');return;
+    }
+    if(body.model==='python-agent') {
+      active--;
+      const last=body.messages.at(-1),names=(body.tools||[]).map(x=>x.function.name);
+      assert.ok(['python_info','write_python_script','run_python_script'].every(n=>names.includes(n)));
+      let name,args,id;
+      if(last.role!=='tool'){name='python_info';args={};id='py-info';}
+      else if(last.tool_call_id==='py-info'){assert.equal(JSON.parse(last.content).Version,'3.13.15');name='write_python_script';args={path:'api-test.py',code:"print('python-api-ok')"};id='py-write';}
+      else if(last.tool_call_id==='py-write'){assert.ok(JSON.parse(last.content).written);name='run_python_script';args={path:'api-test.py'};id='py-run';}
+      else {const result=JSON.parse(last.content);assert.equal(result.exit_code,0);assert.ok(result.stdout.includes('python-api-ok'));}
+      const delta=name?{tool_calls:[{index:0,id,type:'function',function:{name,arguments:JSON.stringify(args)}}]}:{content:'Bundled Python completed.'};
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n');return;
+    }
+    if(body.model==='application-agent') {
+      active--;
+      const last=body.messages.at(-1);
+      const tools=(body.tools||[]).map(x=>x.function);
+      assert.ok(tools.some(x=>x.name==='desktop_applications'));
+      assert.ok(tools.find(x=>x.name==='desktop_mouse').parameters.properties.window_id);
+      assert.ok(tools.find(x=>x.name==='desktop_screenshot').parameters.properties.window_id);
+      const delta=last.role==='tool'?{content:'Applications checked.'}:{tool_calls:[{index:0,id:'applications-list',type:'function',function:{name:'desktop_applications',arguments:'{}'}}]};
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta}]})+'\n\ndata: [DONE]\n\n');return;
+    }
+    if(body.model==='failure-model'){active--;res.writeHead(400);res.end('{}');return;}
     if(body.model==='rag-agent'){
       const last=body.messages.at(-1),name=last.content==='index'?'rag_index':'rag_search';
       const delta=last.role==='tool'?{content:'RAG done'}:{tool_calls:[{index:0,id:'rag-call',type:'function',function:{name,arguments:name==='rag_index'?'{}':'{"query":"database query"}'}}]};
@@ -47,6 +88,17 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   t.after(async()=>{child.stdin.end();await new Promise(resolve=>{if(child.exitCode!=null)return resolve();child.once('exit',resolve);setTimeout(()=>child.kill(),5000).unref();});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});});
   await ready;
   const initial=await rpc('snapshot');assert.equal(initial.state.permissionMode,'ask');assert.equal(initial.providers.length,2);assert.ok(!('protectedKey' in initial.providers[0]));
+  assert.equal(initial.appearanceThemes.length,6);assert.equal(initial.appearanceThemes.filter(x=>x.dark).length,3);
+  const mcpFile=await rpc('mcp.json.get');assert.equal(mcpFile.path,path.join(directory,'MCP.json'));
+  const godot=JSON.stringify({mcpServers:{godot:{command:'npx',args:['@coding-solo/godot-mcp'],env:{GODOT_PATH:'/path/to/godot',DEBUG:'true'},enabled:false}}});
+  await rpc('mcp.json.save',{content:godot,expected:mcpFile.content});
+  const imported=(await rpc('snapshot')).mcpServers.find(x=>x.name==='godot');assert.ok(imported.hasSecrets);assert.equal(imported.enabled,false);
+  await rpc('mcp.toggle',{id:imported.id,enabled:true});assert.equal(JSON.parse(await fs.readFile(mcpFile.path,'utf8')).mcpServers.godot.enabled,true);
+  const current=await rpc('mcp.json.get');await assert.rejects(rpc('mcp.json.save',{content:'{',expected:current.content}));assert.equal(await fs.readFile(mcpFile.path,'utf8'),current.content);
+  await rpc('mcp.json.save',{content:'{"mcpServers":{}}',expected:current.content});
+  await rpc('state.save',{featuresJson:JSON.stringify({Theme:'ivory',ComposerInfoExpanded:false})});
+  const appearance=JSON.parse((await rpc('snapshot')).state.featuresJson);assert.equal(appearance.Theme,'ivory');assert.equal(appearance.ComposerInfoExpanded,false);
+
   const provider=await rpc('provider.save',{name:'local',kind:'openai',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,model:'test-model',key:'fixture-not-a-real-key',contextLimit:4096});
   assert.equal(provider.hasKey,true);assert.deepEqual(await rpc('provider.models',{id:provider.id}),['test-model']);
   const project=await rpc('project.save',{name:'Sources',folders:[directory]});
@@ -97,7 +149,10 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   const queuedRun=rpc('send',{chatId:queueChat.id,providerId:provider.id,text:'first'});
   while(!events.some(x=>x.event==='stream'&&x.chatId===queueChat.id))await new Promise(r=>setTimeout(r,5));
   await rpc('inbox.add',{chatId:queueChat.id,providerId:provider.id,text:'next turn',mode:'queued'});
-  await rpc('inbox.add',{chatId:queueChat.id,providerId:provider.id,text:'use French now',mode:'steering'});
+  await rpc('inbox.add',{chatId:queueChat.id,providerId:provider.id,text:'use English',mode:'queued'});
+  const editable=(await rpc('inbox.list',{chatId:queueChat.id})).find(x=>x.text==='use English');
+  await rpc('inbox.update',{chatId:queueChat.id,id:editable.id,expectedText:'use English',text:'use French now'});
+  await rpc('inbox.update',{chatId:queueChat.id,id:editable.id,expectedText:'use French now',text:'use French now',steer:true});
   assert.equal((await rpc('inbox.list',{chatId:queueChat.id})).length,2);
   await queuedRun;
   assert.deepEqual((await rpc('history',{chatId:queueChat.id})).filter(x=>x.role==='user').map(x=>x.content),['first','use French now','next turn']);
@@ -112,6 +167,9 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   const pending=(await rpc('inbox.list',{chatId:queueChat.id}))[0];await rpc('inbox.delete',{chatId:chatA.id,id:pending.id});
   assert.equal((await rpc('inbox.list',{chatId:queueChat.id})).length,1,'Cannot remove another conversation input');
   await rpc('inbox.delete',{chatId:queueChat.id,id:pending.id});
+  await rpc('inbox.add',{chatId:queueChat.id,providerId:provider.id,text:' single queued turn ',mode:'queued'});
+  await Promise.all([rpc('inbox.resume',{chatId:queueChat.id}),rpc('inbox.resume',{chatId:queueChat.id})]);
+  assert.equal((await rpc('history',{chatId:queueChat.id})).filter(x=>x.role==='user'&&x.content==='single queued turn').length,1,'Concurrent queue resumes consume only once');
   const childProvider=await rpc('provider.save',{name:'Child provider',kind:'openai',baseUrl:provider.baseUrl,model:'child-default',key:'child-fixture-key',contextLimit:4096});
   const config={Orchestrator:{ProviderId:provider.id,Model:'orchestrator-model'},Agents:[{ProviderId:childProvider.id,Model:'review-model',Name:'Review',Task:'Review the code without edits.'},{ProviderId:provider.id,Model:'test-model',Name:'Tests',Task:'Identify tests to run without edits.'}]};
   const composite=await rpc('provider.save',{kind:'composite',name:'Team',compositeJson:JSON.stringify(config)});
@@ -123,4 +181,53 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   assert.ok(!(review.body.tools||[]).some(x=>x.function.name==='write_source'),'Plan applies to configured child model');
   const orchestrator=requestLog.find(x=>x.body.model==='orchestrator-model');assert.equal(orchestrator.authorization,'Bearer fixture-not-a-real-key');assert.ok(orchestrator.body.messages.some(x=>x.content?.includes('[Review]')),'Orchestrator receives child reports');
   await assert.rejects(rpc('provider.save',{kind:'composite',name:'Invalid nesting',compositeJson:JSON.stringify({...config,Orchestrator:{ProviderId:composite.id,Model:'anything'}})}));
+  await rpc('state.save',{enabledSkills:'sources,write_sources',autoContinue:true});
+  const forcedProvider=await rpc('provider.save',{name:'Handoff regression',kind:'openai',baseUrl:provider.baseUrl,model:'handoff-model',contextLimit:32000});
+  const forcedChat=await rpc('chat.save',{projectId:project.id,title:'Forced continuation'});
+  await rpc('chat.modes',{id:forcedChat.id,executionMode:'execute',orchestrationMode:'forced'});
+  await rpc('send',{chatId:forcedChat.id,providerId:forcedProvider.id,text:'Create the requested project'});
+  const forcedHistory=await rpc('history',{chatId:forcedChat.id});
+  assert.equal(forcedHistory.at(-1).content,'Parent resumed and finished.');assert.equal(forcedHistory.at(-1).state,'complete');
+  assert.ok(forcedHistory.some(x=>x.role==='tool'&&x.content.startsWith('list_sources')));
+  assert.equal((await rpc('subagents',{chatId:forcedChat.id})).length,2,'Forced children run once, then the parent continues');
+  const handoffRequests=requestLog.filter(x=>x.body.model==='handoff-model');
+  const parentRequest=handoffRequests.find(x=>!x.body.messages[0].content.includes('You are a bounded subagent'));
+  assert.equal(parentRequest.body.messages.at(-1).role,'user');assert.ok(parentRequest.body.tools.some(x=>x.function.name==='write_source'),'Parent retains Execute tools');
+  assert.ok(handoffRequests.filter(x=>x.body.messages[0].content.includes('You are a bounded subagent')).every(x=>!x.body.tools.some(t=>t.function.name==='write_source')),'Analysis children remain read-only');
+  const failureProvider=await rpc('provider.save',{name:'Error regression',kind:'openai',baseUrl:provider.baseUrl,model:'failure-model'});
+  const failureChat=await rpc('chat.save',{projectId:project.id,title:'Failure detail'});
+  await assert.rejects(rpc('send',{chatId:failureChat.id,providerId:failureProvider.id,text:'Test error'}),/HTTP 400/);
+  const failedHistory=await rpc('history',{chatId:failureChat.id});assert.match(failedHistory.at(-1).content,/HTTP 400/);assert.equal(failedHistory.at(-1).state,'interrupted');
+  const visionProvider=await rpc('provider.save',{name:'Dedicated vision',kind:'openai',baseUrl:provider.baseUrl,model:'provider-default',key:'vision-fixture-key'});
+  const blindProvider=await rpc('provider.save',{name:'No vision',kind:'openai',baseUrl:provider.baseUrl,model:'blind-agent',supportsImages:false,contextLimit:32000});
+  await rpc('state.save',{enabledSkills:'vision_bridge',permissionMode:'allow',featuresJson:JSON.stringify({VisionProviderId:visionProvider.id,VisionModel:'vision-model'})});
+  const visionChat=await rpc('chat.save',{projectId:project.id,title:'Vision relay'});
+  const testImage={name:'test.png',mime:'image/png',data:'AQID'};
+  await rpc('send',{chatId:visionChat.id,providerId:blindProvider.id,text:'Read this image',images:[testImage]});
+  const visionHistory=await rpc('history',{chatId:visionChat.id});assert.equal(visionHistory.at(-1).content,'Vision delegated successfully.');
+  assert.equal(visionHistory[0].attachments[0].data,'AQID','Original image retained in chat history');assert.equal(visionRequests,2,'One automatic description plus one focused question, cached across tool rounds');
+  await rpc('state.save',{permissionMode:'deny'});
+  const deniedVision=await rpc('chat.save',{projectId:project.id,title:'Denied vision relay'});
+  await assert.rejects(rpc('send',{chatId:deniedVision.id,providerId:blindProvider.id,text:'Read',images:[testImage]}),/refusée|denied/);
+  assert.equal(visionRequests,2,'Deny all blocks transmission to vision API');
+  const appProvider=await rpc('provider.save',{...provider,model:'application-agent'});
+  await rpc('state.save',{enabledSkills:'applications,mouse_control,screenshots',permissionMode:'deny'});
+  const appChat=await rpc('chat.save',{projectId:project.id,title:'Application tools'});
+  const dialogsBefore=hosts.filter(x=>x==='permission').length;
+  await rpc('send',{chatId:appChat.id,providerId:appProvider.id,text:'List applications'});
+  assert.equal(hosts.filter(x=>x==='permission').length,dialogsBefore,'Application inventory respects deny before dialogs');
+  assert.ok((await rpc('history',{chatId:appChat.id})).some(x=>x.role==='tool'&&x.content==='desktop_applications\nAccess denied.'));
+  await rpc('state.save',{permissionMode:'ask'});choice='always';
+  await rpc('send',{chatId:appChat.id,providerId:appProvider.id,text:'List applications after approval'});
+  const appHistory=await rpc('history',{chatId:appChat.id});
+  const inventoryText=appHistory.filter(x=>x.role==='tool').at(-1).content;
+  const inventory=JSON.parse(inventoryText.slice(inventoryText.indexOf('\n')+1));
+  assert.ok(Array.isArray(inventory.windows));assert.ok(inventory.coordinate_system);
+  assert.ok((await rpc('snapshot')).permissions.some(x=>x.scope==='desktop|applications'),'Always-allow inventory permission is persisted');
+  const pythonProvider=await rpc('provider.save',{...provider,model:'python-agent'});
+  await rpc('state.save',{enabledSkills:'python',permissionMode:'allow'});
+  const pythonChat=await rpc('chat.save',{projectId:project.id,title:'Python tools'});
+  await rpc('send',{chatId:pythonChat.id,providerId:pythonProvider.id,text:'Create and execute a script'});
+  assert.equal((await rpc('history',{chatId:pythonChat.id})).at(-1).content,'Bundled Python completed.');
+  assert.equal(await fs.readFile(path.join(directory,'scripts','python','chat-'+pythonChat.id,'api-test.py'),'utf8'),"print('python-api-ok')");
 });

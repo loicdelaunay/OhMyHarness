@@ -7,12 +7,10 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
-    readonly ComboBox deliveryMode=new(){ItemsSource=new[]{"File d’attente / Queue","Dans l’exécution en cours / Steer"},SelectedIndex=0,MinWidth=180};
     readonly StackPanel inboxPanel=new(){Spacing=4};
     UIElement BuildInbox()
     {
-        var panel=new StackPanel{Spacing=4};panel.Children.Add(deliveryMode);panel.Children.Add(new ScrollViewer{Content=inboxPanel,MaxHeight=140,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
-        ToolTipService.SetToolTip(deliveryMode,"Pendant une génération : nouveau tour après la fin, ou consigne à la prochaine étape. La requête déjà en cours n’est pas modifiée.");
+        var panel=new StackPanel{Spacing=4};panel.Children.Add(new ScrollViewer{Content=inboxPanel,MaxHeight=160,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled});
         return panel;
     }
     async Task RefreshInboxAsync()
@@ -24,8 +22,32 @@ public sealed partial class MainWindow
         foreach(var item in pending)
         {
             var text=Label((item.Mode=="steering"?"↳ Prochaine étape : ":"⏳ En attente : ")+item.Text[..Math.Min(120,item.Text.Length)],12);
-            var remove=Action("×",async()=>{await using var db=new HarnessDb();await db.PendingInputs.Where(x=>x.Id==item.Id).ExecuteDeleteAsync();await RefreshInboxAsync();});
-            inboxPanel.Children.Add(Row(text,remove));
+            text.TextWrapping = TextWrapping.Wrap;
+            var row = new StackPanel { Spacing = 4 };
+            row.Children.Add(text);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            actions.Children.Add(Action(WorkflowText("Supprimer", "Delete"), async()=>{await using var db=new HarnessDb();await db.PendingInputs.Where(x=>x.Id==item.Id && x.ChatId==item.ChatId).ExecuteDeleteAsync();await RefreshInboxAsync();}));
+            actions.Children.Add(Action(WorkflowText("Modifier", "Edit"), async()=>
+            {
+                var editor = new TextBox { Text = item.Text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100, MaxHeight = 300 };
+                var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = WorkflowText("Modifier le message en attente", "Edit queued message"), Content = editor,
+                    PrimaryButtonText = WorkflowText("Enregistrer", "Save"), CloseButtonText = WorkflowText("Annuler", "Cancel") };
+                if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+                {
+                    await ConversationInbox.UpdateAsync(HarnessDb.DatabasePath, item.ChatId, item.Id, item.Text, editor.Text);
+                    await RefreshInboxAsync();
+                }
+            }));
+            var steer = Action("Steer", async()=>
+            {
+                if (!conversationRuns.TryGetValue(item.ChatId, out var active)) throw new InvalidOperationException(WorkflowText("Aucune exécution en cours.", "No active run."));
+                if (item.Images().Count > 0 && !active.Provider.SupportsImages && !VisionBridge.Enabled(state.EnabledSkills)) throw new InvalidOperationException(WorkflowText("Le modèle en cours n’accepte pas les images.", "The active model does not support images."));
+                await ConversationInbox.UpdateAsync(HarnessDb.DatabasePath, item.ChatId, item.Id, item.Text, item.Text, true, active.SelectedProviderId);
+                await RefreshInboxAsync();
+            });
+            steer.IsEnabled = item.Mode == "queued" && conversationRuns.ContainsKey(item.ChatId);
+            ToolTipService.SetToolTip(steer, WorkflowText("Transmettre à l’agent à sa prochaine étape", "Send to the agent at its next step"));
+            actions.Children.Add(steer); row.Children.Add(actions); inboxPanel.Children.Add(row);
         }
         if(pending.Count>0 && ActiveRun==null)inboxPanel.Children.Add(Action("Reprendre la file / Resume queue",()=>RunNextQueuedAsync(id!.Value,messages)));
     }

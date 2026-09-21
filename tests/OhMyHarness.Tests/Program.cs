@@ -27,6 +27,13 @@ using (var cancellation = new CancellationTokenSource())
     await Throws<OperationCanceledException>(() => ChatEngine.ParseStreamAsync(new StringReader(stream), _ => { }, cancellation.Token), "Annulation du streaming");
 }
 Check(ChatEngine.Endpoint("https://example.com/v1", "chat/completions").AbsoluteUri == "https://example.com/v1/chat/completions", "Route OpenAI v1");
+var handoff = AgentHandoff.Create(12, "[Exploration] Plan: no edits.\n[Validation] Ready.");
+Check(handoff.Role == "assistant" && ChatEngine.ToWire(handoff)["role"]!.GetValue<string>() == "user", "Rapport visible dans le chat mais transmis comme entrée à l’orchestrateur");
+Check(ChatEngine.ToWire(handoff)["content"]!.GetValue<string>().Contains("Continue the original user task") && ChatEngine.ToWire(handoff)["content"]!.GetValue<string>().Contains("remain read-only"), "Reprise du parent explicite avec respect de son mode Plan ou Exécution");
+var legacyHandoff = new Message { Role = "assistant", Content = AgentHandoff.ReportPrefix + "Ancien rapport" };
+Check(ChatEngine.ToWire(legacyHandoff)["role"]!.GetValue<string>() == "user" && legacyHandoff.WireJson.Length == 0, "Ancien rapport réutilisable sans modifier la base");
+var realAssistant = new Message { Role = "assistant", Content = "Réponse du modèle", WireJson = "{\"role\":\"assistant\",\"content\":\"Réponse\",\"reasoning_content\":\"reasoning\"}" };
+Check(ChatEngine.ToWire(realAssistant)["reasoning_content"]!.GetValue<string>() == "reasoning", "Les vraies réponses conservent leur raisonnement fournisseur");
 Check(MouseInput.NormalizeButton(null) == "left" && MouseInput.NormalizeButton("RIGHT") == "right", "Clics souris gauche et droit normalisés");
 await Throws<ArgumentException>(() => Task.FromResult(MouseInput.NormalizeButton("middle")), "Bouton souris non autorisé refusé");
 Check(MouseInput.NormalizeClickCount(1) == 1 && MouseInput.NormalizeClickCount(2) == 2, "Simple et double clic souris acceptés");
@@ -411,6 +418,13 @@ try
         var changedFiles = await GitWorkspace.ListAsync([workspace], default);
         var totalDiff = await GitWorkspace.DiffAsync(changedFiles.Single(x => x.Path == "git-test.txt"), default);
         Check(totalDiff.Contains("+working-tree-change") && !totalDiff.Contains("+staged-change"), "Git : diff total index et travail par rapport à HEAD");
+        var sideBySide = GitWorkspace.ParseDiff(totalDiff);
+        Check(sideBySide.Rows.Any(x => x.AfterLine == 1 && x.After == "working-tree-change" && x.Kind == "added") && sideBySide.Rows.Any(x => x.BeforeLine == 1 && x.Kind == "removed"), "Git : aperçu avant/après avec numéros de lignes");
+        var stats = (await GitWorkspace.ListWithStatsAsync([workspace], default)).Single(x => x.Path == "git-test.txt");
+        Check(stats.Added == 1 && stats.Removed == 1, "Git : compteurs des lignes ajoutées et supprimées");
+        Check(GitWorkspace.ParseDiff("Binary files a/image.png and b/image.png differ").Notice != null, "Git : fichier binaire signalé sans fausses lignes");
+        var hunks = GitWorkspace.ParseDiff("@@ -2,1 +2,1 @@\n-old\n+new\n@@ -20,1 +30,1 @@\n unchanged\n");
+        Check(hunks.Rows.Last().BeforeLine == 20 && hunks.Rows.Last().AfterLine == 30, "Git : numérotation indépendante entre blocs de modifications");
         await File.WriteAllTextAsync(Path.Combine(workspace, "nouveau fichier é.txt"), "nouveau\n");
         var untracked = (await GitWorkspace.ListAsync([workspace], default)).Single(x => x.Path == "nouveau fichier é.txt");
         Check(untracked.Status == "??" && (await GitWorkspace.DiffAsync(untracked, default)).Contains("+nouveau"), "Git : fichier non suivi avec espaces et Unicode");
@@ -565,6 +579,9 @@ await SandboxChecks.Run(Check);
 await TerminalChecks.Run(Check);
 await FeatureChecks.Run(Check);
 await InboxChecks.Run(Check);
+await AppearanceMcpChecks.Run(Check);
+await VisionChecks.Run(Check);
+ApplicationChecks.Run(Check);
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

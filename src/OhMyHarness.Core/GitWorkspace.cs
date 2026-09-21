@@ -2,11 +2,53 @@ namespace OhMyHarness.Core;
 
 public sealed record GitChangedFile(string Repository, string Path, string Status, string? PreviousPath = null)
 {
+    public int? Added { get; init; }
+    public int? Removed { get; init; }
+    public string? PreviewNotice { get; init; }
     public override string ToString() => $"{Status.Trim()}  {Path}  · {System.IO.Path.GetFileName(Repository)}";
 }
 
 public static class GitWorkspace
 {
+    public static async Task<List<GitChangedFile>> ListWithStatsAsync(IEnumerable<string> roots, CancellationToken ct)
+    {
+        var files = await ListAsync(roots, ct);
+        for (var i = 0; i < files.Count; i++)
+        {
+            try
+            {
+                var preview = ParseDiff(await DiffKnownAsync(files[i], ct));
+                files[i] = files[i] with { Added = preview.Rows.Count(x => x.Kind == "added"), Removed = preview.Rows.Count(x => x.Kind == "removed"), PreviewNotice = preview.Notice };
+                if (preview.Notice != null) files[i] = files[i] with { Added = null, Removed = null };
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { files[i] = files[i] with { PreviewNotice = ex.Message }; }
+        }
+        return files;
+    }
+
+    public sealed record DiffRow(int? BeforeLine, string? Before, int? AfterLine, string? After, string Kind);
+    public sealed record DiffPreview(List<DiffRow> Rows, string? Notice);
+    public static DiffPreview ParseDiff(string diff)
+    {
+        var rows = new List<DiffRow>(); int before = 0, after = 0; bool inHunk = false;
+        foreach (var raw in diff.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            var hunk = System.Text.RegularExpressions.Regex.Match(line, @"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@");
+            if (hunk.Success)
+            {
+                before = int.Parse(hunk.Groups[1].Value); after = int.Parse(hunk.Groups[2].Value); inHunk = true;
+                rows.Add(new(null, line, null, line, "hunk")); continue;
+            }
+            if (line.StartsWith("diff --git")) { inHunk = false; continue; }
+            if (!inHunk || line.Length == 0) continue;
+            if (line[0] == '-') rows.Add(new(before++, line[1..], null, null, "removed"));
+            else if (line[0] == '+') rows.Add(new(null, null, after++, line[1..], "added"));
+            else if (line[0] == ' ') rows.Add(new(before++, line[1..], after++, line[1..], "context"));
+            else if (line[0] == '\\') rows.Add(new(null, line, null, line, "hunk"));
+        }
+        return new(rows, rows.Count == 0 ? diff : null);
+    }
     static async Task<string> Run(string root, IEnumerable<string> args, CancellationToken ct, bool diff = false)
     {
         var result = await WorkspaceTools.GitAsync(root, args, ct);
@@ -43,6 +85,12 @@ public static class GitWorkspace
         // Re-read status: only files reported by Git in the attached repository can be requested.
         var current = (await ListAsync([file.Repository], ct)).FirstOrDefault(x => x.Path == file.Path);
         if (current is null) return "Aucune modification / No changes.";
+        return await DiffKnownAsync(current, ct);
+    }
+
+    static async Task<string> DiffKnownAsync(GitChangedFile file, CancellationToken ct)
+    {
+        var current = file;
         var head = await WorkspaceTools.GitAsync(file.Repository, ["rev-parse", "--verify", "HEAD"], ct);
         if (current.Status == "??" || !head.StartsWith("Exit code: 0\n"))
         {

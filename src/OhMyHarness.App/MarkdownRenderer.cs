@@ -23,7 +23,7 @@ namespace OhMyHarness.App;
 
 public sealed class MarkdownRenderer
 {
-    private SolidColorBrush Brush(byte r, byte g, byte b) => new(ColorHelper.FromArgb(255, r, g, b));
+    private SolidColorBrush Brush(byte r, byte g, byte b) => FluentDesign.Adapt(r,g,b);
 
     readonly Func<string, Task>? openFile;
     MarkdownRenderer(Func<string, Task>? openFile) { this.openFile = openFile; }
@@ -53,14 +53,64 @@ public sealed class MarkdownRenderer
             return;
         }
 
+        RichTextBlock? textFlow = null;
         foreach (var block in doc)
         {
+            if (CanJoinText(block))
+            {
+                if (textFlow == null)
+                {
+                    textFlow = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap,
+                        Foreground = FluentDesign.Primary, FontSize = 14.5, LineHeight = 22 };
+                    container.Children.Add(textFlow);
+                }
+                AppendText(block, textFlow, 0);
+                continue;
+            }
+            textFlow = null;
             var elem = RenderBlock(block);
             if (elem != null)
             {
                 container.Children.Add(elem);
             }
         }
+    }
+
+    static bool CanJoinText(MdBlock block) => block is ParagraphBlock or HeadingBlock ||
+        block is ListBlock or ListItemBlock or QuoteBlock && ((ContainerBlock)block).All(CanJoinText);
+
+    void AppendText(MdBlock block, RichTextBlock flow, int depth, string prefix = "")
+    {
+        if (block is ParagraphBlock paragraph || block is HeadingBlock)
+        {
+            var p = new Paragraph { Margin = new Thickness(depth * 18, 2, 0, 6) };
+            if (prefix.Length > 0) p.Inlines.Add(new Run { Text = prefix, Foreground = Brush(130, 175, 245) });
+            if (block is HeadingBlock heading)
+            {
+                p.FontSize = heading.Level switch { 1 => 21, 2 => 18, 3 => 16, _ => 14.5 };
+                p.FontWeight = FontWeights.SemiBold;
+                p.Margin = new Thickness(depth * 18, 8, 0, 4);
+                if (heading.Inline != null) RenderInlines(heading.Inline, p.Inlines);
+            }
+            else if (((ParagraphBlock)block).Inline is { } inline) RenderInlines(inline, p.Inlines);
+            flow.Blocks.Add(p);
+        }
+        else if (block is ListBlock list)
+        {
+            int number = int.TryParse(list.OrderedStart, out var start) ? start : 1;
+            foreach (var item in list.OfType<ListItemBlock>())
+            {
+                bool first = true;
+                foreach (var child in item)
+                {
+                    AppendText(child, flow, depth + 1, first ? (list.IsOrdered ? $"{number}. " : "• ") : "");
+                    first = false;
+                }
+                number++;
+            }
+        }
+        else if (block is ContainerBlock container)
+            foreach (var child in container) AppendText(child, flow, depth + (block is QuoteBlock ? 1 : 0), block is QuoteBlock ? "│ " : prefix);
     }
 
     public FrameworkElement? RenderBlock(MdBlock block)

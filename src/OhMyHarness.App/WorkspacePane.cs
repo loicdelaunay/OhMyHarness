@@ -21,7 +21,7 @@ public sealed partial class MainWindow
     Grid mainArea = null!;
     readonly Pivot toolTabs = new();
     readonly TextBlock gitSummary = new() { TextWrapping = TextWrapping.Wrap };
-    readonly ListView gitFiles = new() { SelectionMode = ListViewSelectionMode.Single };
+    readonly TreeView gitFiles = new() { SelectionMode = TreeViewSelectionMode.Single };
     readonly StackPanel gitDiff = new() { Spacing = 0 };
     int gitRevision, gitDiffRevision;
     readonly ListView fileList = new() { IsItemClickEnabled = true, SelectionMode = ListViewSelectionMode.Single };
@@ -138,7 +138,7 @@ public sealed partial class MainWindow
         foreach (var server in db.McpServers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name))
         {
             var toggle = new CheckBox { Content = server.Name, IsChecked = server.Enabled };
-            toggle.Click += async (_, _) => await Guard(async () => { server.Enabled = toggle.IsChecked == true; await db.SaveChangesAsync(); });
+            toggle.Click += async (_, _) => await Guard(async () => { server.Enabled = toggle.IsChecked == true; await db.SaveChangesAsync(); await McpConfigFile.PublishAsync(db); });
             mcpMenu.Children.Add(toggle);
         }
         mcpMenu.Children.Add(Item("Configurer MCP…", Settings));
@@ -192,16 +192,13 @@ public sealed partial class MainWindow
         Grid.SetRow(gitFiles, 1); git.Children.Add(gitFiles);
         var diffScroll = new ScrollViewer { Content = gitDiff, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
         Grid.SetRow(diffScroll, 2); git.Children.Add(diffScroll);
-        gitFiles.SelectionChanged += async (_, _) => await Guard(async () =>
+        gitFiles.ItemInvoked += async (_, e) => await Guard(async () =>
         {
+            if (e.InvokedItem is not TreeViewNode { Content: FrameworkElement { Tag: GitChangedFile file } }) return;
             var revision = ++gitDiffRevision; gitDiff.Children.Clear();
-            if (gitFiles.SelectedItem is not GitChangedFile file) return;
             var text = await GitWorkspace.DiffAsync(file, CancellationToken.None);
             if (revision != gitDiffRevision) return;
-            foreach (var line in text.Split('\n'))
-                gitDiff.Children.Add(new TextBlock { Text = line.TrimEnd('\r'), FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Code, Consolas"),
-                    IsTextSelectionEnabled = true, FontSize = 12,
-                    Foreground = line.StartsWith('+') ? Brush(110, 220, 150) : line.StartsWith('-') ? Brush(255, 145, 145) : line.StartsWith("@@") ? Brush(130, 175, 255) : Brush(220, 225, 235) });
+            RenderGitPreview(file, GitWorkspace.ParseDiff(text));
             diffScroll.ChangeView(0, 0, null);
         });
         toolTabs.Items.Add(new PivotItem { Header = "Git", Content = git });
@@ -286,7 +283,7 @@ public sealed partial class MainWindow
     {
         fileRevision++;
         fileDirectory = null; selectedFile = null; fileLocation.Text = "";
-        fileList.ItemsSource = null; fileContent.Text = ""; gitRevision++; gitDiffRevision++; gitFiles.ItemsSource = null; gitDiff.Children.Clear(); gitSummary.Text = "";
+        fileList.ItemsSource = null; fileContent.Text = ""; gitRevision++; gitDiffRevision++; gitFiles.RootNodes.Clear(); gitDiff.Children.Clear(); gitSummary.Text = "";
         var dirs = project?.GetSourceFolders() ?? [];
         RefreshTerminals();
         SyncBrowserPresentation();
@@ -347,16 +344,16 @@ public sealed partial class MainWindow
     async Task<string> RefreshGitAsync(CancellationToken ct, Project? targetProject = null)
     {
         var revision = ++gitRevision; gitDiffRevision++;
-        gitFiles.ItemsSource = null; gitDiff.Children.Clear();
+        gitFiles.RootNodes.Clear(); gitDiff.Children.Clear();
         var folders = (targetProject ?? project)?.GetSourceFolders() ?? [];
         gitSummary.Text = T("Chargement…");
         var repos = folders.Where(WorkspaceTools.HasGitRepository).ToList();
-        var files = await GitWorkspace.ListAsync(repos, ct);
+        var files = await GitWorkspace.ListWithStatsAsync(repos, ct);
         if (revision != gitRevision) return "";
         gitSummary.Text = repos.Count == 0 ? T("Aucun dépôt Git : .git absent du dossier du projet.")
             : files.Count == 0 ? (state.Language == "en" ? "No modified files." : "Aucun fichier modifié.")
             : (state.Language == "en" ? $"{files.Count} modified file(s) · Changes since HEAD" : $"{files.Count} fichier(s) modifié(s) · Depuis le dernier commit");
-        gitFiles.ItemsSource = files;
+        BuildGitTree(files);
         if (targetProject != null)
         {
             var results = new List<string>();
@@ -766,7 +763,9 @@ public sealed partial class MainWindow
             return list;
         }
 
-        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureRegion(int x, int y, int width, int height, CursorSnapshot? savedCursor = null)
+        [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+        [DllImport("gdi32.dll")] static extern bool PatBlt(IntPtr dc, int x, int y, int width, int height, uint operation);
+        internal static (byte[] Pixels, int X, int Y, int Width, int Height) CaptureRegion(int x, int y, int width, int height, CursorSnapshot? savedCursor = null, IntPtr window = default)
         {
             if (width <= 0 || height <= 0) throw new InvalidOperationException("Region dimensions must be greater than zero.");
             var screenDc = GetDC(IntPtr.Zero); var memoryDc = IntPtr.Zero; var bitmap = IntPtr.Zero; var previous = IntPtr.Zero;
@@ -775,7 +774,13 @@ public sealed partial class MainWindow
                 if (screenDc == IntPtr.Zero || (memoryDc = CreateCompatibleDC(screenDc)) == IntPtr.Zero || (bitmap = CreateCompatibleBitmap(screenDc, width, height)) == IntPtr.Zero)
                     throw new InvalidOperationException("Desktop capture initialization failed.");
                 previous = SelectObject(memoryDc, bitmap);
-                if (!BitBlt(memoryDc, 0, 0, width, height, screenDc, x, y, SourceCopy | CaptureLayered)) throw new InvalidOperationException("Desktop capture failed.");
+                if (window != IntPtr.Zero)
+                {
+                    // Initialize the buffer and never substitute another application's desktop pixels.
+                    if (!PatBlt(memoryDc, 0, 0, width, height, 0x00000042)) throw new IOException("Window capture initialization failed.");
+                    if (!PrintWindow(window, memoryDc, 2)) throw new InvalidOperationException("Capture de cette fenêtre indisponible (protection ou rendu incompatible).");
+                }
+                else if (!BitBlt(memoryDc, 0, 0, width, height, screenDc, x, y, SourceCopy | CaptureLayered)) throw new InvalidOperationException("Desktop capture failed.");
                 var cursor = savedCursor ?? GetCursorSnapshot();
                 if (cursor.Visible && cursor.Handle != IntPtr.Zero)
                 {
@@ -805,6 +810,27 @@ public sealed partial class MainWindow
             var width = GetSystemMetrics(VirtualWidth); var height = GetSystemMetrics(VirtualHeight);
             return CaptureRegion(x, y, width, height);
         }
+    }
+    static readonly SemaphoreSlim applicationCaptureGate = new(1, 1);
+    static async Task<(byte[] Pixels, int X, int Y, int Width, int Height)> CaptureApplicationPixelsAsync(ApplicationWindow window, DesktopInterop.CursorSnapshot cursor, CancellationToken ct)
+    {
+        // PrintWindow is synchronous and third-party applications can hang. Keep UI responsive,
+        // bound callers' wait, and prevent spawning more workers while a capture remains blocked.
+        if (!applicationCaptureGate.Wait(0)) throw new IOException("Une capture de fenêtre est encore en cours. Réessayez plus tard.");
+        var task = Task.Run(() =>
+        {
+            try
+            {
+                using var dpi = DesktopApplications.PhysicalCoordinates();
+                var current = DesktopApplications.Resolve(window.Id);
+                if (current != window) throw new IOException("La fenêtre a changé. Recommencez la capture.");
+                return DesktopInterop.CaptureRegion((int)window.X, (int)window.Y, (int)window.Width, (int)window.Height, cursor, (nint)window.NativeId);
+            }
+            finally { applicationCaptureGate.Release(); }
+        });
+        // Observe a late fault even if cancellation/timeout ends the caller's wait first.
+        _ = task.ContinueWith(t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+        return await task.WaitAsync(TimeSpan.FromSeconds(5), ct);
     }
     async Task RestoreForegroundWindowAsync(IntPtr targetWindow, CancellationToken ct)
     {
@@ -836,20 +862,30 @@ public sealed partial class MainWindow
         };
         return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
-    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, int clickCount, CancellationToken ct)
+    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, int clickCount, CancellationToken ct, string? windowId = null)
     {
         action = action.Trim().ToLowerInvariant(); button = MouseInput.NormalizeButton(button);
         if (action is not ("move" or "click" or "scroll")) throw new ArgumentException(T("Action souris invalide : move, click ou scroll."));
         clickCount = MouseInput.NormalizeClickCount(clickCount);
+        var application = windowId == null ? null : DesktopApplications.Resolve(windowId);
+        var point = application?.RelativePoint(x, y) ?? (X: x, Y: y);
         var minX = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX); var minY = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualY);
         var width = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth); var height = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
-        var px = (int)Math.Round(x); var py = (int)Math.Round(y);
+        var px = (int)Math.Floor(point.X); var py = (int)Math.Floor(point.Y);
         if (px < minX || py < minY || px >= minX + width || py >= minY + height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors du bureau Windows."));
         var details = T("Action souris demandée : ") + action + $"\nX={px}, Y={py}" + (action == "scroll" ? $"\nΔY={deltaY:0}" : "") + (action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "");
-        var targetWindow = DesktopInterop.GetForegroundWindow();
+        if (application != null) details += "\n" + application.Application + " · " + application.Title + "\nwindow_id=" + windowId;
+        var targetWindow = application == null ? DesktopInterop.GetForegroundWindow() : (nint)application.NativeId;
         if (!await RequestAccessAsync("desktop|mouse", T("Contrôler la souris Windows"), details, T("Souris sur le bureau Windows"), ct)) return T("Accès refusé par l’utilisateur.");
         ct.ThrowIfCancellationRequested();
         await RestoreForegroundWindowAsync(targetWindow, ct);
+        if (windowId != null)
+        {
+            application = DesktopApplications.Resolve(windowId);
+            point = application.RelativePoint(x, y);
+            DesktopApplications.DemandPointTarget(application, point.X, point.Y);
+            px = (int)Math.Floor(point.X); py = (int)Math.Floor(point.Y);
+        }
         if (!DesktopInterop.SetCursorPos(px, py)) throw new InvalidOperationException(T("Impossible de déplacer le pointeur."));
         if (action is "click" or "scroll") await Task.Delay(60, ct);
         if (action == "click")
@@ -889,9 +925,9 @@ public sealed partial class MainWindow
         int? x, int? y, int? width, int? height,
         int? maxWidth, int? maxHeight,
         int? quality,
-        CancellationToken ct, Provider? targetProvider = null)
+        CancellationToken ct, Provider? targetProvider = null, string? windowId = null)
     {
-        if ((targetProvider ?? provider)?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
+        if ((targetProvider ?? provider)?.SupportsImages != true && !VisionBridge.Enabled(state.EnabledSkills)) return T("Le modèle actif n’accepte pas les images.");
 
         var screens = DesktopInterop.GetScreens();
         var vx = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX);
@@ -899,12 +935,20 @@ public sealed partial class MainWindow
         var vw = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth);
         var vh = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
 
-        var region = ScreenGeometry.ResolveRegion(screens, screenTarget, x, y, width, height, vx, vy, vw, vh);
+        var application = windowId == null ? null : DesktopApplications.Resolve(windowId);
+        if (application != null)
+        {
+            if (screenTarget != null || x.HasValue || y.HasValue || width.HasValue || height.HasValue) throw new ArgumentException("window_id cannot be combined with screen/crop.");
+            DesktopApplications.ValidateCapture(application);
+        }
+        var region = application == null ? ScreenGeometry.ResolveRegion(screens, screenTarget, x, y, width, height, vx, vy, vw, vh)
+            : (X: (int)application.X, Y: (int)application.Y, Width: (int)application.Width, Height: (int)application.Height);
         var targetWindow = DesktopInterop.GetForegroundWindow();
         var cursor = DesktopInterop.GetCursorSnapshot();
 
         string targetDesc;
-        if (x.HasValue && y.HasValue && width.HasValue && height.HasValue)
+        if (application != null) targetDesc = application.Application + " · " + application.Title + " (" + windowId + ")";
+        else if (x.HasValue && y.HasValue && width.HasValue && height.HasValue)
             targetDesc = $"Zone personnalisée ({region.Width} × {region.Height}, position {region.X},{region.Y})";
         else if (string.Equals(screenTarget, "all", StringComparison.OrdinalIgnoreCase))
             targetDesc = $"Tous les écrans ({region.Width} × {region.Height})";
@@ -927,7 +971,14 @@ public sealed partial class MainWindow
         ct.ThrowIfCancellationRequested();
         await RestoreForegroundWindowAsync(targetWindow, ct);
 
-        var capture = DesktopInterop.CaptureRegion(region.X, region.Y, region.Width, region.Height, cursor);
+        if (windowId != null)
+        {
+            application = DesktopApplications.Resolve(windowId);
+            DesktopApplications.ValidateCapture(application);
+            region = ((int)application.X, (int)application.Y, (int)application.Width, (int)application.Height);
+        }
+        var capture = application == null ? DesktopInterop.CaptureRegion(region.X, region.Y, region.Width, region.Height, cursor)
+            : await CaptureApplicationPixelsAsync(application, cursor, ct);
         var (scaledW, scaledH) = ScreenGeometry.CalculateScaledDimensions(capture.Width, capture.Height, maxWidth, maxHeight);
         byte[] pixels = capture.Pixels;
         int finalW = capture.Width;
@@ -993,6 +1044,8 @@ public sealed partial class MainWindow
         {
             ok = true,
             target = targetDesc,
+            window_id = windowId,
+            window = application == null ? null : new { width = application.Width, height = application.Height, x = application.X, y = application.Y },
             captured_region = new { x = region.X, y = region.Y, width = region.Width, height = region.Height },
             image = new { width = finalW, height = finalH, mime, size_bytes = bytes.Length }
         });
@@ -1115,7 +1168,7 @@ public sealed partial class MainWindow
     }
     async Task<string> CaptureBrowserScreenshotAsync(CancellationToken ct, Provider? targetProvider = null)
     {
-        if ((targetProvider ?? provider)?.SupportsImages != true) return T("Le modèle actif n’accepte pas les images.");
+        if ((targetProvider ?? provider)?.SupportsImages != true && !VisionBridge.Enabled(state.EnabledSkills)) return T("Le modèle actif n’accepte pas les images.");
         await EnsureBrowser();
         var permission = BrowserPermissionTarget();
         if (!await RequestAccessAsync(permission.Key + "|screenshot", T("Capturer et transmettre la page"), T("Une image de la zone visible du navigateur sera transmise au fournisseur IA.") + "\n\n" + permission.Description, T("Captures du navigateur · ") + permission.Description, ct)) return T("Accès refusé par l’utilisateur.");
@@ -1197,6 +1250,8 @@ public sealed partial class MainWindow
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute Windows path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
         RagTools.AddDefinitions(definitions, project.GetSourceFolders().Count > 0, state.EnabledSkills);
+        VisionBridge.AddDefinitions(definitions, state.EnabledSkills);
+        PythonTools.AddDefinitions(definitions, state.EnabledSkills);
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a PowerShell command in the attached project folder. Each invocation is a new session, 30 second default timeout, configurable up to 600 seconds. The command runs with the user's Windows privileges.", new() { ["command"] = StringProperty() }, "command");
         if (Skills.Enabled(state.EnabledSkills, "terminal")) TerminalHub.AddDefinitions(definitions);
         if (Skills.Enabled(state.EnabledSkills, "sources") && (run.Chat.SandboxEnabled || (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false))) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
@@ -1231,5 +1286,6 @@ public sealed partial class MainWindow
                 ["quality"] = new JsonObject { ["type"] = "integer", ["description"] = "Optional image quality (1 to 100). If < 100, encodes as JPEG with given quality. 100 encodes as PNG." }
             });
         }
+        ApplicationTools.AddDefinitions(definitions, state.EnabledSkills);
     }
 }

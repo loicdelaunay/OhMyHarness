@@ -3,12 +3,49 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using OhMyHarness.Core;
 
 namespace OhMyHarness.App;
 
 internal static class FluentDesign
 {
-    public static Brush Resource(string key) => (Brush)Application.Current.Resources[key];
+    static AppearanceTheme theme = AppearanceThemes.All[0];
+    static readonly Dictionary<string, SolidColorBrush> resources = [];
+    static readonly Dictionary<(byte R, byte G, byte B), SolidColorBrush> adapted = [];
+    static Windows.UI.Color Color(string hex) => ColorHelper.FromArgb(255, Convert.ToByte(hex.Substring(1,2),16), Convert.ToByte(hex.Substring(3,2),16), Convert.ToByte(hex.Substring(5,2),16));
+    static Windows.UI.Color ResourceColor(string key) => key switch
+    {
+        "TextFillColorPrimaryBrush" => Color(theme.Text),
+        "TextFillColorSecondaryBrush" => Color(theme.Muted),
+        "CardStrokeColorDefaultBrush" => ColorHelper.FromArgb(theme.Dark ? (byte)24 : (byte)32, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0),
+        "SolidBackgroundFillColorBaseBrush" => Color(theme.Background),
+        "SystemAccentColor" => Color(theme.Accent),
+        _ => Color(theme.Surface)
+    };
+    public static Brush Resource(string key)
+    {
+        if (!resources.TryGetValue(key, out var brush)) resources[key] = brush = new(ResourceColor(key));
+        return brush;
+    }
+    public static SolidColorBrush Adapt(byte r, byte g, byte b)
+    {
+        if (!adapted.TryGetValue((r,g,b), out var brush)) adapted[(r,g,b)] = brush = new(AdaptColor(r,g,b));
+        return brush;
+    }
+    static Windows.UI.Color AdaptColor(byte r, byte g, byte b)
+    {
+        if (Math.Max(r,Math.Max(g,b)) < 115) return Color(theme.Surface);
+        if (Math.Max(r,Math.Max(g,b)) - Math.Min(r,Math.Min(g,b)) < 85 && Math.Min(r,Math.Min(g,b)) > 105)
+            return Color(Math.Max(r,Math.Max(g,b)) > 220 ? theme.Text : theme.Muted);
+        if (!theme.Dark) return ColorHelper.FromArgb(255, (byte)(r*.55), (byte)(g*.55), (byte)(b*.55));
+        return ColorHelper.FromArgb(255,r,g,b);
+    }
+    public static void SetTheme(string id)
+    {
+        theme = AppearanceThemes.Get(id);
+        foreach (var (key,brush) in resources) brush.Color = ResourceColor(key);
+        foreach (var (key,brush) in adapted) brush.Color = AdaptColor(key.R,key.G,key.B);
+    }
     public static Brush Card => Resource("CardBackgroundFillColorDefaultBrush");
     public static Brush Stroke => Resource("CardStrokeColorDefaultBrush");
     public static Brush Primary => Resource("TextFillColorPrimaryBrush");
@@ -67,12 +104,9 @@ internal static class FluentDesign
     {
         window.SystemBackdrop = new MicaBackdrop();
         var bar = window.AppWindow.TitleBar;
-        bar.BackgroundColor = ColorHelper.FromArgb(255, 32, 32, 32);
-        bar.ForegroundColor = Colors.White;
-        bar.InactiveBackgroundColor = ColorHelper.FromArgb(255, 32, 32, 32);
-        bar.InactiveForegroundColor = ColorHelper.FromArgb(255, 160, 160, 160);
-        bar.ButtonBackgroundColor = ColorHelper.FromArgb(255, 32, 32, 32); bar.ButtonForegroundColor = Colors.White;
-        bar.ButtonInactiveBackgroundColor = ColorHelper.FromArgb(255, 32, 32, 32);
-        bar.ButtonInactiveForegroundColor = ColorHelper.FromArgb(255, 160, 160, 160);
+        bar.BackgroundColor = bar.InactiveBackgroundColor = Color(theme.Background);
+        bar.ForegroundColor = bar.ButtonForegroundColor = Color(theme.Text);
+        bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = Color(theme.Muted);
+        bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = Color(theme.Background);
     }
 }

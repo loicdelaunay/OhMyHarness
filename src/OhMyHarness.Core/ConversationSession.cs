@@ -12,6 +12,7 @@ public class ConversationSession : IDisposable
     public Dictionary<string,Provider> AgentProviders { get; } = new(StringComparer.OrdinalIgnoreCase);
     public volatile ConversationExport.Progress? ExportProgress;
     public WorkflowTools? Workflow { get; set; }
+    public VisionBridge? Vision { get; set; }
     public ToolLoopGuard LoopGuard { get; } = new();
     public SandboxWorkspace? Sandbox { get; private set; }
     public string? SandboxEngine { get; private set; }

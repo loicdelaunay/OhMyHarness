@@ -15,6 +15,17 @@ public sealed class PendingInput
 }
 public static class ConversationInbox
 {
+    public static async Task UpdateAsync(string database, int chatId, int id, string expectedText, string text, bool steer = false, int? providerId = null, CancellationToken ct = default)
+    {
+        await using var db = new HarnessDb(database);
+        var input = await db.PendingInputs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.ChatId == chatId, ct)
+            ?? throw new InvalidOperationException("Ce message a déjà été envoyé ou supprimé.");
+        if (string.IsNullOrWhiteSpace(text) && input.Images().Count == 0) throw new ArgumentException("Message requis.");
+        var updated = await db.PendingInputs.Where(x => x.Id == id && x.ChatId == chatId && x.Text == expectedText && x.Mode == input.Mode)
+            .ExecuteUpdateAsync(set => set.SetProperty(x => x.Text, text).SetProperty(x => x.Mode, steer ? "steering" : input.Mode)
+                .SetProperty(x => x.ProviderId, providerId ?? input.ProviderId), ct);
+        if (updated != 1) throw new InvalidOperationException("Ce message a été modifié, envoyé ou supprimé. Actualisez la file.");
+    }
     public static async Task<PendingInput> AddAsync(string database, int chatId, int providerId, string text, IEnumerable<Attachment> images, string mode, CancellationToken ct=default)
     {
         if(mode is not ("queued" or "steering")) throw new ArgumentException("Mode d'envoi invalide.");
@@ -46,6 +57,8 @@ public static class ConversationInbox
         if(run.PendingInputId==0)return;
         var input=await run.Db.PendingInputs.SingleOrDefaultAsync(x=>x.Id==run.PendingInputId && x.ChatId==run.Chat.Id,ct);
         if(input==null)throw new InvalidOperationException("Message en attente introuvable.");
+        if(input.Text.Trim() != run.Prompt.Trim() || input.ProviderId != run.SelectedProviderId)
+            throw new InvalidOperationException("Le message a été modifié avant son envoi. Il reste dans la file : reprenez-la pour envoyer la nouvelle version.");
         run.Db.PendingInputs.Remove(input); // Saved atomically with the first user message.
     }
 }

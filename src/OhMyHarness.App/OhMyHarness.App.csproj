@@ -20,4 +20,5 @@
     <PackageReference Include="Markdig" Version="0.40.0" />
     <ProjectReference Include="../OhMyHarness.Core/OhMyHarness.Core.csproj" />
   </ItemGroup>
+  <Import Project="../../build/PythonRuntime.targets" />
 </Project>

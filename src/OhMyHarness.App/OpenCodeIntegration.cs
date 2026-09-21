@@ -198,6 +198,11 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         Message? active = null; AssistantMessageUi? assistantUi = null;
         try
         {
+            if (!provider.SupportsImages && run.Images.Count > 0)
+            {
+                var described = await VisionFor(run).PrepareAsync(new JsonArray(ChatEngine.ToWire(user)), ct);
+                prompt = described[0]!["content"]!.GetValue<string>(); images.Clear();
+            }
             await EnsureOpenCodeServerAsync(provider, password, ct, run.Project);
             var directory = OpenCodeDirectory(run.Project);
             var link = await db.ExternalChatSessions.SingleOrDefaultAsync(x => x.ChatId == chat.Id && x.ProviderId == provider.Id, ct);

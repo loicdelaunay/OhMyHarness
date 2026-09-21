@@ -9,11 +9,13 @@ assert.equal(app.getPath('sessionData'), path.join(process.env.OHMYHARNESS_TEST_
 assert.equal(app.getPath('temp'), path.join(process.env.OHMYHARNESS_TEST_DATA, 'temp'));
 assert.equal(app.getPath('crashDumps'), path.join(process.env.OHMYHARNESS_TEST_DATA, 'crashes'));
 let server, finishResponse;
+const fixtureSources=path.join(process.env.OHMYHARNESS_TEST_DATA,'sources');
 const gitFixture=path.join(process.env.OHMYHARNESS_TEST_DATA,'git-fixture');
 async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,80));}throw new Error('Smoke test timed out');}
 (async()=>{
   await fs.mkdir(directory,{recursive:true});
-  await fs.writeFile(path.join(directory,'report.html'),'<!doctype html><h1>Local report opened from chat</h1>');
+  await fs.mkdir(fixtureSources,{recursive:true});
+  await fs.writeFile(path.join(fixtureSources,'report.html'),'<!doctype html><h1>Local report opened from chat</h1>');
   await fs.mkdir(gitFixture,{recursive:true});
   const {execFileSync}=require('node:child_process');
   const git=args=>execFileSync('git',args,{cwd:gitFixture,windowsHide:true});
@@ -39,6 +41,7 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await app.whenReady();
   const win=await waitFor(()=>BrowserWindow.getAllWindows()[0]);
   const evaluate=source=>win.webContents.executeJavaScript(source,true);
+  async function captureSettings(name){if(!process.env.OHMYHARNESS_DESIGN_QA)return;const dir=path.resolve(__dirname,'../../artifacts/design');await fs.mkdir(dir,{recursive:true});await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await new Promise(r=>setTimeout(r,350));await fs.writeFile(path.join(dir,name+'.png'),(await win.webContents.capturePage()).toPNG());}
   await waitFor(()=>evaluate('!!window.harness && document.getElementById("platform")?.textContent.length > 0').catch(()=>false));
   assert.equal(webContents.getAllWebContents().length,1,'No browser process/view is created at startup');
   await evaluate('showTools(true);selectTab("terminal");selectTab("web");showTools(false)');
@@ -46,14 +49,25 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   const base=`http://127.0.0.1:${server.address().port}`;
   const model=await evaluate(`window.harness.call('provider.save',${JSON.stringify({name:'Smoke provider',baseUrl:base+'/v1',kind:'openai',model:'smoke',key:'fake-test-key',supportsImages:true})})`);
   const snapshot=await evaluate(`window.harness.call('snapshot')`),project=snapshot.projects[0];
-  await evaluate(`window.harness.call('project.save',${JSON.stringify({id:project.id,name:project.name,folders:[directory,gitFixture]})})`);
+  await evaluate(`window.harness.call('project.save',${JSON.stringify({id:project.id,name:project.name,folders:[fixtureSources,gitFixture]})})`);
   const chat=await evaluate(`window.harness.call('chat.save',{projectId:${project.id},title:'Smoke conversation'})`);
   await evaluate(`(async()=>{await refresh();providerId=${model.id};projectId=${project.id};await selectChat(${chat.id});document.getElementById('composer').value='Hello';document.getElementById('send').click();})()`);
   await waitFor(()=>evaluate(`document.querySelector('.chat-row progress') !== null`));
   assert.equal(await evaluate(`document.getElementById('new-chat').disabled`),false);
   assert.equal(await evaluate(`document.getElementById('composer').disabled`),false);
   assert.equal(await evaluate(`document.getElementById('send').disabled`),false,'Can send while the current model runs');
-  assert.equal(await evaluate(`document.getElementById('delivery-mode').hidden`),false);
+  assert.equal(await evaluate(`document.getElementById('delivery-mode')`),null);
+  await evaluate(`document.getElementById('composer').value='queued original';document.getElementById('send').click()`);
+  await waitFor(()=>evaluate(`document.querySelector('#inbox .inbox-row')!==null`));
+  assert.equal(await evaluate(`inboxes.get(chatId)[0].mode`),'queued');
+  await evaluate(`document.querySelectorAll('#inbox .inbox-actions button')[1].click()`);
+  await waitFor(()=>evaluate(`document.querySelector('dialog[open] textarea')!==null`));
+  await evaluate(`document.querySelector('dialog[open] textarea').value='edited\\nsecond line';document.querySelector('dialog[open] button').click()`);
+  await waitFor(()=>evaluate(`inboxes.get(chatId)[0]?.text.startsWith('edited')`));
+  await evaluate(`document.querySelectorAll('#inbox .inbox-actions button')[2].click()`);
+  await waitFor(()=>evaluate(`inboxes.get(chatId)[0]?.mode==='steering'`));
+  await evaluate(`document.querySelector('#inbox .inbox-actions button').click()`);
+  await waitFor(()=>evaluate(`inboxes.get(chatId).length===0`));
   await evaluate(`document.getElementById('new-chat').click()`);
   await waitFor(()=>evaluate(`chatId!==${chat.id} && !document.getElementById('send').disabled`));
   await evaluate('showSettings()');
@@ -74,24 +88,61 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   win.webContents.send('harness:event',{event:'subagent',chatId:chat.id,child:{id:'fixture-child',chatId:chat.id,name:'Recherche',task:'Examiner les sources',status:'completed',activity:'completed',transcriptJson:'[{"role":"assistant","content":"Child finished"}]'}});
   await waitFor(()=>evaluate('document.querySelector(".child-row")===null'));
   await evaluate('document.querySelector("#messages button").click()');
-  assert.ok(await evaluate('document.querySelector(".child-bubble").textContent.includes("completed")'));
+  assert.equal(await evaluate('document.querySelector(".child-bubble .agent-card").dataset.status'),'completed');
   await evaluate(`window.savedHistory=histories.get(chatId);histories.set(chatId,Array.from({length:30},(_,i)=>({id:9000+i,role:'assistant',content:'History '+i+' long text '.repeat(100)})));renderMessages(true);`);
-  await evaluate(`$('messages').scrollTop=100`);
+  // A layout-induced offset reduction is not a user scrolling up.
+  await evaluate(`$('messages').scrollTop=100;$('messages').dispatchEvent(new Event('scroll'))`);
+  assert.equal(await evaluate('followChatTail'),true,'Programmatic offset changes retain automatic follow');
+  await evaluate(`followMessages();$('messages').dispatchEvent(new WheelEvent('wheel',{deltaY:-120}));$('messages').dispatchEvent(new Event('scroll'))`);
+  assert.equal(await evaluate('followChatTail'),false,'A delayed bottom event cannot undo an upward gesture');
+  await evaluate(`followMessages();$('messages').dispatchEvent(new WheelEvent('wheel',{deltaY:-120}));$('messages').scrollTop=100`);
   await waitFor(()=>evaluate('!followChatTail'));
   assert.equal(await evaluate('document.getElementById("auto-scroll").getAttribute("aria-pressed")'),'false');
   assert.equal(await evaluate(`updateMessage(chatId,{id:9030,role:'tool',content:'Incoming tool'});renderMessages();Math.round($('messages').scrollTop)`),100);
-  await evaluate(`$('messages').scrollTop=$('messages').scrollHeight`);
+  await evaluate(`$('messages').dispatchEvent(new WheelEvent('wheel',{deltaY:120}));$('messages').scrollTop=$('messages').scrollHeight`);
   await waitFor(()=>evaluate('followChatTail'));
   assert.equal(await evaluate(`updateMessage(chatId,{id:9031,role:'assistant',content:'Streaming tail '.repeat(500)});$('messages').scrollHeight-$('messages').scrollTop-$('messages').clientHeight<=8`),true);
+  await evaluate(`updateMessage(chatId,{id:9031,role:'assistant',content:'Shortened response'});renderMessages()`);
+  await waitFor(()=>evaluate(`followChatTail && $('messages').scrollHeight-$('messages').scrollTop-$('messages').clientHeight<=8`));
+  await evaluate(`$('auto-scroll').click();$('messages').dispatchEvent(new Event('scroll'));updateMessage(chatId,{id:9032,role:'assistant',content:'New content '.repeat(500)})`);
+  await new Promise(r=>setTimeout(r,150));
+  assert.equal(await evaluate('followChatTail'),false,'Manual off survives layout and new content');
+  await evaluate(`$('auto-scroll').click();var nested=document.createElement('div');nested.className='reasoning';nested.textContent='Nested reasoning '.repeat(1000);$('messages').append(nested);nested.dispatchEvent(new WheelEvent('wheel',{deltaY:-120,bubbles:true}))`);
+  assert.equal(await evaluate('followChatTail'),true,'Scrolling reasoning leaves main chat follow enabled');
   await evaluate('histories.set(chatId,window.savedHistory);renderMessages(true);delete window.savedHistory');
   await evaluate('showSettings()');
   assert.equal(await evaluate(`document.querySelector('[data-settings="skills"]').nextElementSibling.dataset.settings`),'mcp');
   assert.equal(await evaluate(`getComputedStyle(document.getElementById('setting-tabs')).flexDirection`),'column');
+  await evaluate(`settingsTab='general';renderSettings();document.getElementById('theme-selector').value='ivory';document.querySelector('#settings-content button').click()`);
+  await waitFor(()=>evaluate(`document.documentElement.dataset.theme==='ivory'`));
+  assert.equal(await evaluate(`document.documentElement.classList.contains('theme-light')`),true);
+  assert.equal(await evaluate(`document.querySelectorAll('#theme-selector option').length`),6);await captureSettings('settings-ivory');
+  await evaluate(`document.getElementById('settings').close();document.getElementById('info-toggle').click()`);
+  await waitFor(()=>evaluate(`document.querySelector('.metrics').hidden`));
+  assert.equal(await evaluate(`JSON.parse(snapshot.state.featuresJson).ComposerInfoExpanded`),false);
+  await evaluate(`document.getElementById('info-toggle').click()`);await waitFor(()=>evaluate(`!document.querySelector('.metrics').hidden`));
+  assert.equal(await evaluate(`document.querySelector('.metrics').parentElement===document.querySelector('.composer').parentElement`),true);
+  await evaluate(`showSettings()`);
+  await evaluate(`settingsTab='providers';renderSettings()`);await captureSettings('provider-cards');
+  await evaluate(`document.querySelector('.provider-card button').click()`);
+  assert.equal(await evaluate(`!!document.querySelector('#settings-content form input')`),true);
+  await evaluate(`settingsTab='mcp';renderSettings();mcpJsonEditor()`);
+  assert.equal(await evaluate(`JSON.parse(document.getElementById('mcp-json').value).mcpServers!=null`),true);await captureSettings('mcp-json-editor');
+  await evaluate(`settingsTab='general';renderSettings();document.getElementById('theme-selector').value='fluent-dark';document.querySelector('#settings-content button').click()`);
+  await waitFor(()=>evaluate(`document.documentElement.dataset.theme==='fluent-dark'`));
+
   assert.equal(await evaluate(`document.querySelector('[data-settings="rag"]')===null`),true);
   await evaluate(`settingsTab='skills';renderSettings();var rag=document.querySelector('[data-skill="rag"]');rag.checked=false;rag.dispatchEvent(new Event('change'))`);
   assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),true);
   await evaluate(`document.querySelector('[data-skill="rag"]').click()`);
   assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),false);
+  await evaluate(`var vision=document.querySelector('[data-skill="vision_bridge"]');vision.checked=true;vision.dispatchEvent(new Event('change'));document.querySelector('[data-vision-settings] select').value='${model.id}';document.querySelector('[data-vision-settings] input').value='vision-ui-model';[...document.querySelectorAll('#settings-content button')].find(x=>x.textContent==='Enregistrer'||x.textContent==='Save').click()`);
+  await waitFor(()=>evaluate(`JSON.parse(snapshot.state.featuresJson).VisionModel==='vision-ui-model'`));
+  assert.equal(await evaluate(`JSON.parse(snapshot.state.featuresJson).VisionProviderId`),model.id);
+  assert.equal(await evaluate(`document.querySelector('[data-vision-settings]').hidden`),false);
+  await evaluate(`document.querySelector('[data-skill="vision_bridge"]').checked=false;document.querySelector('[data-skill="vision_bridge"]').dispatchEvent(new Event('change'));[...document.querySelectorAll('#settings-content button')].find(x=>x.textContent==='Enregistrer'||x.textContent==='Save').click()`);
+  await waitFor(()=>evaluate(`!snapshot.state.enabledSkills.split(',').includes('vision_bridge')`));
+  assert.equal(await evaluate(`document.querySelector('[data-vision-settings]').hidden`),true);
   if(process.env.OHMYHARNESS_DESIGN_QA){
     const output=path.resolve(__dirname,'../../artifacts/design');await fs.mkdir(output,{recursive:true});
     async function capture(name){await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await new Promise(r=>setTimeout(r,350));await fs.writeFile(path.join(output,name+'.png'),(await win.webContents.capturePage()).toPNG());}
@@ -149,11 +200,14 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await evaluate("selectTab('git')");
   await waitFor(()=>evaluate("document.querySelector('#git-files button') !== null"));
   await evaluate("document.querySelector('#git-files button').click()");
-  await waitFor(()=>evaluate("document.getElementById('git-diff').textContent.includes('+after')"));
-  assert.ok(await evaluate("document.querySelector('#git-diff .diff-removed').textContent.startsWith('-')"));
+  await waitFor(()=>evaluate("document.getElementById('git-diff').textContent.includes('after')"));
+  assert.ok(await evaluate("document.querySelector('#git-diff .diff-removed').textContent.includes('before')"));
+  assert.ok(await evaluate("document.querySelector('#git-files details button .diff-added').textContent.includes('+1')"));
+  assert.ok(await evaluate("document.querySelector('#git-files details button .diff-removed').textContent.includes('−1')"));
+  assert.ok(await evaluate("document.querySelector('#git-diff .git-comparison .diff-added').textContent.includes('after')"));
   await evaluate(`(async()=>{showTools(false);for(const m of snapshot.mcpServers)await call('mcp.toggle',{id:m.id,enabled:false});window.previousChat=chatId;var fresh=await call('chat.save',{projectId,title:'Workflow smoke'});await refresh();await selectChat(fresh.id);document.getElementById('composer').value='workflow smoke';document.getElementById('send').click();})()`);
   await waitFor(()=>evaluate(`document.querySelector('#questions .question-card:not([hidden])')!==null`));
-  assert.ok(await evaluate(`document.querySelector('.task-list').textContent.includes('Analyser la demande')`));
+  assert.ok(await evaluate(`!document.getElementById('pinned-tasks').hidden && document.querySelector('.pinned-checklist').textContent.includes('Analyser la demande')`));
   await new Promise(r=>setTimeout(r,250));
   await fs.writeFile(path.join(directory,'desktop-question.png'),(await win.webContents.capturePage()).toPNG());
   await evaluate(`document.querySelector('#questions textarea').value='Mon rapport';window.workflowChat=chatId;selectChat(window.previousChat)`);
@@ -164,6 +218,7 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   assert.ok(await evaluate(`running.has(window.workflowChat)`));
   await evaluate(`document.querySelector('[data-close="settings"]').click();document.querySelector('#questions input').click();document.querySelector('#questions button[type="submit"]').click()`);
   await waitFor(()=>evaluate(`!running.has(window.workflowChat) && document.querySelector('.task-list').textContent.includes('2/2')`));
+  assert.ok(await evaluate(`document.getElementById('pinned-tasks').hidden`));
   assert.ok(await evaluate(`document.getElementById('messages').textContent.includes('Mon rapport')`));
   await evaluate(`document.getElementById('messages').scrollTop=0`);
   await new Promise(r=>setTimeout(r,250));
@@ -250,7 +305,7 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
     await waitFor(async()=>(await pool.execute('read_page',{chatId:901})).text.includes('Clicked'));
     assert.ok((await pool.execute('read_page',{chatId:902})).text.includes('Click me'));
     const shot=await pool.execute('browser_screenshot',{chatId:901});assert.ok(shot.data.length>0);
-    const localPage=await pool.execute('browser.local',{chatId:901,path:path.join(directory,'report.html'),folder:directory});
+    const localPage=await pool.execute('browser.local',{chatId:901,path:path.join(fixtureSources,'report.html'),folder:fixtureSources});
     assert.ok(localPage.text.includes('Local report opened from chat'));
     try { await pool.execute('browse',{chatId:902,url:localPage.url}); } catch { }
     assert.ok(!(await pool.execute('read_page',{chatId:902})).text.includes('Local report opened from chat'));

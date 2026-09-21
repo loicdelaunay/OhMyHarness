@@ -5,4 +5,5 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../OhMyHarness.Core/OhMyHarness.Core.csproj" /></ItemGroup>
+  <Import Project="../../build/PythonRuntime.targets" />
 </Project>

@@ -9,7 +9,7 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
-    sealed record McpEditorState(StackPanel Panel, Func<bool> Validate, Action Save);
+    sealed record McpEditorState(StackPanel Panel, Func<bool> Validate, Func<Task> Save);
     sealed class McpDraft(McpServer server)
     {
         public McpServer Server { get; } = server;
@@ -22,6 +22,17 @@ public sealed partial class MainWindow
         var drafts = db.McpServers.Local.Where(x => db.Entry(x).State != EntityState.Deleted)
             .Select(x => new McpDraft(JsonSerializer.Deserialize<McpServer>(JsonSerializer.Serialize(x))!)).ToList();
         var panel = new StackPanel { Spacing = 12 };
+        var jsonMode = new ToggleSwitch { Header = WorkflowText("Éditer MCP.json", "Edit MCP.json") };
+        var originalJson = File.Exists(McpConfigFile.FilePath) ? File.ReadAllText(McpConfigFile.FilePath) : McpConfigFile.Empty;
+        var json = new TextBox { Text = originalJson, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Code, Consolas"), MinHeight = 280, MaxHeight = 450 };
+        var jsonPanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
+        jsonPanel.Children.Add(Label(McpConfigFile.FilePath, 12));
+        jsonPanel.Children.Add(Label(WorkflowText("Format mcpServers : command, args, env, url, headers. Les valeurs env/headers sont conservées en clair dans ce fichier. Enregistrer valide et applique la configuration.", "mcpServers format: command, args, env, url, headers. Environment values and headers are stored as plain text in this file. Save validates and applies the configuration."), 12));
+        jsonPanel.Children.Add(json);
+        var reloadJson = new Button { Content = WorkflowText("Recharger le fichier", "Reload file") };
+        reloadJson.Click += (_, _) => { originalJson = File.Exists(McpConfigFile.FilePath) ? File.ReadAllText(McpConfigFile.FilePath) : McpConfigFile.Empty; json.Text = originalJson; };
+        jsonPanel.Children.Add(reloadJson);
         var chooser = new ComboBox { Header = T("Serveur MCP"), HorizontalAlignment = HorizontalAlignment.Stretch };
         var name = new TextBox { Header = T("Nom"), MaxLength = 100 };
         var enabled = new ToggleSwitch { Header = T("Activé"), OnContent = T("Activé"), OffContent = T("Désactivé") };
@@ -93,14 +104,25 @@ public sealed partial class MainWindow
         };
         bool Validate()
         {
+            if (jsonMode.IsOn)
+            {
+                try { _ = McpConfigFile.Parse(json.Text); return true; }
+                catch (Exception ex) { info.Text = ex.Message; return false; }
+            }
             Capture();
+            if (drafts.Select(x => x.Server.Name).Distinct(StringComparer.Ordinal).Count() != drafts.Count) { info.Text = WorkflowText("Chaque serveur doit avoir un nom unique.", "Server names must be unique."); return false; }
             foreach (var draft in drafts)
                 try { draft.Server.Validate(); if (draft.Secrets.Length > 0) _ = McpSecrets.Parse(draft.Secrets); }
                 catch (Exception ex) { Refresh(draft); info.Text = ex is JsonException ? T("JSON MCP invalide.") : ex.Message; return false; }
             return true;
         }
-        void Save()
+        async Task Save()
         {
+            if (jsonMode.IsOn)
+            {
+                await McpConfigFile.SaveJsonAsync(db, json.Text, originalJson, (s, _) => Task.FromResult(KeyVault.Encrypt(s)), decrypt: (s, _) => Task.FromResult(KeyVault.Decrypt(s)));
+                return;
+            }
             Capture();
             foreach (var old in db.McpServers.Local.ToList()) if (!drafts.Any(x => x.Server.Id == old.Id)) db.McpServers.Remove(old);
             foreach (var draft in drafts)
@@ -112,10 +134,19 @@ public sealed partial class MainWindow
                 target.ArgumentsJson = source.ArgumentsJson; target.WorkingDirectory = source.WorkingDirectory; target.Url = source.Url; target.ProtectedSecrets = protectedSecrets;
                 if (source.Id == 0) db.McpServers.Add(target);
             }
+            await db.SaveChangesAsync();
+            await McpConfigFile.PublishAsync(db, changedSecrets: drafts.Where(x => x.Secrets.Length > 0 || x.ClearSecrets).Select(x => x.Server.Name).ToHashSet());
         }
         panel.Children.Add(Label(T("MCP ajoute les outils des serveurs activés. Enregistrer applique la configuration. Les nouvelles connexions et les appels respectent les autorisations."), 12));
         panel.Children.Add(Label(T("Pour les API compatibles OpenAI/DeepSeek. OpenCode utilise sa propre configuration MCP."), 12));
         panel.Children.Add(add); panel.Children.Add(chooser); panel.Children.Add(fields); panel.Children.Add(Row(test, remove)); panel.Children.Add(info);
+        var formElements = panel.Children.Where(x => x != info).ToArray();
+        panel.Children.Insert(0, jsonMode); panel.Children.Insert(1, jsonPanel);
+        jsonMode.Toggled += (_, _) =>
+        {
+            foreach (var element in formElements) element.Visibility = jsonMode.IsOn ? Visibility.Collapsed : Visibility.Visible;
+            jsonPanel.Visibility = jsonMode.IsOn ? Visibility.Visible : Visibility.Collapsed;
+        };
         Refresh(drafts.FirstOrDefault());
         return new(panel, Validate, Save);
     }

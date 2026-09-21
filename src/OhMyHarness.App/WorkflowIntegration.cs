@@ -8,6 +8,37 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
+    readonly Border pinnedTasks = new() { Visibility = Visibility.Collapsed };
+    async Task RefreshPinnedTasksAsync()
+    {
+        var id = chat?.Id;
+        await using var store = new HarnessDb();
+        var json = id == null ? null : await store.Messages.Where(x => x.ChatId == id && x.Role == "tasks").Select(x => x.Content).FirstOrDefaultAsync();
+        if (chat?.Id == id) ShowPinnedTasks(json);
+    }
+    void ShowPinnedTasks(string? json)
+    {
+        var items = string.IsNullOrWhiteSpace(json) ? new JsonArray() : JsonNode.Parse(json) as JsonArray ?? [];
+        if (selectedSubagent != null || !items.Any(x => x?["status"]?.GetValue<string>() is "pending" or "in_progress"))
+        { pinnedTasks.Child = null; pinnedTasks.Visibility = Visibility.Collapsed; return; }
+        var panel = new StackPanel { Spacing = 4 };
+        foreach (var item in items)
+        {
+            var status = item?["status"]?.GetValue<string>();
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+            var check = new CheckBox { IsChecked = status == "completed", IsHitTestVisible = false, IsTabStop = false, MinWidth = 22, MinHeight = 24 };
+            row.Children.Add(check);
+            var label = new TextBlock { Text = (status == "in_progress" ? "◉ " : status == "cancelled" ? "— " : "") + item?["content"]?.GetValue<string>(),
+                TextWrapping = TextWrapping.Wrap, FontSize = 12, Foreground = status == "in_progress" ? FluentDesign.Primary : FluentDesign.Secondary, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(label, 1); row.Children.Add(label);
+            panel.Children.Add(row);
+        }
+        var expanded = (pinnedTasks.Child as Expander)?.IsExpanded ?? true;
+        pinnedTasks.Child = new Expander { Header = WorkflowText("À faire", "To do") + $" · {items.Count(x => x?["status"]?.GetValue<string>() == "completed")}/{items.Count}",
+            Content = new ScrollViewer { Content = panel, MaxHeight = 140 }, IsExpanded = expanded, HorizontalAlignment = HorizontalAlignment.Stretch };
+        pinnedTasks.Visibility = Visibility.Visible;
+    }
     string WorkflowText(string fr, string en) => state.Language == "en" ? en : fr;
     WorkflowTools CreateWorkflow(ConversationRun run) => new(
         async (questions, ct) =>
@@ -66,14 +97,16 @@ public sealed partial class MainWindow
             var message = await store.Messages.FirstOrDefaultAsync(x => x.ChatId == run.Chat.Id && x.Role == "tasks", ct);
             if (message == null) { message = new() { ChatId = run.Chat.Id, Role = "tasks", State = "ui" }; store.Messages.Add(message); }
             message.Content = items.ToJsonString(); await store.SaveChangesAsync(ct);
-            RenderTasks(message.Content, run.Messages);
+            RenderTasks(message.Content, run.Messages, run.Chat.Id);
         });
 
-    void RenderTasks(string json, StackPanel target)
+    void RenderTasks(string json, StackPanel target, int? ownerId = null)
     {
         foreach (var old in target.Children.OfType<FrameworkElement>().Where(x => Equals(x.Tag, "workflow-tasks")).ToList()) target.Children.Remove(old);
         var items = JsonNode.Parse(json) as JsonArray ?? [];
+        if ((ownerId ?? chat?.Id) == chat?.Id) ShowPinnedTasks(json);
         if (items.Count == 0) return;
+        if (items.Any(x => x?["status"]?.GetValue<string>() is "pending" or "in_progress")) return;
         var panel = new StackPanel { Spacing = 8 };
         panel.Children.Add(new TextBlock { Text = WorkflowText("Tâches", "Tasks") + $" · {items.Count(x => x?["status"]?.GetValue<string>() == "completed")}/{items.Count}", FontSize = 18 });
         foreach (var item in items)
@@ -82,7 +115,7 @@ public sealed partial class MainWindow
             var label = status switch { "completed" => WorkflowText("✓ Terminée", "✓ Completed"), "in_progress" => WorkflowText("◉ En cours", "◉ In progress"), "cancelled" => WorkflowText("— Annulée", "— Cancelled"), _ => WorkflowText("○ À faire", "○ To do") };
             panel.Children.Add(new TextBlock { Text = label + " · " + item?["content"]?.GetValue<string>(), TextWrapping = TextWrapping.Wrap });
         }
-        var card = new Expander { Header = WorkflowText("Étapes du travail", "Work steps"), Content = panel, IsExpanded = true, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "workflow-tasks" };
+        var card = new Expander { Header = WorkflowText("Étapes du travail", "Work steps"), Content = panel, IsExpanded = false, HorizontalAlignment = HorizontalAlignment.Stretch, Tag = "workflow-tasks" };
         target.Children.Insert(0, card);
     }
 }

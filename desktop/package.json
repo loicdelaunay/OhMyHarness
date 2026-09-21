@@ -19,7 +19,7 @@
     "appId": "com.ohmyharness.desktop",
     "productName": "OhMyHarness",
     "asar": true,
-    "files": ["main.cjs", "preload.cjs", "browser.cjs", "policy.cjs", "ui/**", "package.json"],
+    "files": ["main.cjs", "preload.cjs", "browser.cjs", "application-capture.cjs", "policy.cjs", "ui/**", "package.json"],
     "extraResources": [{ "from": "sidecar/${os}-${arch}", "to": "service" }],
     "directories": { "output": "dist" },
     "mac": {

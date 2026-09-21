@@ -4,6 +4,8 @@ namespace OhMyHarness.Core;
 
 public sealed class FeatureSettings
 {
+    public string Theme { get; set; } = "fluent-dark";
+    public bool ComposerInfoExpanded { get; set; } = true;
     public string BrowserMode { get; set; } = "embedded";
     public string ChromePath { get; set; } = "";
     public string RagMode { get; set; } = "local";
@@ -11,6 +13,8 @@ public sealed class FeatureSettings
     public string RagModel { get; set; } = "text-embedding-3-small";
     public int RagMaxFiles { get; set; } = 500;
     public int RagTopK { get; set; } = 5;
+    public int VisionProviderId { get; set; }
+    public string VisionModel { get; set; } = "";
     public void FilterBrowser(System.Text.Json.Nodes.JsonArray tools)
     {
         if (BrowserMode == "embedded") return;
@@ -23,7 +27,7 @@ public sealed class FeatureSettings
     public static FeatureSettings Read(string json) { try { return JsonSerializer.Deserialize<FeatureSettings>(json) ?? new(); } catch { return new(); } }
     public string Json()
     {
-        if (BrowserMode is not ("embedded" or "chrome" or "disabled") || RagMode is not ("local" or "api") || RagMaxFiles is < 1 or > 2000 || RagTopK is < 1 or > 20 || RagModel.Length > 200)
+        if (BrowserMode is not ("embedded" or "chrome" or "disabled") || RagMode is not ("local" or "api") || RagMaxFiles is < 1 or > 2000 || RagTopK is < 1 or > 20 || RagModel.Length > 200 || VisionProviderId < 0 || VisionModel.Length > 200)
             throw new ArgumentException("Réglages navigateur/RAG invalides.");
         return JsonSerializer.Serialize(this);
     }

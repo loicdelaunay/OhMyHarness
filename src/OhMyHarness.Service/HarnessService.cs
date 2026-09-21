@@ -42,6 +42,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         {
             case "inbox.list":return await Inbox(p,ct);
             case "inbox.add":return await AddInbox(p,ct);
+            case "inbox.update":return await UpdateInbox(p,ct);
             case "inbox.resume":return await SendNext(I(p,"chatId"),ct);
             case "inbox.delete":await db.PendingInputs.Where(x=>x.Id==I(p,"id") && x.ChatId==I(p,"chatId")).ExecuteDeleteAsync(ct);await NotifyInbox(I(p,"chatId"));return true;
             case "terminals.list": case "terminals.create": case "terminals.delete": case "terminals.stop": case "terminals.start":
@@ -50,7 +51,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "context.compact": return await CompactManually(p, ct);
             case "question.answer": return AnswerQuestion(p);
             case "snapshot":
-                return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database,
+                var mcpConfigError = await SyncMcpFile(ct);
+                return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database, mcpConfigError, appearanceThemes = AppearanceThemes.All,
                     projects = await db.Projects.AsNoTracking().Select(x => new { x.Id, x.Name, x.SourceFolder }).ToListAsync(ct),
                     chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
@@ -152,24 +154,24 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "permission.revoke":
                 db.PermissionGrants.Remove(await db.PermissionGrants.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "browser.access": browserAccess = B(p, "enabled"); domAccess = B(p, "dom"); return true;
-            case "files.list": case "files.read": case "git": case "git.files": case "git.diff": case "terminal":
+            case "files.list": case "files.read": case "git": case "git.files": case "git.diff": case "git.preview": case "terminal":
                 var workspace = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
                 var source = new SourceAccess(workspace.GetSourceFolders());
                 if (method == "files.list") return source.List(S(p, "path", "."));
                 if (method == "files.read") return await source.ReadAsync(S(p, "path"), ct);
                 if (method == "git") return await Git(workspace, ct);
-                if (method == "git.files") return new { hasRepository = workspace.GetSourceFolders().Any(WorkspaceTools.HasGitRepository), files = await GitWorkspace.ListAsync(workspace.GetSourceFolders(), ct) };
-                if (method == "git.diff")
+                if (method == "git.files") return new { hasRepository = workspace.GetSourceFolders().Any(WorkspaceTools.HasGitRepository), files = await GitWorkspace.ListWithStatsAsync(workspace.GetSourceFolders(), ct) };
+                if (method is "git.diff" or "git.preview")
                 {
                     var file = (await GitWorkspace.ListAsync(workspace.GetSourceFolders(), ct)).FirstOrDefault(x => x.Repository == S(p, "repository") && x.Path == S(p, "path"));
-                    return file == null ? "Aucune modification / No changes." : await GitWorkspace.DiffAsync(file, ct);
+                    var diff = file == null ? "Aucune modification / No changes." : await GitWorkspace.DiffAsync(file, ct); return method == "git.preview" ? GitWorkspace.ParseDiff(diff) : diff;
                 }
                 return await WorkspaceTools.ShellAsync(S(p, "command"), Root(workspace), ct);
             case "preview":
                 var previewChat = await db.Chats.SingleAsync(x => x.Id == I(p, "chatId"), ct);
                 var previewProject = await db.Projects.SingleAsync(x => x.Id == previewChat.ProjectId, ct);
                 return await Preview(previewProject, S(p, "path"), ct, previewChat.Id);
-            case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
+            case "mcp.json.get": case "mcp.json.save": case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
             case "send": return await Send(p, ct);
             case "stop": if (runs.TryGetValue(I(p, "chatId"), out var running)) running.Cancellation.Cancel(); await terminals.StopChatAsync(I(p, "chatId")); return true;
             default: throw new ArgumentException("Unknown method: " + method);

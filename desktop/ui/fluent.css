@@ -18,13 +18,34 @@ h2 { font-size: 24px; font-weight: 600; letter-spacing: -.3px; }
 #sidebar { background: transparent; border: 0; gap: 22px; padding: 24px 16px 16px; }
 #sidebar > header { font-size: 20px; font-weight: 600; min-height: 36px; }
 #new-chat { min-height: 40px; }
+.inbox-row { display:block; padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin:4px 0; overflow-wrap:anywhere; }
+.inbox-actions { display:flex; gap:6px; margin-top:5px; }
+.inbox-actions button { font-size:11px; min-height:28px; padding:3px 8px; }
+.pinned-checklist { border:1px solid var(--line); border-radius:8px; padding:6px 10px; margin:0 0 6px; }
+.pinned-checklist summary { padding:3px 0; font-size:12px; }
+.checklist-items { max-height:140px; overflow:auto; }
+.checklist-row { display:flex; gap:8px; align-items:flex-start; font-size:12px; margin:5px 0; overflow-wrap:anywhere; }
+.checklist-row input { flex:none; margin:3px 0; }
+.checklist-row.task-completed { color:var(--muted); }
+.checklist-row.task-in_progress { color:var(--accent); }
+.child-row { display:block; width:calc(100% - 18px); margin:2px 0 2px 18px; padding:8px; border:0; border-left:1px solid var(--line); border-radius:0 6px 6px 0; background:transparent; }
+.child-row:hover { background:#80808015; }
+.agent-card { display:grid; grid-template-columns:16px minmax(0,1fr) auto; gap:5px 8px; text-align:left; white-space:normal; align-items:center; }
+.agent-icon { grid-column:1; color:var(--accent); font-size:14px; }
+.agent-name { grid-column:2; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.agent-badge { grid-column:3; font-size:10px; color:var(--accent); background:#80808015; border-radius:4px; padding:2px 5px; }
+.agent-activity { grid-column:2 / 4; font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.agent-task { grid-column:2 / 4; margin-top:4px; font-size:12px; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.agent-card[data-status=completed] .agent-icon { color:#40a66a; }
+.agent-card[data-status=failed] .agent-icon { color:#d95555; }
+.child-bubble { border-radius:10px; padding:14px; }
 .chat-row { border: 0; border-radius: 4px; min-height: 42px; padding-left: 14px; }
 .chat-row:hover { background: #ffffff09; }
 .chat-row.selected { background: #ffffff10; }
 .chat-row.selected::before { content: ""; position: absolute; left: 0; height: 18px; width: 3px; border-radius: 3px; background: var(--accent); }
 #settings-open { text-align: left; background: transparent; border-color: transparent; }
 #settings-open:hover { background: #ffffff0e; }
-#chat { background: #272727; border: 1px solid #ffffff0c; border-bottom: 0; border-right: 0; border-radius: 8px 0 0; margin-top: 8px; }
+#chat { background: #272727; border: 1px solid var(--line); border-radius: 12px; margin: 12px; }
 .chat-header { border-bottom-color: var(--line); min-height: 60px; }
 .chat-header h1 { font-weight: 600; }
 .chat-header button { font-size: 12px; }
@@ -47,7 +68,18 @@ footer { padding-top: 2px; }
 #send, #plus, #stop { width: 36px; min-height: 36px; border-radius: 6px; }
 #status { background: #323232; border-color: var(--line); }
 #auto-scroll[aria-pressed=true] { background: #60cdff1a; border-color: #60cdff40; color: #8cdaff; }
-#tools { background: #202020; border-color: var(--line); }
+#tools { background: #202020; border: 1px solid var(--line); border-radius: 12px; margin: 12px 12px 12px 0; overflow: hidden; }
+#git-tool { display: flex; flex-direction: column; min-height: 0; }
+#git-files { flex: 0 1 35%; min-height: 80px; }
+#git-files details { margin: 0 0 0 12px; }
+#git-files summary { padding: 4px 0; }
+#git-files button span { margin-left: 8px; }
+#git-diff { flex: 1; min-height: 100px; }
+.git-comparison { display: grid; grid-template-columns: minmax(280px,1fr) minmax(280px,1fr); width: max-content; min-width: 100%; }
+.git-comparison > div { padding: 2px 8px; border-right: 1px solid var(--line); }
+.git-comparison .diff-added,.git-comparison .diff-removed { background: #80808015; }
+body.tools-full #tools { margin-left: 12px; }
+@media(max-width:1100px) { body.with-tools #tools { margin-left: 12px; } }
 nav button.selected { background: #ffffff10; border-color: transparent; }
 .popover, #context-popover, #speed-popover { background: #2c2c2c; border-color: #ffffff20; border-radius: 8px; color: #f3f3f3; box-shadow: 0 8px 24px #0006; }
 dialog { background: #202020; border: 1px solid #ffffff25; border-radius: 8px; box-shadow: 0 24px 64px #0008; }

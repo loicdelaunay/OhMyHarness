@@ -54,7 +54,6 @@ public sealed partial class MainWindow
     {
         // Keep navigation, settings and drafts usable; only sending to this running chat is blocked.
         send.IsEnabled = selectedSubagent == null && chat != null;
-        deliveryMode.Visibility=ActiveRun!=null?Visibility.Visible:Visibility.Collapsed;
         stop.IsEnabled = ActiveRun != null;
         composer.IsEnabled = selectedSubagent == null;
         RefreshConversationProgress();
@@ -134,8 +133,8 @@ public sealed partial class MainWindow
         if (string.IsNullOrWhiteSpace(composer.Text) && pendingImages.Count == 0) return;
         if(ActiveRun is { } active)
         {
-            if(pendingImages.Count>0 && !(deliveryMode.SelectedIndex==1?active.Provider.SupportsImages:provider.SupportsImages))throw new InvalidOperationException("Ce modèle n’accepte pas les images.");
-            var text=composer.Text.Trim();var images=pendingImages.ToList();var id=chat.Id;var providerId=deliveryMode.SelectedIndex==1?active.SelectedProviderId:provider.Id;var mode=deliveryMode.SelectedIndex==1?"steering":"queued";
+            if(pendingImages.Count>0 && !provider.SupportsImages && !VisionBridge.Enabled(state.EnabledSkills))throw new InvalidOperationException("Activez Bypass image AI ou choisissez un modèle vision.");
+            var text=composer.Text.Trim();var images=pendingImages.ToList();var id=chat.Id;var providerId=provider.Id;var mode="queued";
             composer.Text="";pendingImages.Clear();UpdateAttachments();SaveConversationDraft();
             try{await ConversationInbox.AddAsync(HarnessDb.DatabasePath,id,providerId,text,images,mode);}
             catch{var draft=conversationDrafts.GetValueOrDefault(id);conversationDrafts[id]=(text+"\n"+draft.Text,[..images,..draft.Images??[]]);if(chat?.Id==id)RestoreConversationDraft();throw;}

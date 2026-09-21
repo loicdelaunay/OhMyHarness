@@ -15,7 +15,7 @@ static class InboxChecks
             await ConversationInbox.AddAsync(file,chat.Id,provider.Id,"steer",[new(){Name="test.png",Mime="image/png",Data=[1,2,3]}],"steering");
             await ConversationInbox.AddAsync(file,other.Id,provider.Id,"other",[],"steering");
             await using(var reopened=new HarnessDb(file))check(await reopened.PendingInputs.CountAsync()==3,"File d’attente et consignes persistées après réouverture SQLite");
-            using var run=new ConversationSession(chat,project,provider,options,"",[],file);
+            using var run=new ConversationSession(chat,project,provider,options,"next",[],file);
             var added=await ConversationInbox.ApplySteeringAsync(run,default);
             check(added.Count==1 && added[0].Content=="steer" && added[0].Attachments[0].Data.SequenceEqual(new byte[]{1,2,3}),"Consigne et image transférées à la conversation en cours");
             check(await db.PendingInputs.CountAsync()==2 && (await ConversationInbox.ApplySteeringAsync(run,default)).Count==0,"Consigne consommée une fois, file et autre conversation préservées");
@@ -24,6 +24,19 @@ static class InboxChecks
             check(await db.PendingInputs.AnyAsync(x=>x.Id==queued.Id),"Envoi en attente conservé jusqu’à la sauvegarde du message utilisateur");
             run.Db.Messages.Add(new(){ChatId=chat.Id,Content=queued.Text});await run.Db.SaveChangesAsync();
             check(!await db.PendingInputs.AnyAsync(x=>x.Id==queued.Id),"Suppression atomique du message en attente lors de son envoi");
+            var editable = await ConversationInbox.AddAsync(file,chat.Id,provider.Id,"original",[new(){Name="keep.png",Mime="image/png",Data=[4,5]}],"queued");
+            await ConversationInbox.UpdateAsync(file,chat.Id,editable.Id,"original","edited\nsecond line");
+            await ConversationInbox.UpdateAsync(file,chat.Id,editable.Id,"edited\nsecond line","edited\nsecond line",true,provider.Id);
+            var changed = await db.PendingInputs.AsNoTracking().SingleAsync(x=>x.Id==editable.Id);
+            check(changed.Mode=="steering" && changed.Text=="edited\nsecond line" && changed.Images()[0].Data.SequenceEqual(new byte[]{4,5}),"Modifier puis Steer conserve les retours à la ligne et les images");
+            bool stale=false;try{await ConversationInbox.UpdateAsync(file,chat.Id,editable.Id,"original","lost");}catch(InvalidOperationException){stale=true;}
+            check(stale,"Édition obsolète refusée sans écraser la version courante");
+            bool wrongChat=false;try{await ConversationInbox.UpdateAsync(file,other.Id,editable.Id,changed.Text,"lost");}catch(InvalidOperationException){wrongChat=true;}
+            check(wrongChat,"Impossible de modifier la file d’une autre conversation");
+            var steered=await ConversationInbox.ApplySteeringAsync(run,default);
+            check(steered.Count==1 && steered[0].Content==changed.Text,"Message modifié transmis une seule fois à l’agent");
+            bool consumed=false;try{await ConversationInbox.UpdateAsync(file,chat.Id,editable.Id,changed.Text,"lost");}catch(InvalidOperationException){consumed=true;}
+            check(consumed,"Message déjà transmis non recréé lors d’une édition tardive");
             var composed=new Provider{Id=999,Kind="composite",CompositeJson=new CompositeModel{Orchestrator=new(){ProviderId=provider.Id,Model="orchestrator"},Agents=[new(){ProviderId=provider.Id,Model="reviewer",Name="Review",Task="Inspect"}]}.Json()};
             using var team=new ConversationSession(chat,project,composed,options,"Inspect",[],file,[provider]);
             provider.Model="changed after capture";

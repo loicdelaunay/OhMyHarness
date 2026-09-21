@@ -7,7 +7,7 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
-    (StackPanel Browser, StackPanel Rag, Func<string> Save) BuildFeatureSettings()
+    (StackPanel Browser, StackPanel Rag, StackPanel Vision, Func<string> Save) BuildFeatureSettings()
     {
         var config = FeatureSettings.Read(state.FeaturesJson);
         var browser = new StackPanel { Spacing=12 };
@@ -28,7 +28,21 @@ public sealed partial class MainWindow
         rag.Children.Add(Label(WorkflowText("Activez le skill RAG, puis demandez une indexation à l’IA. MiniLM multilingue (quantifié, ~118 Mo) fonctionne hors ligne en français et en anglais, avec recherche entre les langues. L’index reste dans SQLite. Réindexez vos sources après le passage de l’ancien modèle anglais au modèle multilingue, ou après modification des fichiers. En mode API, les textes sélectionnés sont transmis après autorisation.", "Enable RAG and ask the agent to index. Multilingual MiniLM (~118 MB) works offline in French and English, including cross-language search. Re-index after upgrading from the English model or editing sources. API transmission requires approval."),13));
         var targetProjectId=project?.Id;
         rag.Children.Add(Action(WorkflowText("Effacer l’index du projet", "Clear project index"), async()=> { if(targetProjectId!=null) {await using var context=new HarnessDb();await context.RagChunks.Where(x=>x.ProjectId==targetProjectId).ExecuteDeleteAsync();} }));
-        return (browser,rag,()=>new FeatureSettings { BrowserMode=mode.SelectedIndex==1?"chrome":mode.SelectedIndex==2?"disabled":"embedded",ChromePath=executable.Text.Trim(),RagMode=ragMode.SelectedIndex==1?"api":"local",RagProviderId=(provider.SelectedItem as Provider)?.Id??0,RagModel=model.Text.Trim(),RagMaxFiles=(int)maxFiles.Value,RagTopK=(int)topK.Value }.Json());
+        var vision = new StackPanel { Spacing = 10 };
+        var visionProvider = new ComboBox { Header = WorkflowText("Fournisseur vision", "Vision provider"), ItemsSource = providers,
+            SelectedItem = providers.FirstOrDefault(x=>x.Id==config.VisionProviderId), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var visionModel = new ComboBox { Header = WorkflowText("Modèle vision", "Vision model"), IsEditable = true, Text = config.VisionModel, HorizontalAlignment = HorizontalAlignment.Stretch };
+        void UpdateVisionModels() { visionModel.ItemsSource = ModelCatalog.GetModelsForProvider(visionProvider.SelectedItem as Provider); }
+        visionProvider.SelectionChanged += (_, _) => { UpdateVisionModels(); visionModel.Text = (visionProvider.SelectedItem as Provider)?.Model ?? ""; };
+        UpdateVisionModels();
+        vision.Children.Add(visionProvider); vision.Children.Add(visionModel);
+        vision.Children.Add(Action(WorkflowText("Charger les modèles", "Load models"), async()=>
+        {
+            if (visionProvider.SelectedItem is not Provider selected) return;
+            visionModel.ItemsSource = await engine.ModelsAsync(selected, KeyVault.Decrypt(selected.ProtectedKey), CancellationToken.None);
+        }));
+        vision.Children.Add(Label(WorkflowText("Choisissez un modèle acceptant les images. Les images jointes et captures sont décrites automatiquement si le modèle principal n’a pas la vision. L’outil analyze_image permet une question ciblée, même avec un modèle principal vision. Les images sont envoyées au fournisseur choisi après autorisation et peuvent être facturées. Les descriptions peuvent être inexactes. OpenCode conserve ses propres outils ; ce relais y couvre seulement les images jointes.", "Choose an image-capable model. Attachments and screenshots are described automatically for non-vision main models. analyze_image supports focused questions even with a vision main model. Images are sent to the selected provider after approval and may incur charges. Descriptions can be inaccurate. OpenCode retains its own tools; this bridge only covers its attachments."),12));
+        return (browser,rag,vision,()=>new FeatureSettings { BrowserMode=mode.SelectedIndex==1?"chrome":mode.SelectedIndex==2?"disabled":"embedded",ChromePath=executable.Text.Trim(),RagMode=ragMode.SelectedIndex==1?"api":"local",RagProviderId=(provider.SelectedItem as Provider)?.Id??0,RagModel=model.Text.Trim(),RagMaxFiles=(int)maxFiles.Value,RagTopK=(int)topK.Value,VisionProviderId=(visionProvider.SelectedItem as Provider)?.Id??0,VisionModel=visionModel.Text.Trim() }.Json());
     }
     readonly TextBlock browserNotice = new() { TextWrapping=TextWrapping.Wrap, Margin=new Thickness(20), Text="Navigateur arrêté. Utilisez → pour démarrer. / Browser stopped. Use → to start." };
     void ShowBrowserNotice(string? error=null)

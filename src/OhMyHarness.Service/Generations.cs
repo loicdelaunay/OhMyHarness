@@ -22,7 +22,11 @@ public sealed partial class HarnessService
         using var run = new ConversationSession(chat, project, provider, options, text, images, database,await setup.Providers.ToListAsync(lifetime)){PendingInputId=I(p,"pendingInputId")};
         provider=run.Provider;
         await using var mcp = CreateMcpSession(chat.Id);
-        if (!runs.TryAdd(chat.Id, run)) throw new InvalidOperationException("This conversation is already running.");
+        if (!runs.TryAdd(chat.Id, run))
+        {
+            if (run.PendingInputId != 0) return false; // Another queue consumer already started the turn.
+            throw new InvalidOperationException("This conversation is already running.");
+        }
         using var cancel = lifetime.Register(run.Cancellation.Cancel);
         var ct = run.Cancellation.Token;
         Message? active = null;
@@ -34,7 +38,7 @@ public sealed partial class HarnessService
             await run.PrepareSandboxAsync(ct);
             var secret = await Decrypt(provider.ProtectedKey, ct);
             var history = await History(run, ct);
-            if (!provider.SupportsImages && (images.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException("Choose a model that supports images.");
+            if (!provider.SupportsImages && !VisionBridge.Enabled(options.EnabledSkills) && (images.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException("Enable Bypass image AI or choose a vision model.");
             var user = new Message { ChatId = chat.Id, Content = text, Attachments = run.Images };
             if (history.Count == 0) run.Chat.Title = text.Length == 0 ? "Images" : text[..Math.Min(50, text.Length)];
             await ConversationInbox.SubmitAsync(run,user,ct); history.Add(user);
@@ -49,7 +53,7 @@ public sealed partial class HarnessService
             {
                 var report = await agent.ForcedAsync(ct);
                 if (provider.IsOpenCode) system += "\nSubagent findings:\n" + report;
-                var delegated = new Message { ChatId = chat.Id, Role = "assistant", Content = "Sous-agents / Subagents\n" + report };
+                var delegated = AgentHandoff.Create(chat.Id, report);
                 run.Db.Messages.Add(delegated); await run.Db.SaveChangesAsync(ct); history.Add(delegated);
                 await emit(new { @event = "message", chatId = chat.Id, message = MessageView(delegated) });
             }
@@ -75,6 +79,7 @@ public sealed partial class HarnessService
                 }
                 if (!provider.IsOpenCode) history = await Compact(run, history, system, definitions, secret, ct);
                 var wire = Wire(system, history);
+                wire = await VisionFor(run).PrepareAsync(wire, ct);
                 int input = ContextWindow.Estimate(wire) + ContextWindow.Estimate(definitions);
                 active = new Message { ChatId = chat.Id, Role = "assistant", State = "interrupted" };
                 run.Db.Messages.Add(active); await run.Db.SaveChangesAsync(ct);
@@ -112,7 +117,7 @@ public sealed partial class HarnessService
                         var arguments = call["function"]?["arguments"]?.GetValue<string>() ?? "{}";
                         ToolResult result;
                         if (!TerminalHub.IsBoundedWait(name, arguments)) await run.LoopGuard.CheckAsync(name, arguments, run.Workflow, ct);
-                        var ownsToolQueue = !AgentRuntime.Handles(name) && !TerminalHub.Handles(name) && !RagTools.Handles(name);
+                        var ownsToolQueue = !AgentRuntime.Handles(name) && !TerminalHub.Handles(name) && !RagTools.Handles(name) && !VisionBridge.Handles(name) && !PythonTools.Handles(name);
                         if (ownsToolQueue) await tools.WaitAsync(ct);
                         try
                         {
@@ -124,7 +129,7 @@ public sealed partial class HarnessService
                                 if (AgentRuntime.Handles(name)) result = new(await agent.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], ct));
                                 else if (name.StartsWith("mcp_", StringComparison.Ordinal))
                                 {
-                                    var output = await mcp.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], provider.SupportsImages, ct);
+                                    var output = await mcp.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], provider.SupportsImages || VisionBridge.Enabled(options.EnabledSkills), ct);
                                     result = new(output.Text, output.Image);
                                 }
                                 else result = await Tool(run, name, JsonNode.Parse(arguments) as JsonObject ?? [], ct);
@@ -159,7 +164,13 @@ public sealed partial class HarnessService
                 if (results.Count == 0 && steered.Count==0) break;
             }
         }
-        catch (Exception ex) { error = ex is OperationCanceledException ? "Génération arrêtée / Generation stopped" : ex.Message; throw; }
+        catch (Exception ex)
+        {
+            error = ex is OperationCanceledException ? "Génération arrêtée / Generation stopped" : ex.Message;
+            if (active != null && ex is not OperationCanceledException)
+                active.Content += "\n[Erreur de génération / Generation error] " + ex.Message;
+            throw;
+        }
         finally
         {
             try
@@ -267,8 +278,15 @@ public sealed partial class HarnessService
             system += "\nPrevious history:\n" + string.Join("\n", history.TakeLast(20).Select(x => $"[{x.Role}] {x.Content}"));
         }
         var pendingUsers=history.AsEnumerable().Reverse().TakeWhile(x=>x.Role=="user").Reverse().ToList();
-        return await engine.PromptAsync(p, password, directory, link.SessionId, pendingUsers.Count>0?string.Join("\n\n",pendingUsers.Select(x=>x.Content)):run.Prompt, system,
-            (pendingUsers.Count>0?pendingUsers.SelectMany(x=>x.Attachments):run.Images).Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList(), update, ct,
+        var prompt = pendingUsers.Count>0?string.Join("\n\n",pendingUsers.Select(x=>x.Content)):run.Prompt;
+        var attachments = (pendingUsers.Count>0?pendingUsers.SelectMany(x=>x.Attachments):run.Images).ToList();
+        if (!p.SupportsImages && attachments.Count > 0)
+        {
+            var described = await VisionFor(run).PrepareAsync(new JsonArray(ChatEngine.ToWire(new Message { Content = prompt, Attachments = attachments })), ct);
+            prompt = described[0]!["content"]!.GetValue<string>(); attachments.Clear();
+        }
+        return await engine.PromptAsync(p, password, directory, link.SessionId, prompt, system,
+            attachments.Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList(), update, ct,
             async (permission, token) => await Approve($"opencode|{p.Id}|{directory}|{permission.Action}|{string.Join('|', permission.Resources)}",
                 run.Chat.Title + " · OpenCode · " + permission.Action, string.Join('\n', permission.Resources) + "\n" + permission.Details, token) ? "once" : "reject", new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
     }

@@ -3,9 +3,60 @@ let snapshot, chatId, projectId, providerId, tab='web', settingsTab='general', p
 const pendingQuestions=new Map();
 const subagents=new Map();let selectedChild=null;
 let followChatTail=true;
-$('auto-scroll').onclick=()=>{followChatTail=!followChatTail;$('auto-scroll').setAttribute('aria-pressed',String(followChatTail));followMessages();};
-$('messages').addEventListener('scroll',()=>{const box=$('messages');followChatTail=box.scrollHeight-box.scrollTop-box.clientHeight<=8;$('auto-scroll').setAttribute('aria-pressed',String(followChatTail));});
-function followMessages(){if(followChatTail)$('messages').scrollTop=$('messages').scrollHeight;}
+let chatScrollInputUntil=0,chatScrollGesture=false,chatScrollMayResume=false,lastChatScrollTop=0,chatTailFrame=0;
+function setChatFollow(value){followChatTail=value;$('auto-scroll').setAttribute('aria-pressed',String(value));}
+function isChatScrollInput(target){
+  for(let node=target instanceof Element?target:target?.parentElement;node;node=node.parentElement){
+    if(node===$('messages'))return true;
+    if(node.scrollHeight>node.clientHeight&&/auto|scroll/.test(getComputedStyle(node).overflowY))return false;
+  }return false;
+}
+$('auto-scroll').onclick=()=>{chatScrollInputUntil=0;setChatFollow(!followChatTail);followMessages();};
+$('messages').addEventListener('wheel',event=>{
+  if(!isChatScrollInput(event.target)||!event.deltaY)return;
+  chatScrollInputUntil=performance.now()+750;
+  chatScrollMayResume=event.deltaY>0;
+  if(event.deltaY<0)setChatFollow(false);
+},{passive:true});
+$('messages').addEventListener('keydown',event=>{
+  if(!isChatScrollInput(event.target)||event.target.closest('input,textarea,select,button,[contenteditable=true]'))return;
+  if(!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))return;
+  chatScrollInputUntil=performance.now()+750;
+  chatScrollMayResume=!(['ArrowUp','PageUp','Home'].includes(event.key)||(event.key===' '&&event.shiftKey));
+  if(!chatScrollMayResume)setChatFollow(false);
+});
+$('messages').addEventListener('pointerdown',event=>{
+  if(!isChatScrollInput(event.target))return;
+  const box=$('messages'),rect=box.getBoundingClientRect();
+  chatScrollGesture=event.pointerType!=='mouse'||(event.target===box&&event.clientX>=rect.left+box.clientWidth);
+  chatScrollMayResume=false;
+  lastChatScrollTop=box.scrollTop;
+});
+function endChatScrollGesture(){if(chatScrollGesture)chatScrollInputUntil=performance.now()+750;chatScrollGesture=false;}
+document.addEventListener('pointerup',endChatScrollGesture);
+document.addEventListener('pointercancel',endChatScrollGesture);
+let chatTouchY=null;
+$('messages').addEventListener('touchstart',event=>{chatTouchY=isChatScrollInput(event.target)?event.touches[0]?.clientY:null;},{passive:true});
+$('messages').addEventListener('touchmove',event=>{
+  if(chatTouchY==null||!event.touches.length)return;
+  const y=event.touches[0].clientY;chatScrollInputUntil=performance.now()+750;
+  chatScrollMayResume=y<chatTouchY;
+  if(y>chatTouchY+1)setChatFollow(false);chatTouchY=y;
+},{passive:true});
+$('messages').addEventListener('touchend',()=>chatTouchY=null,{passive:true});
+$('messages').addEventListener('touchcancel',()=>chatTouchY=null,{passive:true});
+$('messages').addEventListener('scroll',()=>{
+  const box=$('messages');
+  if(chatScrollGesture&&Math.abs(box.scrollTop-lastChatScrollTop)>1){chatScrollMayResume=box.scrollTop>lastChatScrollTop;if(!chatScrollMayResume)setChatFollow(false);}
+  if(chatScrollMayResume&&(chatScrollGesture||performance.now()<chatScrollInputUntil)&&box.scrollHeight-box.scrollTop-box.clientHeight<=8)setChatFollow(true);
+  lastChatScrollTop=box.scrollTop;
+});
+function followMessages(){if(followChatTail){$('messages').scrollTop=$('messages').scrollHeight;lastChatScrollTop=$('messages').scrollTop;}$('auto-scroll').setAttribute('aria-pressed',String(followChatTail));}
+function queueChatTail(){if(!followChatTail||chatTailFrame)return;chatTailFrame=requestAnimationFrame(()=>{chatTailFrame=0;followMessages();});}
+// Layout and rendering events never change the user's follow preference.
+new MutationObserver(queueChatTail).observe($('messages'),{childList:true,subtree:true,characterData:true,attributes:true});
+new ResizeObserver(queueChatTail).observe($('messages'));
+$('messages').addEventListener('load',queueChatTail,true);
 let contextDetail=null,contextDetailChat=null,contextCloseTimer;
 const drafts=new Map(), histories=new Map(), running=new Set(), inflight=new Set(), metrics=new Map(), statuses=new Map();
 const L=(fr,en)=>snapshot?.state.language==='en'?en:fr;
@@ -31,7 +82,7 @@ function translate(){
   document.querySelector('[data-tab="files"]').textContent=L('Fichiers','Files');
 }
 async function refresh(){
-  snapshot=await call('snapshot');
+  snapshot=await call('snapshot');applyAppearance();
   for(const item of snapshot.questions||[])pendingQuestions.set(item.id,item);
   renderQuestions();
   running.clear();snapshot.running.forEach(id=>running.add(id));inflight.forEach(id=>running.add(id));
@@ -68,7 +119,7 @@ async function selectChat(id){
   if(!$('tools').hidden){if(tab==='git')guard(refreshGit);if(tab==='files'&&selectedProject()?.sourceFolder)guard(loadFiles);}
   await call('state.save',{chatId:id,projectId});
 }
-function updateControls(){if(typeof renderInbox==='function')renderInbox();$('composer').disabled=!!selectedChild;$('send').disabled=!!selectedChild||!chatId||!providerId;$('delivery-mode').hidden=!running.has(chatId);$('stop').disabled=!running.has(chatId);$('rename-chat').disabled=$('delete-chat').disabled=!chatId;$('new-chat').disabled=!projectId;}
+function updateControls(){if(typeof renderInbox==='function')renderInbox();$('composer').disabled=!!selectedChild;$('send').disabled=!!selectedChild||!chatId||!providerId;$('stop').disabled=!running.has(chatId);$('rename-chat').disabled=$('delete-chat').disabled=!chatId;$('new-chat').disabled=!projectId;}
 function renderAssets(){
   $('assets').replaceChildren();currentDraft().images.forEach((image,index)=>{const box=el('div',null,'asset');const img=el('img');img.src=`data:${image.mime};base64,${image.data}`;img.alt=image.name;const remove=el('button','×');remove.onclick=()=>{currentDraft().images.splice(index,1);renderAssets();};box.append(img,remove);$('assets').append(box);});
 }
@@ -82,6 +133,7 @@ function renderMessage(message){
   return node;
 }
 function renderMessages(bottom=false){
+  renderPinnedTasks();
   if(selectedChild){renderChild();return;}
   const position=$('messages').scrollTop;
   if(bottom)followChatTail=true;
@@ -93,6 +145,7 @@ function renderMessages(bottom=false){
 function updateMessage(id,message){
   if(!histories.has(id))histories.set(id,[]);const list=histories.get(id);const index=list.findIndex(x=>x.id===message.id);
   if(index<0)list.push(message);else list[index]={...list[index],...message};
+  if(id===chatId&&message.role==='tasks')renderPinnedTasks();
   if(id!==chatId||selectedChild)return;
   const scroll=$('messages'),bottom=followChatTail;
   const old=scroll.querySelector(`[data-message="${message.id}"]`),node=renderMessage(index<0?message:list[index]);
@@ -111,7 +164,7 @@ function renderMetrics(){
 async function send(){
   if($('send').disabled)return;saveDraft();const id=chatId,draft=currentDraft();if(!draft.text.trim()&&!draft.images.length)return;
   const text=draft.text,images=draft.images;draft.text='';draft.images=[];$('composer').value='';renderAssets();
-  if(running.has(id)){try{const result=await call('inbox.add',{chatId:id,providerId,text,images,mode:$('delivery-mode').value});if(!result.running&&result.autoStart)await call('inbox.resume',{chatId:id});}catch(error){draft.text=text+(draft.text?'\n'+draft.text:'');draft.images.unshift(...images);if(chatId===id){$('composer').value=draft.text;renderAssets();}throw error;}return;}
+  if(running.has(id)){try{const result=await call('inbox.add',{chatId:id,providerId,text,images,mode:'queued'});if(!result.running&&result.autoStart)await call('inbox.resume',{chatId:id});}catch(error){draft.text=text+(draft.text?'\n'+draft.text:'');draft.images.unshift(...images);if(chatId===id){$('composer').value=draft.text;renderAssets();}throw error;}return;}
   inflight.add(id);running.add(id);renderChats();updateControls();statuses.set(id,L('Le modèle réfléchit…','Model is thinking…'));status(statuses.get(id));
   try{await call('send',{chatId:id,providerId,text,images});}
   catch(error){status(error.message,true);if(!(histories.get(id)||[]).some(x=>x.role==='user'&&x.content===text)){const next=drafts.get(id);next.text=text+(next.text?'\n'+next.text:'');next.images.unshift(...images);if(chatId===id){$('composer').value=next.text;renderAssets();}}}
@@ -225,12 +278,21 @@ async function refreshGit(){
   $('git-files').replaceChildren();$('git-diff').replaceChildren();$('git-summary').textContent=L('Chargement…','Loading…');
   const result=await call('git.files',{projectId:selectedProjectId});if(revision!==gitRevision||projectId!==selectedProjectId)return;
   $('git-summary').textContent=!result.hasRepository?L('Aucun dépôt Git dans les sources.','No Git repository in sources.'):result.files.length?L('Modifications depuis le dernier commit','Changes since last commit'):L('Aucun fichier modifié.','No modified files.');
-  for(const file of result.files){const button=el('button',file.status.trim()+' · '+file.path+' · '+file.repository.split(/[\\/]/).pop());
+  const folders=new Map();
+  function folder(key,name,parent){if(!folders.has(key)){const node=document.createElement('details');node.open=true;node.append(el('summary','📁 '+name));parent.append(node);folders.set(key,node);}return folders.get(key);}
+  for(const file of result.files){
+    let parent=folder(file.repository,file.repository.split(/[\\/]/).pop(),$('git-files')),key=file.repository;
+    const parts=file.path.split('/');for(const name of parts.slice(0,-1)){key+='/'+name;parent=folder(key,name,parent);}
+    const button=el('button',parts.at(-1)+' · '+file.status.trim());button.title=file.path+(file.previousPath?' ← '+file.previousPath:'')+(file.previewNotice?'\n'+file.previewNotice:'');
+    button.append(el('span',file.added==null?' —':' +'+file.added,'diff-added'),el('span',file.removed==null?'':' −'+file.removed,'diff-removed'));
     button.onclick=()=>guard(async()=>{const request=++gitRevision;$('git-diff').replaceChildren();
-      for(const row of $('git-files').children)row.classList.toggle('selected',row===button);
-      const diff=await call('git.diff',{projectId:selectedProjectId,repository:file.repository,path:file.path});if(request!==gitRevision||projectId!==selectedProjectId)return;
-      for(const line of diff.split('\n'))$('git-diff').append(el('div',line||' ',line.startsWith('+')?'diff-added':line.startsWith('-')?'diff-removed':line.startsWith('@@')?'diff-hunk':''));
-    });$('git-files').append(button);
+      for(const row of $('git-files').querySelectorAll('button'))row.classList.toggle('selected',row===button);
+      const preview=await call('git.preview',{projectId:selectedProjectId,repository:file.repository,path:file.path});if(request!==gitRevision||projectId!==selectedProjectId)return;
+      $('git-diff').append(el('div',file.path));const table=el('div',null,'git-comparison');
+      table.append(el('div',L('Avant · HEAD','Before · HEAD'),'diff-hunk'),el('div',L('Après · Dossier de travail','After · Working tree'),'diff-hunk'));
+      for(const row of preview.rows){table.append(el('div',row.before==null?'':(row.beforeLine??'')+'  '+row.before,row.kind==='removed'?'diff-removed':row.kind==='hunk'?'diff-hunk':''),el('div',row.after==null?'':(row.afterLine??'')+'  '+row.after,row.kind==='added'?'diff-added':row.kind==='hunk'?'diff-hunk':''));}
+      $('git-diff').append(table);if(preview.notice)$('git-diff').append(el('div',preview.notice));
+    });parent.append(button);
   }
 }
 $('git-refresh').onclick=()=>guard(refreshGit);
@@ -274,18 +336,21 @@ function renderSettings(){
   $('settings').querySelector('h2').textContent=L('Réglages','Settings');
   if(settingsTab==='browser'){renderFeatureSettings(area);
   }else if(settingsTab==='general'){
+    const theme=field(area,L('Thème','Theme'),'select');theme.id='theme-selector';for(const t of snapshot.appearanceThemes)theme.append(option(t.id,L(t.french,t.english)));theme.value=featureConfig().Theme||'fluent-dark';
     const language=field(area,L('Langue','Language'),'select');language.append(option('fr','Français'),option('en','English'));language.value=snapshot.state.language;
     const showReasoning=field(area,L('Afficher les détails du raisonnement','Show reasoning details'),'checkbox',snapshot.state.showReasoningDetails!==false);
     const auto=field(area,L('Continuer automatiquement après 12 étapes','Automatically continue after 12 steps'),'checkbox',snapshot.state.autoContinue);
     area.append(el('p',L('Poursuit les outils jusqu’à la réponse finale ou Arrêter. Des tokens supplémentaires peuvent être consommés ; les autorisations restent applicables.','Continue tools until the final answer or Stop. May consume additional tokens; permissions still apply.'),'muted'));
-    button(area,L('Enregistrer','Save'),async()=>{await call('state.save',{language:language.value,autoContinue:auto.checked,showReasoningDetails:showReasoning.checked});await refresh();renderSettings();renderMessages();});
+    button(area,L('Enregistrer','Save'),async()=>{await call('state.save',{language:language.value,autoContinue:auto.checked,showReasoningDetails:showReasoning.checked,featuresJson:JSON.stringify({...featureConfig(),Theme:theme.value})});await refresh();renderSettings();renderMessages();});
     area.append(el('p',snapshot.database,'muted'));button(area,L('Vérifier les autorisations système','Check system permissions'),async()=>{const result=await api.host('system.permissions');area.append(el('pre',JSON.stringify(result,null,2)));});
   }else if(settingsTab==='skills'){
     area.append(el('p',L('Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Le modèle exemple-revue est fourni.','Custom skills: copy a folder containing SKILL.md here, then reopen settings. The exemple-revue template is included.')+' '+snapshot.skillsDirectory,'muted'));
     const browserSkills=addBrowserSkillControls(area,false);
-    let ragSave=()=>snapshot.state.featuresJson;for(const skill of snapshot.skills){const card=el('section',null,'skill-card');area.append(card);const label=field(card,L(skill.frenchName,skill.englishName),'checkbox',snapshot.state.enabledSkills.split(',').includes(skill.id));label.dataset.skill=skill.id;card.append(el('p',L(skill.frenchDescription,skill.englishDescription),'muted'));if(skill.id==='rag'){const settings=el('div',null,'card');settings.dataset.ragSettings='';card.append(settings);ragSave=renderFeatureSettings(settings,true);settings.hidden=!label.checked;label.onchange=()=>settings.hidden=!label.checked;}}
-    button(area,L('Enregistrer','Save'),async()=>{await call('browser.access',{enabled:browserSkills.browser.checked,dom:browserSkills.dom.checked});await call('state.save',{featuresJson:ragSave(),enabledSkills:[...area.querySelectorAll('[data-skill]:checked')].map(x=>x.dataset.skill).join(',')});await refresh();status(L('Skills enregistrés','Skills saved'));});
+    let ragSave=()=>snapshot.state.featuresJson,visionSave=()=>({});for(const skill of snapshot.skills){const card=el('section',null,'skill-card');area.append(card);const label=field(card,L(skill.frenchName,skill.englishName),'checkbox',snapshot.state.enabledSkills.split(',').includes(skill.id));label.dataset.skill=skill.id;card.append(el('p',L(skill.frenchDescription,skill.englishDescription),'muted'));if(skill.id==='rag'||skill.id==='vision_bridge'){const settings=el('div',null,'card');card.append(settings);if(skill.id==='rag'){settings.dataset.ragSettings='';ragSave=renderFeatureSettings(settings,true);}else{settings.dataset.visionSettings='';visionSave=renderVisionSettings(settings);}settings.hidden=!label.checked;label.onchange=()=>settings.hidden=!label.checked;}}
+    button(area,L('Enregistrer','Save'),async()=>{await call('browser.access',{enabled:browserSkills.browser.checked,dom:browserSkills.dom.checked});await call('state.save',{featuresJson:JSON.stringify({...JSON.parse(ragSave()),...visionSave()}),enabledSkills:[...area.querySelectorAll('[data-skill]:checked')].map(x=>x.dataset.skill).join(',')});await refresh();status(L('Skills enregistrés','Skills saved'));});
   }else if(settingsTab==='mcp'){
+    button(area,L('Éditer MCP.json','Edit MCP.json'),mcpJsonEditor);
+    if(snapshot.mcpConfigError)area.append(el('p',snapshot.mcpConfigError,'error'));
     area.append(el('p',L('Outils MCP pour les API compatibles OpenAI/DeepSeek. OpenCode utilise sa propre configuration MCP.','MCP tools for OpenAI/DeepSeek compatible APIs. OpenCode uses its own MCP configuration.'),'muted'));
     button(area,L('＋ Ajouter un serveur MCP','＋ Add MCP server'),()=>mcpForm({transport:'stdio',argumentsJson:'[]'}));
     for(const server of snapshot.mcpServers||[]){const card=el('div',null,'card');card.append(el('strong',server.name),el('p',server.transport+' · '+(server.transport==='stdio'?server.command:server.url)));
@@ -298,7 +363,7 @@ function renderSettings(){
     for(const grant of snapshot.permissions){const card=el('div',null,'card');card.append(el('strong',grant.name),el('p',grant.details));button(card,L('Révoquer','Revoke'),async()=>{await call('permission.revoke',{id:grant.id});await refresh();renderSettings();});area.append(card);}
   }else if(settingsTab==='providers'){
     const actions=el('div',null,'form-actions');button(actions,L('＋ Modèle composé','＋ Composite model'),()=>compositeForm({}));for(const kind of ['openai','deepseek','opencode'])button(actions,'＋ '+kind,()=>providerForm({kind,baseUrl:kind==='opencode'?'http://127.0.0.1:4096':kind==='deepseek'?'https://api.deepseek.com':'https://api.openai.com/v1',name:kind,contextLimit:128000,supportsImages:true}));area.append(actions);
-    for(const provider of snapshot.providers){const card=el('div',null,'card');card.append(el('strong',provider.name),el('p',provider.model+' · '+provider.baseUrl));button(card,L('Modifier','Edit'),()=>providerForm(provider));button(card,L('Dupliquer','Duplicate'),()=>providerForm({...provider,id:0,name:provider.name+' copy',hasKey:false}));button(card,L('Supprimer','Delete'),async()=>{if(confirm(L('Supprimer ce fournisseur ?','Delete provider?'))){await call('provider.delete',{id:provider.id});await refresh();renderSettings();}});area.append(card);}
+    for(const provider of snapshot.providers){const card=el('div',null,'card provider-card'),copy=el('div',null,'provider-copy');copy.append(el('strong',provider.name),el('p',provider.kind==='composite'?L('Modèle composé','Composite model'):provider.model+' · '+provider.kind));card.append(copy);const gear=button(card,'⚙',()=>providerForm(provider));gear.setAttribute('aria-label',L('Réglages de ','Settings for ')+provider.name);area.append(card);}
   }else if(settingsTab==='templates'){
     button(area,L('＋ Nouveau template','＋ New template'),()=>templateForm({}));for(const template of snapshot.templates){const card=el('div',null,'card');card.append(el('strong',template.name));button(card,L('Modifier','Edit'),()=>templateForm(template));button(card,L('Supprimer','Delete'),async()=>{await call('template.delete',{id:template.id});await refresh();renderSettings();});area.append(card);}
   }
@@ -317,7 +382,7 @@ function mcpForm(server){
 }
 function providerForm(provider){
   if(provider.kind==='composite')return compositeForm(provider);
-  const area=$('settings-content');area.replaceChildren();const form=el('form');area.append(form);
+  const area=$('settings-content');area.replaceChildren();const form=el('form');area.append(form);providerActions(form,provider);
   const name=field(form,L('Nom','Name'),'text',provider.name),url=field(form,'URL','url',provider.baseUrl),model=field(form,L('Modèle','Model'),'text',provider.model),key=field(form,L('Clé API / mot de passe (vide : conserver)','API key / password (blank: keep existing)'),'password','');
   const limit=field(form,L('Limite de contexte','Context limit'),'number',provider.contextLimit),vision=field(form,L('Images acceptées','Supports images'),'checkbox',provider.supportsImages),deleteKey=field(form,L('Supprimer la clé enregistrée','Delete saved key'),'checkbox',false);
   let username,executable,autoStart,openCodeTools;
@@ -332,9 +397,20 @@ guard(async()=>{await refresh();const preferred=snapshot.chats.find(x=>x.id===sn
 function renderTasks(message){
   const node=el('details',null,'message task-list');node.dataset.message=message.id;node.open=true;
   let tasks=[];try{tasks=JSON.parse(message.content);}catch{}
+  node.hidden=tasks.some(x=>x.status==='pending'||x.status==='in_progress');node.open=false;
   node.append(el('summary',L('Étapes du travail','Work steps')+' · '+tasks.filter(x=>x.status==='completed').length+'/'+tasks.length));
   for(const task of tasks){const labels={pending:L('○ À faire','○ To do'),in_progress:L('◉ En cours','◉ In progress'),completed:L('✓ Terminée','✓ Completed'),cancelled:L('— Annulée','— Cancelled')};node.append(el('p',(labels[task.status]||task.status)+' · '+task.content,'task-'+task.status));}
   return node;
+}
+function renderPinnedTasks(){
+  const region=$('pinned-tasks');if(!region)return;
+  const expanded=region.querySelector('details')?.open??true;region.replaceChildren();
+  const message=(histories.get(chatId)||[]).find(x=>x.role==='tasks');let tasks=[];try{tasks=JSON.parse(message?.content||'[]');}catch{}
+  region.hidden=!!selectedChild||!tasks.some(x=>x.status==='pending'||x.status==='in_progress');if(region.hidden)return;
+  const card=el('details',null,'pinned-checklist');card.open=expanded;card.append(el('summary',L('À faire','To do')+' · '+tasks.filter(x=>x.status==='completed').length+'/'+tasks.length));
+  const list=el('div',null,'checklist-items');
+  for(const task of tasks){const row=el('div',null,'checklist-row task-'+task.status),check=document.createElement('input');check.type='checkbox';check.checked=task.status==='completed';check.disabled=true;row.append(check,el('span',(task.status==='in_progress'?'◉ ':task.status==='cancelled'?'— ':'')+task.content));list.append(row);}
+  card.append(list);region.append(card);
 }
 function renderQuestions(){
   const region=$('questions');if(!region)return;

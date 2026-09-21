@@ -107,6 +107,7 @@ public sealed class ChatEngine(HttpClient http)
     public static JsonObject ToWire(Message message)
     {
         if (message.WireJson.Length > 0) return JsonNode.Parse(message.WireJson)!.AsObject();
+        if (AgentHandoff.IsLegacyReport(message)) return AgentHandoff.Input(message.Content[AgentHandoff.ReportPrefix.Length..]);
         if (message.Attachments.Count == 0) return new JsonObject { ["role"] = message.Role, ["content"] = message.Content };
         var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = message.Content } };
         foreach (var image in message.Attachments)
