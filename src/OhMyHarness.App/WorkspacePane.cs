@@ -95,10 +95,11 @@ public sealed partial class MainWindow
                 modeMenu.Children.Add(choice);
             }
 
-            var agentsMenu = Section(T("Orchestration sous-agents") + " · " + selectedChat.OrchestrationMode);
+            var orchestration=provider?.IsComposite==true?"forced":selectedChat.OrchestrationMode;
+            var agentsMenu = Section(T("Orchestration sous-agents") + " · " + orchestration);
             foreach (var value in new[] { "disabled", "auto", "forced" })
             {
-                var choice = new RadioButton { GroupName = "composer-orchestration", Content = value == "disabled" ? "Disable" : value == "auto" ? "Auto" : "Forced", IsChecked = selectedChat.OrchestrationMode == value };
+                var choice = new RadioButton { GroupName = "composer-orchestration", Content = value == "disabled" ? "Disable" : value == "auto" ? "Auto" : "Forced", IsChecked = orchestration == value, IsEnabled=provider?.IsComposite!=true };
                 choice.Click += async (_, _) => await Guard(async () => {
                     selectedChat.OrchestrationMode = value; await db.SaveChangesAsync();
                     ((Expander)agentsMenu.Tag).Header = T("Orchestration sous-agents") + " · " + choice.Content;
@@ -258,7 +259,7 @@ public sealed partial class MainWindow
         {
             switch (toolTabs.SelectedIndex)
             {
-                case 0: await EnsureBrowser(); break;
+                case 0: if (!conversationBrowsers.TryGetValue(chat?.Id ?? 0, out var shown) || !shown.Ready) ShowBrowserNotice(); break;
                 case 1:
                     RefreshTerminals();
                     break;
@@ -275,6 +276,7 @@ public sealed partial class MainWindow
         browserVisible = true; browserPanel.Visibility = Visibility.Visible;
         activatingTool = true; toolTabs.SelectedIndex = index; activatingTool = false;
         SyncBrowserPresentation(); ResizeLayout(); await ActivateToolAsync();
+        if(index == 0) await EnsureBrowser();
     }
     void ResetWorkspaceTools()
     {
@@ -395,10 +397,10 @@ public sealed partial class MainWindow
     }
     async Task<string> ReadWithApprovalAsync(string requested, CancellationToken ct, Project? targetProject = null, int? startLine = null, int? endLine = null)
     {
-        var path = ResolveRequestedLocalPath(requested, targetProject);
-        new SourceAccess(Path.GetDirectoryName(path)!).Resolve(Path.GetFileName(path));
+        if(Uri.TryCreate(requested,UriKind.Absolute,out var uri) && uri.IsFile)requested=uri.LocalPath;
+        var path = Path.GetFullPath(Path.IsPathFullyQualified(requested) ? requested : Path.Combine(RequireDirectory(targetProject), requested));
         if (!await RequestAccessAsync(PermissionScope("read-local", path), T("Lire un fichier hors du périmètre du projet"), path + "\n\n" + T("Le contenu sera transmis au fournisseur IA pour cette demande."), T("Lecture et transmission de : ") + path, ct)) return T("Accès refusé par l’utilisateur.");
-        return await new SourceAccess(Path.GetDirectoryName(path)!).ReadAsync(Path.GetFileName(path), ct, startLine, endLine);
+        return await SourceAccess.ReadFileAsync(path, ct, startLine, endLine);
     }
     async Task<string> WriteWithApprovalAsync(string requested, string content, string? oldText, CancellationToken ct, Project? targetProject = null)
     {
@@ -439,26 +441,27 @@ public sealed partial class MainWindow
     }
     void ConfigureLocalPreview()
     {
-        var ownerId = CurrentBrowser.Id;
-        browser.CoreWebView2.AddWebResourceRequestedFilter("https://*.preview.invalid/*", CoreWebView2WebResourceContext.All);
-        browser.CoreWebView2.FrameNavigationStarting += (_, e) => { if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.IsFile) e.Cancel = true; };
-        browser.CoreWebView2.WebResourceRequested += async (_, e) =>
+        var owner = CurrentBrowser;
+        var core = owner.View.CoreWebView2;
+        core.AddWebResourceRequestedFilter("https://*.preview.invalid/*", CoreWebView2WebResourceContext.All);
+        core.FrameNavigationStarting += (_, e) => { if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.IsFile) e.Cancel = true; };
+        core.WebResourceRequested += async (_, e) =>
         {
-            using var scope = BrowserScope(ownerId);
+            using var scope = BrowserScope(owner.Id);
             using var deferral = e.GetDeferral();
             try
             {
                 var uri = new Uri(e.Request.Uri);
-                if (previewFolder == null || uri.Host != previewHost || e.Request.Method != "GET") throw new UnauthorizedAccessException();
-                var path = LocalPreview.ResolveResource(previewFolder, uri.AbsolutePath);
+                if (owner.PreviewFolder == null || uri.Host != owner.PreviewHost || e.Request.Method != "GET") throw new UnauthorizedAccessException();
+                var path = LocalPreview.ResolveResource(owner.PreviewFolder, uri.AbsolutePath);
                 var bytes = await File.ReadAllBytesAsync(path);
                 var content = new InMemoryRandomAccessStream();
                 using (var writer = new DataWriter(content)) { writer.WriteBytes(bytes); await writer.StoreAsync(); writer.DetachStream(); }
                 content.Seek(0);
-                e.Response = browser.CoreWebView2.Environment.CreateWebResourceResponse(content, 200, "OK", "Content-Type: " + LocalPreview.Mime(path) + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff");
+                if(owner.Ready)e.Response = core.Environment.CreateWebResourceResponse(content, 200, "OK", "Content-Type: " + LocalPreview.Mime(path) + "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff");
             }
-            catch { e.Response = browser.CoreWebView2.Environment.CreateWebResourceResponse(null, 403, "Access denied", "Cache-Control: no-store"); }
-            finally { deferral.Complete(); }
+            catch { try { if(owner.Ready)e.Response = core.Environment.CreateWebResourceResponse(null, 403, "Access denied", "Cache-Control: no-store"); } catch (System.Runtime.InteropServices.COMException) { } }
+            finally { try { deferral.Complete(); } catch (System.Runtime.InteropServices.COMException) { } }
         };
     }
     (string Key, string Description) BrowserPermissionTarget()
@@ -1189,8 +1192,9 @@ public sealed partial class MainWindow
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute Windows path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
-        if (Skills.Enabled(state.EnabledSkills, "terminal")) TerminalHub.AddDefinitions(definitions);
+        RagTools.AddDefinitions(definitions, project.GetSourceFolders().Count > 0, state.EnabledSkills);
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a PowerShell command in the attached project folder. Each invocation is a new session, 30 second default timeout, configurable up to 600 seconds. The command runs with the user's Windows privileges.", new() { ["command"] = StringProperty() }, "command");
+        if (Skills.Enabled(state.EnabledSkills, "terminal")) TerminalHub.AddDefinitions(definitions);
         if (Skills.Enabled(state.EnabledSkills, "sources") && (run.Chat.SandboxEnabled || (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false))) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
         if (Skills.Enabled(state.EnabledSkills, "web") && browserAccess.IsOn && browserDomAccess.IsOn)
         {

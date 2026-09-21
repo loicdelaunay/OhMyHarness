@@ -7,10 +7,13 @@ namespace OhMyHarness.Service;
 public sealed partial class HarnessService
 {
     static object McpView(McpServer s) => new { s.Id, s.Name, s.Enabled, s.Transport, s.Command, s.ArgumentsJson, s.WorkingDirectory, s.Url, hasSecrets = s.ProtectedSecrets.Length > 0 };
-    McpSession CreateMcpSession() => new(async ct =>
+    McpSession CreateMcpSession(int chatId) => new(async ct =>
     {
         await using var context = Db();
-        return await context.McpServers.AsNoTracking().ToListAsync(ct);
+        var list = await context.McpServers.AsNoTracking().ToListAsync(ct);
+        var features = FeatureSettings.Read((await context.States.AsNoTracking().SingleAsync(ct)).FeaturesJson);
+        if(features.BrowserMode == "chrome") list.Add(features.ChromeServer(chatId));
+        return list;
     }, Decrypt, Approve);
 
     async Task<object?> DispatchMcp(string method, JsonObject p, CancellationToken ct)

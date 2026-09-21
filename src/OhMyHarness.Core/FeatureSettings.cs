@@ -1,0 +1,49 @@
+using System.Text.Json;
+
+namespace OhMyHarness.Core;
+
+public sealed class FeatureSettings
+{
+    public string BrowserMode { get; set; } = "embedded";
+    public string ChromePath { get; set; } = "";
+    public string RagMode { get; set; } = "local";
+    public int RagProviderId { get; set; }
+    public string RagModel { get; set; } = "text-embedding-3-small";
+    public int RagMaxFiles { get; set; } = 500;
+    public int RagTopK { get; set; } = 5;
+    public void FilterBrowser(System.Text.Json.Nodes.JsonArray tools)
+    {
+        if (BrowserMode == "embedded") return;
+        for (int i=tools.Count-1; i>=0; i--)
+        {
+            var name=tools[i]?["function"]?["name"]?.GetValue<string>() ?? "";
+            if(name.StartsWith("browser_") || name is "browse" or "read_page" or "inspect_dom" or "open_local_file") tools.RemoveAt(i);
+        }
+    }
+    public static FeatureSettings Read(string json) { try { return JsonSerializer.Deserialize<FeatureSettings>(json) ?? new(); } catch { return new(); } }
+    public string Json()
+    {
+        if (BrowserMode is not ("embedded" or "chrome" or "disabled") || RagMode is not ("local" or "api") || RagMaxFiles is < 1 or > 2000 || RagTopK is < 1 or > 20 || RagModel.Length > 200)
+            throw new ArgumentException("Réglages navigateur/RAG invalides.");
+        return JsonSerializer.Serialize(this);
+    }
+    public McpServer ChromeServer(int chatId) => new()
+    {
+        Id = int.MaxValue, Name = "Chrome DevTools", Enabled = BrowserMode == "chrome", Command = OperatingSystem.IsWindows() ? "npx.cmd" : "npx",
+        ArgumentsJson = JsonSerializer.Serialize(new[] { "-y", "chrome-devtools-mcp@latest", "--no-usage-statistics", "--user-data-dir=" + Path.Combine(PortableStorage.Root, "Chrome", "chat-" + chatId) }
+            .Concat(string.IsNullOrWhiteSpace(ChromePath) ? [] : new[] { "--executable-path=" + ChromePath }))
+    };
+}
+
+public sealed class RagChunk
+{
+    public int Id { get; set; }
+    public int ProjectId { get; set; }
+    public string Model { get; set; } = "";
+    public string Path { get; set; } = "";
+    public string Hash { get; set; } = "";
+    public int StartLine { get; set; }
+    public int EndLine { get; set; }
+    public string Text { get; set; } = "";
+    public byte[] Vector { get; set; } = [];
+}

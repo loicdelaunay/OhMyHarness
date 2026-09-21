@@ -47,7 +47,7 @@ public sealed partial class MainWindow
     async Task CompactCurrentChat()
     {
         if (chat == null || project == null || provider == null || ActiveRun != null) return;
-        using var run = new ConversationRun(chat, project, provider, state, "", []) { Messages = messages };
+        using var run = new ConversationRun(chat, project, provider, state, "", [],db.Providers.Local) { Messages = messages };
         conversationRuns.Add(run.Chat.Id, run); RefreshGenerationControls();
         var ct = run.Cancellation.Token;
         SetRunStatus(run, WorkflowText("Compactage manuel du contexte…", "Compacting context…"));
@@ -76,7 +76,7 @@ public sealed partial class MainWindow
             }
             SetRunStatus(run, changed ? WorkflowText("Contexte compacté.", "Context compacted.") : WorkflowText("Aucune réduction utile : historique conservé.", "No useful reduction: history preserved."));
         }
-        catch (Exception ex) { SetRunStatus(run, ex is OperationCanceledException ? WorkflowText("Compactage arrêté.", "Compaction stopped.") : ex.Message); }
+        catch (Exception ex) { run.Failed=true;SetRunStatus(run, ex is OperationCanceledException ? WorkflowText("Compactage arrêté.", "Compaction stopped.") : ex.Message); }
         finally
         {
             try { conversationHistory[run.Chat.Id] = await run.Db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == run.Chat.Id).OrderBy(x => x.Id).ToListAsync(); }
@@ -84,7 +84,9 @@ public sealed partial class MainWindow
             {
                 conversationRuns.Remove(run.Chat.Id); RefreshGenerationControls();
                 if (IsVisible(run)) RefreshContextInfo();
+                await RefreshInboxAsync();
             }
         }
+        if(!run.Failed&&!run.Cancellation.IsCancellationRequested)await RunNextQueuedAsync(run.Chat.Id,run.Messages);
     }
 }

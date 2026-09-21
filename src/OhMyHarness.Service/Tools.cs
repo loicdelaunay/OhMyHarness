@@ -87,7 +87,9 @@ public sealed partial class HarnessService
             Add("desktop_screenshot", "Capture the desktop with cursor after approval. screen: primary or ID; optional x/y/width/height crop, max_width/max_height and quality 1..100. Read captured_region and image size before clicking; Retina scales differ.", ("screen", "string"), ("x", "integer"), ("y", "integer"), ("width", "integer"), ("height", "integer"), ("max_width", "integer"), ("max_height", "integer"), ("quality", "integer"));
             if (browserAccess) Add("browser_screenshot", "Capture the integrated browser with cursor, after approval.");
         }
+        RagTools.AddDefinitions(definitions, source, skills);
         if (Skills.Enabled(skills, "terminal") && source) TerminalHub.AddDefinitions(definitions);
+        FeatureSettings.Read(run.Options.FeaturesJson).FilterBrowser(definitions);
         return definitions;
     }
     async Task<ToolResult> Tool(ConversationSession run, string name, JsonObject p, CancellationToken ct)
@@ -96,6 +98,7 @@ public sealed partial class HarnessService
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
+        if (RagTools.Handles(name)) return new(await RagTools.CallAsync(run,name,p,Decrypt,Approve,ct));
         if (TerminalHub.Handles(name)) return new(await terminals.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
             var approved = await Approve(scope, title, detail, token);
             skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(token);
@@ -126,6 +129,12 @@ public sealed partial class HarnessService
             try { source.Resolve(path); }
             catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled)
             {
+                if (name == "read_source")
+                {
+                    var requested = Path.GetFullPath(Path.IsPathFullyQualified(path) ? path : Path.Combine(Root(run.Project), path));
+                    if (!await Approve("read-local|" + requested, "Lire et transmettre le fichier / Read and transmit file", requested, ct)) return new("Access denied.");
+                    return new(await SourceAccess.ReadFileAsync(requested, ct, p["start_line"]?.GetValue<int>(), p["end_line"]?.GetValue<int>()));
+                }
                 var absolute = LocalPreview.ValidatePath(Path.IsPathFullyQualified(path) ? path : Path.Combine(Root(run.Project), path));
                 var outside = new SourceAccess(Path.GetDirectoryName(absolute)!); outside.Resolve(Path.GetFileName(absolute));
                 if (!await Approve(name + "|" + absolute, run.Chat.Title + " · " + name, absolute + "\n" + S(p, "content", S(p, "new_text")), ct)) return new("Access denied.");

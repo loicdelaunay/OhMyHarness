@@ -243,13 +243,22 @@ public sealed class MarkdownRenderer
         };
         var codeText = new TextBlock
         {
-            Text = code,
+
             FontFamily = new FontFamily("Cascadia Code, Consolas"),
             FontSize = 12.5,
             Foreground = Brush(220, 230, 245),
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.NoWrap
         };
+        try
+        {
+            foreach (var token in CodeHighlight.Tokens(code, language))
+            {
+                var color = token.Color;
+                codeText.Inlines.Add(new Run { Text = token.Text, Foreground = Brush(Convert.ToByte(color.Substring(1,2),16), Convert.ToByte(color.Substring(3,2),16), Convert.ToByte(color.Substring(5,2),16)) });
+            }
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { codeText.Inlines.Clear(); codeText.Text = code; }
         scroll.Content = codeText;
         stack.Children.Add(scroll);
 

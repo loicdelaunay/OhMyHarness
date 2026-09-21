@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OhMyHarness.Core;
 
@@ -10,9 +11,11 @@ using OhMyHarness.Core;
 namespace OhMyHarness.Core.Migrations
 {
     [DbContext(typeof(HarnessDb))]
-    partial class HarnessDbModelSnapshot : ModelSnapshot
+    [Migration("20260921190409_CompositeModelsAndInbox")]
+    partial class CompositeModelsAndInbox
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");

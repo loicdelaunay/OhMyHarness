@@ -60,6 +60,8 @@ public sealed class Attachment
 }
 public sealed class Provider
 {
+    public string CompositeJson { get; set; } = "";
+    public bool IsComposite => Kind.Equals("composite", StringComparison.OrdinalIgnoreCase);
     public int Id { get; set; }
     public string Name { get; set; } = "OpenAI";
     public string BaseUrl { get; set; } = "https://api.openai.com/v1";
@@ -88,6 +90,7 @@ public sealed class AppState
     public int? ProjectId { get; set; }
     public int? ChatId { get; set; }
     public int ProviderId { get; set; } = 1;
+    public string FeaturesJson { get; set; } = "{}";
     public string BrowserUrl { get; set; } = "https://www.bing.com";
     public string Language { get; set; } = "fr";
     public string EnabledSkills { get; set; } = "sources,web";
@@ -144,6 +147,9 @@ public sealed class HarnessDb : DbContext
         usesDefaultPath = string.IsNullOrWhiteSpace(path);
         this.path = Path.GetFullPath(usesDefaultPath ? DatabasePath : path!);
     }
+    public DbSet<SubagentRecord> Subagents => Set<SubagentRecord>();
+    public DbSet<PendingInput> PendingInputs => Set<PendingInput>();
+    public DbSet<RagChunk> RagChunks => Set<RagChunk>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Chat> Chats => Set<Chat>();
     public DbSet<Message> Messages => Set<Message>();
@@ -158,6 +164,11 @@ public sealed class HarnessDb : DbContext
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<PendingInput>().HasOne<Chat>().WithMany().HasForeignKey(x=>x.ChatId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<PendingInput>().HasIndex(x=>new{x.ChatId,x.Id});
+        model.Entity<SubagentRecord>().HasOne<Chat>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<RagChunk>().HasIndex(x => new { x.ProjectId, x.Model });
+        model.Entity<RagChunk>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Project>().HasMany(x => x.Chats).WithOne().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Chat>().HasMany(x => x.Messages).WithOne().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Message>().HasMany(x => x.Attachments).WithOne().HasForeignKey(x => x.MessageId).OnDelete(DeleteBehavior.Cascade);

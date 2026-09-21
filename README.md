@@ -117,3 +117,5 @@ Références : [Chat Completions OpenAI](https://developers.openai.com/api/refer
 - Liste de tâches structurée, questions interactives par conversation et protection après trois appels identiques : [guide du déroulement des agents](docs/workflow.md).
 
 Le chat suit les nouvelles réponses uniquement lorsque le défilement est en bas ; consulter l’historique suspend ce suivi. Le skill web expose `browser_javascript` (avec accès navigateur et DOM activés) pour lire les scripts et variables ou modifier le JavaScript de la page après autorisation. Le code est synchrone, limité à 32 000 caractères et 5 secondes, exécuté dans la page de la conversation, sans accès Node. Les changements sont temporaires jusqu’au rechargement ; utiliser les outils sources pour les enregistrer. Cet outil est interdit en mode Plan et en sandbox.
+
+- Navigateur démarré à la demande, Chrome MCP, lecture de fichiers étendue, suivi Auto, coloration du code, RAG configurable et vues de sous-agents : [guide et limites](docs/browser-rag-agents.md).

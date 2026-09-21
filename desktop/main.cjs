@@ -21,8 +21,8 @@ let win, service, browser, readyResolve, readyReject, closing = false;
 const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
 const requests = new Map(); let sequence = 0, dialogs = Promise.resolve();
 const uiUrl = pathToFileURL(path.join(__dirname, 'ui/index.html')).href;
-const serviceMethods = new Set(['snapshot','history','chat.export','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
-  'sandbox.review','sandbox.apply','sandbox.close','terminals.list','terminals.create','terminals.delete','terminals.start','terminals.stop','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop']);
+const serviceMethods = new Set(['snapshot','history','subagents','chat.export','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
+  'sandbox.review','sandbox.apply','sandbox.close','terminals.list','terminals.create','terminals.delete','terminals.start','terminals.stop','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','terminal','preview','send','stop','inbox.list','inbox.add','inbox.delete','inbox.resume']);
 const uiHostMethods = new Set(['conversation.export','pick.folders','pick.images','pick.file','browser.select','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
 function trusted(event) {
   if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || event.senderFrame.url !== uiUrl) throw new Error('Untrusted IPC sender.');

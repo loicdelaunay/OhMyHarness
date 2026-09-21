@@ -48,9 +48,8 @@ public sealed partial class MainWindow
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.Children.Add(Label(T("Réglages"), 24));
-        var scroller = new ScrollViewer { Content = content, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
-        Grid.SetRow(scroller, 1);
-        panel.Children.Add(scroller);
+        Grid.SetRow((FrameworkElement)content, 1);
+        panel.Children.Add(content);
         var save = new Button { Content = T("Enregistrer"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         var cancel = new Button { Content = T("Annuler") };
         var actions = Row(cancel, save);

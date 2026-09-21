@@ -5,10 +5,13 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
-    McpSession CreateMcpSession() => new(async ct =>
+    McpSession CreateMcpSession(int chatId) => new(async ct =>
     {
         await using var context = new HarnessDb();
-        return await context.McpServers.AsNoTracking().ToListAsync(ct);
+        var list = await context.McpServers.AsNoTracking().ToListAsync(ct);
+        var features = FeatureSettings.Read((await context.States.AsNoTracking().SingleAsync(ct)).FeaturesJson);
+        if(features.BrowserMode == "chrome") list.Add(features.ChromeServer(chatId));
+        return list;
     }, (secret, _) => Task.FromResult(KeyVault.Decrypt(secret)),
         (scope, title, details, ct) => RequestAccessAsync(scope, title, details, title, ct));
 

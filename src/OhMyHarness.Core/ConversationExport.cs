@@ -39,6 +39,7 @@ public static class ConversationExport
         Setting(L("Fournisseur", "Provider"), provider?.Name ?? "—");
         Setting("Type", provider?.Kind ?? "—");
         Setting(L("Modèle", "Model"), provider?.Model ?? "—");
+        if(provider?.IsComposite==true)Setting(L("Composition des agents", "Agent composition"),provider.CompositeJson);
         if (provider != null)
         {
             var endpoint = Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out var uri)
@@ -50,6 +51,10 @@ public static class ConversationExport
         }
         Setting(L("Langue", "Language"), state.Language);
         Setting("Thinking", state.ThinkingLevel);
+        var features=FeatureSettings.Read(state.FeaturesJson);
+        Setting("Navigateur / Browser",features.BrowserMode);
+        Setting("RAG",features.RagMode+" · "+(features.RagMode=="local"?LocalEmbeddings.ModelName:features.RagModel));
+        Setting("RAG provider / files / results",$"{features.RagProviderId} / {features.RagMaxFiles} / {features.RagTopK}");
         Setting(L("Détails du raisonnement", "Reasoning details"), state.ShowReasoningDetails);
         Setting("Mode", chat.ExecutionMode);
         Setting(L("Sous-agents", "Subagents"), chat.OrchestrationMode);

@@ -17,5 +17,12 @@ public sealed partial class MainWindow
         },
         (scope, diff, ct) => RequestAccessAsync(scope, "Sous-agent · Patch", diff, "Patch des sources", ct),
         text => { SetRunStatus(run, text); return Task.CompletedTask; },
-        _ => Task.FromResult(state.EnabledSkills));
+        _ => Task.FromResult(state.EnabledSkills), child => { UpdateSubagent(run,child); return Task.CompletedTask; },
+        async (target,wire,definitions,ct)=> {
+            var key=KeyVault.Decrypt(target.ProtectedKey);
+            if(!target.IsOpenCode)return await engine.StreamAsync(target,key,wire,definitions,_=>{},ct,run.Options.ThinkingLevel);
+            var directory=OpenCodeDirectory(run.Project);await EnsureOpenCodeServerAsync(target,key,ct,run.Project);
+            var id=await openCodeEngine.CreateSessionAsync(target,key,directory,"Sous-agent · "+run.Chat.Title,ct);
+            return await openCodeEngine.PromptAsync(target,key,directory,id,wire.Last()?["content"]?.GetValue<string>()??"",wire[0]?["content"]?.GetValue<string>()??"",[],_=>{},ct,policy:new("plan","disabled"),workflow:run.Workflow?.ForChild());
+        });
 }

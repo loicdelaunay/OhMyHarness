@@ -24,12 +24,12 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     static JsonObject Obj(object value) => (JsonSerializer.SerializeToNode(value, Json) as JsonObject)!;
     HarnessDb Db() => new(database);
     public async Task Initialize() { await using var db = Db(); await db.InitializeAsync(); new CustomSkills(CustomSkills.DefaultRoot).EnsureTemplate(); }
-    static object ProviderView(Provider p) => new { p.Id, p.Name, p.Kind, p.BaseUrl, p.Model, p.ContextLimit, p.SupportsImages, p.Username, p.ExecutablePath, p.AutoStart, p.OpenCodeTools, hasKey = p.ProtectedKey.Length > 0 };
+    static object ProviderView(Provider p) => new { p.Id, p.Name, p.Kind, p.CompositeJson, p.BaseUrl, p.Model, p.ContextLimit, p.SupportsImages, p.Username, p.ExecutablePath, p.AutoStart, p.OpenCodeTools, hasKey = p.ProtectedKey.Length > 0 };
     static string Html(string text)
     {
         var document = Markdig.Markdown.Parse(text, Markdown);
         LocalFileLinks.Decorate(document);
-        return Markdig.Markdown.ToHtml(document, Markdown);
+        return CodeHighlight.Html(Markdig.Markdown.ToHtml(document, Markdown));
     }
     static object MessageView(Message m) => new { m.Id, m.ChatId, m.Role, m.Content, m.State, m.InputTokens, m.OutputTokens, m.Seconds,
         html = Html(m.Content), reasoning = string.IsNullOrEmpty(m.WireJson) ? "" : JsonNode.Parse(m.WireJson)?["reasoning_content"]?.GetValue<string>() ?? "",
@@ -40,6 +40,10 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         await using var db = Db();
         switch (method)
         {
+            case "inbox.list":return await Inbox(p,ct);
+            case "inbox.add":return await AddInbox(p,ct);
+            case "inbox.resume":return await SendNext(I(p,"chatId"),ct);
+            case "inbox.delete":await db.PendingInputs.Where(x=>x.Id==I(p,"id") && x.ChatId==I(p,"chatId")).ExecuteDeleteAsync(ct);await NotifyInbox(I(p,"chatId"));return true;
             case "terminals.list": case "terminals.create": case "terminals.delete": case "terminals.stop": case "terminals.start":
                 return await DispatchTerminal(method, p, ct);
             case "context.details": return await ReadContext(I(p, "chatId"), I(p, "providerId"), ct);
@@ -55,6 +59,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                     permissions = await db.PermissionGrants.ToListAsync(ct), skills = Skills.Available().Select(skill => OperatingSystem.IsMacOS() ? skill with
                     { FrenchDescription = skill.FrenchDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh"), EnglishDescription = skill.EnglishDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh") } : skill), running = runs.Keys,
                     questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }), browserAccess, domAccess, skillsDirectory = CustomSkills.DefaultRoot };
+            case "subagents": return await db.Subagents.AsNoTracking().Where(x=>x.ChatId==I(p,"chatId")).OrderBy(x=>x.CreatedUtc).ToListAsync(ct);
             case "history":
                 return (await db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == I(p, "chatId")).OrderBy(x => x.Id).ToListAsync(ct)).Select(MessageView);
             case "chat.export":
@@ -94,6 +99,14 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "provider.save":
                 var provider = I(p, "id") == 0 ? new Provider() : await db.Providers.SingleAsync(x => x.Id == I(p, "id"), ct);
                 provider.Name = S(p, "name", "Compatible OpenAI"); provider.Kind = S(p, "kind", "openai");
+                if(provider.IsComposite)
+                {
+                    var composite=CompositeModel.Read(S(p,"compositeJson"));var available=await db.Providers.AsNoTracking().ToListAsync(ct);composite.Validate(available);
+                    var orchestrator=CompositeModel.Resolve(composite.Orchestrator,available);
+                    provider.CompositeJson=composite.Json();provider.Model=orchestrator.Model;provider.BaseUrl="";provider.ProtectedKey=[];
+                    provider.ContextLimit=orchestrator.ContextLimit;provider.SupportsImages=orchestrator.SupportsImages;
+                    if(provider.Id==0)db.Providers.Add(provider);await db.SaveChangesAsync(ct);return ProviderView(provider);
+                }
                 provider.BaseUrl = S(p, "baseUrl").TrimEnd('/'); _ = ChatEngine.Endpoint(provider.BaseUrl, "models");
                 provider.Model = S(p, "model"); provider.ContextLimit = Math.Clamp(I(p, "contextLimit", 128000), 1024, 10_000_000);
                 provider.SupportsImages = B(p, "supportsImages", true); provider.Username = S(p, "username", "opencode");
@@ -103,10 +116,12 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 if (provider.Id == 0) db.Providers.Add(provider);
                 await db.SaveChangesAsync(ct); return ProviderView(provider);
             case "provider.delete":
-                if (runs.Values.Any(x => x.Provider.Id == I(p, "id"))) throw new InvalidOperationException("Provider is in use by a conversation.");
+                if((await db.Providers.Where(x=>x.Kind=="composite").ToListAsync(ct)).Any(x=>{var c=CompositeModel.Read(x.CompositeJson);return c.Agents.Prepend(c.Orchestrator).Any(a=>a.ProviderId==I(p,"id"));}) || await db.PendingInputs.AnyAsync(x=>x.ProviderId==I(p,"id"),ct))throw new InvalidOperationException("Fournisseur utilisé par un modèle composé ou un message en attente.");
+                if (runs.Values.Any(x => x.SelectedProviderId == I(p, "id") || x.Provider.Id == I(p,"id") || x.AgentProviders.Values.Any(a=>a.Id==I(p,"id")))) throw new InvalidOperationException("Provider is in use by a conversation.");
                 db.Providers.Remove(await db.Providers.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "provider.models":
                 var selected = await db.Providers.SingleAsync(x => x.Id == I(p, "id"), ct);
+                if(selected.IsComposite)return new[]{selected.Model};
                 var secret = await Decrypt(selected.ProtectedKey, ct);
                 using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
                 {
@@ -117,6 +132,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 }
             case "state.save":
                 var state = await db.States.SingleAsync(ct);
+                if(p["featuresJson"] != null) state.FeaturesJson = FeatureSettings.Read(S(p,"featuresJson")).Json();
                 state.Language = S(p, "language", state.Language) == "en" ? "en" : "fr";
                 state.PermissionMode = PermissionModes.Normalize(S(p, "permissionMode", state.PermissionMode));
                 state.AutoContinue = B(p, "autoContinue", state.AutoContinue);

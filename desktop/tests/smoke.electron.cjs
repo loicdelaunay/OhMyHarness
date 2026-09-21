@@ -40,6 +40,9 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   const win=await waitFor(()=>BrowserWindow.getAllWindows()[0]);
   const evaluate=source=>win.webContents.executeJavaScript(source,true);
   await waitFor(()=>evaluate('!!window.harness && document.getElementById("platform")?.textContent.length > 0').catch(()=>false));
+  assert.equal(webContents.getAllWebContents().length,1,'No browser process/view is created at startup');
+  await evaluate('showTools(true);selectTab("terminal");selectTab("web");showTools(false)');
+  assert.equal(webContents.getAllWebContents().length,1,'Opening Tools does not initialize the browser');
   const base=`http://127.0.0.1:${server.address().port}`;
   const model=await evaluate(`window.harness.call('provider.save',${JSON.stringify({name:'Smoke provider',baseUrl:base+'/v1',kind:'openai',model:'smoke',key:'fake-test-key',supportsImages:true})})`);
   const snapshot=await evaluate(`window.harness.call('snapshot')`),project=snapshot.projects[0];
@@ -49,6 +52,8 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await waitFor(()=>evaluate(`document.querySelector('.chat-row progress') !== null`));
   assert.equal(await evaluate(`document.getElementById('new-chat').disabled`),false);
   assert.equal(await evaluate(`document.getElementById('composer').disabled`),false);
+  assert.equal(await evaluate(`document.getElementById('send').disabled`),false,'Can send while the current model runs');
+  assert.equal(await evaluate(`document.getElementById('delivery-mode').hidden`),false);
   await evaluate(`document.getElementById('new-chat').click()`);
   await waitFor(()=>evaluate(`chatId!==${chat.id} && !document.getElementById('send').disabled`));
   await evaluate('showSettings()');
@@ -61,9 +66,19 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await evaluate(`selectChat(${chat.id})`);
   assert.ok((await evaluate(`document.getElementById('messages').textContent`)).includes('streamed response'));
   assert.ok((await evaluate(`document.getElementById('messages').textContent`)).includes('Completed while settings are open'));
+  win.webContents.send('harness:event',{event:'subagent',chatId:chat.id,child:{id:'fixture-child',chatId:chat.id,name:'Recherche',task:'Examiner les sources',status:'running',activity:'read_source',transcriptJson:'[{"role":"assistant","content":"Child transcript fixture"}]'}});
+  await waitFor(()=>evaluate('document.querySelector(".child-row")!==null'));
+  await evaluate('document.querySelector(".child-bubble").click()');
+  assert.equal(await evaluate('document.getElementById("send").disabled'),true);
+  assert.ok(await evaluate('document.getElementById("messages").textContent.includes("Child transcript fixture")'));
+  win.webContents.send('harness:event',{event:'subagent',chatId:chat.id,child:{id:'fixture-child',chatId:chat.id,name:'Recherche',task:'Examiner les sources',status:'completed',activity:'completed',transcriptJson:'[{"role":"assistant","content":"Child finished"}]'}});
+  await waitFor(()=>evaluate('document.querySelector(".child-row")===null'));
+  await evaluate('document.querySelector("#messages button").click()');
+  assert.ok(await evaluate('document.querySelector(".child-bubble").textContent.includes("completed")'));
   await evaluate(`window.savedHistory=histories.get(chatId);histories.set(chatId,Array.from({length:30},(_,i)=>({id:9000+i,role:'assistant',content:'History '+i+' long text '.repeat(100)})));renderMessages(true);`);
   await evaluate(`$('messages').scrollTop=100`);
   await waitFor(()=>evaluate('!followChatTail'));
+  assert.equal(await evaluate('document.getElementById("auto-scroll").getAttribute("aria-pressed")'),'false');
   assert.equal(await evaluate(`updateMessage(chatId,{id:9030,role:'tool',content:'Incoming tool'});renderMessages();Math.round($('messages').scrollTop)`),100);
   await evaluate(`$('messages').scrollTop=$('messages').scrollHeight`);
   await waitFor(()=>evaluate('followChatTail'));
@@ -71,6 +86,17 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
   await evaluate('histories.set(chatId,window.savedHistory);renderMessages(true);delete window.savedHistory');
   await evaluate('showSettings()');
   assert.equal(await evaluate(`document.querySelector('[data-settings="skills"]').nextElementSibling.dataset.settings`),'mcp');
+  assert.equal(await evaluate(`getComputedStyle(document.getElementById('setting-tabs')).flexDirection`),'column');
+  assert.equal(await evaluate(`document.querySelector('[data-settings="rag"]')===null`),true);
+  await evaluate(`settingsTab='skills';renderSettings();var rag=document.querySelector('[data-skill="rag"]');rag.checked=false;rag.dispatchEvent(new Event('change'))`);
+  assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),true);
+  await evaluate(`document.querySelector('[data-skill="rag"]').click()`);
+  assert.equal(await evaluate(`document.querySelector('[data-rag-settings]').hidden`),false);
+  await evaluate(`settingsTab='providers';compositeForm({});document.querySelector('#settings-content form input').value='UI composite fixture';[...document.querySelectorAll('#settings-content button')].find(x=>x.textContent.includes('＋ Sous-agent')).click();var task=document.querySelector('#settings-content textarea');task.value='Review the source files';task.dispatchEvent(new Event('input'));document.querySelector('#settings-content form').requestSubmit()`);
+  await waitFor(()=>evaluate(`snapshot.providers.some(x=>x.name==='UI composite fixture')`));
+  assert.equal(await evaluate(`JSON.parse(snapshot.providers.find(x=>x.name==='UI composite fixture').compositeJson).Agents[0].Task`),'Review the source files');
+  await evaluate(`providerForm(snapshot.providers.find(x=>x.name==='UI composite fixture'));document.querySelector('#settings-content form input').value='UI composite edited';document.querySelector('#settings-content form').requestSubmit()`);
+  await waitFor(()=>evaluate(`snapshot.providers.some(x=>x.name==='UI composite edited')`));
   await evaluate(`settingsTab='general';renderSettings();document.querySelectorAll('#settings-content input[type="checkbox"]')[1].checked=true;document.querySelectorAll('#settings-content input[type="checkbox"]')[0].checked=false;document.querySelector('#settings-content button').click()`);
   await waitFor(()=>evaluate(`snapshot.state.autoContinue===true && snapshot.state.showReasoningDetails===false`));
   assert.equal(await evaluate(`document.querySelector('#messages details').open`),false);
@@ -219,6 +245,8 @@ async function waitFor(fn){const until=Date.now()+25000;while(Date.now()<until){
     try { await pool.execute('browse',{chatId:902,url:localPage.url}); } catch { }
     assert.ok(!(await pool.execute('read_page',{chatId:902})).text.includes('Local report opened from chat'));
     await assert.rejects(pool.execute('read_page',{}));
+    const crashed=new Promise(resolve=>a.once('render-process-gone',resolve));a.forcefullyCrashRenderer();await crashed;
+    assert.equal(await evaluate('1+1'),2,'Application UI remains responsive after a browser renderer crash');
     await pool.execute('browser.close',{chatId:901});
     assert.ok(!b.isDestroyed());
   } finally {pool.close();isolatedWindow.close();}

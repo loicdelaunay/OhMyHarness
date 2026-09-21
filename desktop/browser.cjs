@@ -33,6 +33,7 @@ function createBrowser(win, chatId = 0) {
   win.contentView.addChildView(view,0); view.setBounds({x:0,y:0,width:1024,height:768}); view.setVisible(true);
   let visible=false;
   const wc = view.webContents;
+  wc.on('render-process-gone',(_,details)=>{if(!win.isDestroyed())win.webContents.send('harness:event',{event:'browser-error',chatId,error:'Browser stopped: '+details.reason});});
   wc.setWindowOpenHandler(({ url }) => { if (allowedNavigation(url)) wc.loadURL(url).catch(() => {}); return { action:'deny' }; });
   wc.on('will-navigate', (event, url) => { if (!allowedNavigation(url)) event.preventDefault(); });
   wc.on('will-redirect', (event, url) => { if (!allowedNavigation(url)) event.preventDefault(); });
@@ -177,10 +178,11 @@ function createBrowserPool(win) {
       if(method==='browser.select') {
         selected=Number(p.chatId)||0;
         for(const entry of browsers.values())entry.browser.hide();
-        return selected?get(selected).browser.execute('browser.state',{}):{url:'about:blank'};
+        return browsers.has(selected)?browsers.get(selected).browser.execute('browser.state',{}):{url:'about:blank'};
       }
       if(method==='browser.close') {const entry=browsers.get(p.chatId);if(entry){browsers.delete(p.chatId);entry.browser.close();}return true;}
       const id=method.startsWith('desktop_')?0:p.chatId;
+      if(method==='browser.bounds'&&!browsers.has(id))return false;
       const entry=get(id);
       if(method==='browser.bounds') {
         if(id!==selected)return false;

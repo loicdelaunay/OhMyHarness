@@ -216,7 +216,34 @@ public sealed partial class SourceAccess
         if (startLine.HasValue != endLine.HasValue || startLine is < 1 || endLine < startLine || (long?)endLine - startLine >= 2000)
             throw new ArgumentException("Indiquez start_line et end_line ensemble : lignes à partir de 1, bornes incluses, 2 000 lignes maximum.");
         var full = Resolve(relative);
-        if (!Extensions.Contains(Path.GetExtension(full))) throw new InvalidOperationException("Format source non pris en charge.");
+        return await ReadFileAsync(full, ct, startLine, endLine, relative);
+    }
+    public static async Task<string> ReadFileAsync(string full, CancellationToken ct, int? startLine = null, int? endLine = null, string? relative = null)
+    {
+        relative ??= full;
+        if (startLine.HasValue != endLine.HasValue || startLine is < 1 || endLine < startLine || (long?)endLine - startLine >= 2000)
+            throw new ArgumentException("start_line/end_line: 1-based, inclusive, maximum 2000 lines.");
+        await using (var stream = File.OpenRead(full))
+        {
+            var sample = new byte[4096]; var length = await stream.ReadAsync(sample, ct);
+            bool unicode = length >= 2 && (sample[0] == 255 && sample[1] == 254 || sample[0] == 254 && sample[1] == 255);
+            bool binary = sample.AsSpan(0, length).Contains((byte)0);
+            if(!unicode && !binary)
+            {
+                try { new System.Text.UTF8Encoding(false,true).GetDecoder().Convert(sample,0,length,new char[4096],0,4096,false,out _,out _,out _); }
+                catch(System.Text.DecoderFallbackException) {binary=true;}
+            }
+            if (!unicode && binary)
+            {
+                long offset = ((long)(startLine ?? 1) - 1) * 16;
+                stream.Position = Math.Min(offset, stream.Length);
+                var bytes = new byte[Math.Min(32000, (endLine.HasValue ? endLine.Value - startLine!.Value + 1 : 128) * 16)];
+                var count = await stream.ReadAsync(bytes, ct);
+                var hex = new System.Text.StringBuilder($"Binary file: {full}, {stream.Length} bytes. Hex rows are 16 bytes; use start_line/end_line to read further.\n");
+                for (int i = 0; i < count; i += 16) hex.Append((offset+i).ToString("X8")).Append(": ").Append(Convert.ToHexString(bytes.AsSpan(i, Math.Min(16,count-i)))).Append('\n');
+                return hex.ToString();
+            }
+        }
         if (startLine.HasValue)
         {
             if (new FileInfo(full).Length > 16 * 1024 * 1024) throw new InvalidOperationException("Lecture partielle : fichier >16 Mio.");

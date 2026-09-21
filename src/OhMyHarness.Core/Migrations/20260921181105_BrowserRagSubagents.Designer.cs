@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using OhMyHarness.Core;
 
@@ -10,9 +11,11 @@ using OhMyHarness.Core;
 namespace OhMyHarness.Core.Migrations
 {
     [DbContext(typeof(HarnessDb))]
-    partial class HarnessDbModelSnapshot : ModelSnapshot
+    [Migration("20260921181105_BrowserRagSubagents")]
+    partial class BrowserRagSubagents
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
@@ -235,37 +238,6 @@ namespace OhMyHarness.Core.Migrations
                     b.ToTable("Messages");
                 });
 
-            modelBuilder.Entity("OhMyHarness.Core.PendingInput", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ChatId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ImagesJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("ProviderId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Text")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChatId", "Id");
-
-                    b.ToTable("PendingInputs");
-                });
-
             modelBuilder.Entity("OhMyHarness.Core.PermissionGrant", b =>
                 {
                     b.Property<int>("Id")
@@ -343,10 +315,6 @@ namespace OhMyHarness.Core.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("BaseUrl")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CompositeJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
@@ -505,15 +473,6 @@ namespace OhMyHarness.Core.Migrations
                 {
                     b.HasOne("OhMyHarness.Core.Chat", null)
                         .WithMany("Messages")
-                        .HasForeignKey("ChatId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("OhMyHarness.Core.PendingInput", b =>
-                {
-                    b.HasOne("OhMyHarness.Core.Chat", null)
-                        .WithMany()
                         .HasForeignKey("ChatId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

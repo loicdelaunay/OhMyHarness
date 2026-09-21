@@ -20,6 +20,7 @@ public sealed partial class MainWindow
         public int ContextLimit { get; set; } = 128000;
         public bool SupportsImages { get; set; } = true;
         public string Kind { get; set; } = "openai";
+        public string CompositeJson { get; set; } = "";
         public string Username { get; set; } = "";
         public string ExecutablePath { get; set; } = "";
         public bool AutoStart { get; set; }
@@ -40,7 +41,7 @@ public sealed partial class MainWindow
     {
         var drafts = db.Providers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Id)
             .Select(x => new ProviderDraft { Id = x.Id, Name = x.Name, BaseUrl = x.BaseUrl, Model = x.Model, ProtectedKey = [.. x.ProtectedKey], ContextLimit = x.ContextLimit, SupportsImages = x.SupportsImages,
-                Kind = x.Kind, Username = x.Username, ExecutablePath = x.ExecutablePath, AutoStart = x.AutoStart, OpenCodeTools = x.OpenCodeTools })
+                Kind = x.Kind, CompositeJson=x.CompositeJson, Username = x.Username, ExecutablePath = x.ExecutablePath, AutoStart = x.AutoStart, OpenCodeTools = x.OpenCodeTools })
             .ToList();
         var state = new ProviderEditorState { Panel = new StackPanel(), Drafts = drafts, Error = Label("", 12) };
         state.Error.Tag = null;
@@ -70,6 +71,8 @@ public sealed partial class MainWindow
         var addOpenAi = new Button { Content = T("+ OpenAI compatible") };
         var addDeepSeek = new Button { Content = "+ DeepSeek" };
         var addOpenCode = new Button { Content = "+ OpenCode" };
+        var addComposite = new Button { Content = "+ Modèle composé / Composite" };
+        var compositePanel=new StackPanel();
         var duplicate = new Button { Content = T("Dupliquer") };
         var remove = new Button { Content = T("Supprimer le fournisseur") };
         bool refreshing = false;
@@ -100,6 +103,9 @@ public sealed partial class MainWindow
             importModels.Content = T(openCode ? "Importer les modèles OpenCode" : "Importer les modèles");
             key.Password = draft?.PendingKey ?? "";
             key.PlaceholderText = draft?.ProtectedKey.Length > 0 && draft.DeleteKey == false ? T("Clé déjà enregistrée") : T("Votre clé API");
+            var composite=draft?.Kind=="composite";
+            foreach(var control in new UIElement[]{url,key,model,limit,vision,deleteKey,testConnection,importModels})control.Visibility=composite?Visibility.Collapsed:Visibility.Visible;
+            compositePanel.Children.Clear();if(composite)compositePanel.Children.Add(BuildCompositeModelEditor(draft!,drafts));
             refreshing = false;
         }
         void Refresh(ProviderDraft? draft)
@@ -109,6 +115,7 @@ public sealed partial class MainWindow
         state.Commit = () =>
         {
             if (state.Selected == null) return;
+            if(state.Selected.Kind=="composite"){state.Selected.Name=name.Text;return;}
             state.Selected.Name = name.Text; state.Selected.BaseUrl = url.Text; state.Selected.Model = model.Text;
             if (double.IsFinite(limit.Value)) state.Selected.ContextLimit = (int)limit.Value;
             state.Selected.SupportsImages = vision.IsChecked == true; state.Selected.DeleteKey = deleteKey.IsChecked == true; state.Selected.PendingKey = key.Password;
@@ -180,6 +187,7 @@ public sealed partial class MainWindow
             drafts.Add(draft); Refresh(draft); name.Focus(FocusState.Programmatic); name.SelectAll();
         }
         addOpenAi.Click += (_, _) => AddPreset("openai");
+        addComposite.Click+=(_,_)=>{state.Commit();var draft=new ProviderDraft{Name=NextName("Modèle composé"),Kind="composite",CompositeJson=new CompositeModel().Json()};drafts.Add(draft);Refresh(draft);};
         addDeepSeek.Click += (_, _) => AddPreset("deepseek");
         addOpenCode.Click += (_, _) =>
         {
@@ -205,7 +213,7 @@ public sealed partial class MainWindow
             state.Commit();
             var source = state.Selected;
             var draft = new ProviderDraft { Name = NextName(source.Name + " " + T("copie")), BaseUrl = source.BaseUrl, Model = source.Model, ContextLimit = source.ContextLimit, SupportsImages = source.SupportsImages,
-                Kind = source.Kind, Username = source.Username, ExecutablePath = source.ExecutablePath, AutoStart = source.AutoStart, OpenCodeTools = source.OpenCodeTools };
+                Kind = source.Kind, CompositeJson=source.CompositeJson, Username = source.Username, ExecutablePath = source.ExecutablePath, AutoStart = source.AutoStart, OpenCodeTools = source.OpenCodeTools };
             drafts.Add(draft); Refresh(draft); name.Focus(FocusState.Programmatic); name.SelectAll();
         };
         remove.Click += (_, _) =>
@@ -276,7 +284,7 @@ public sealed partial class MainWindow
 
         state.Panel.Spacing = 12;
         state.Panel.Children.Add(info);
-        foreach (var item in new UIElement[] { Row(addOpenAi, addDeepSeek, addOpenCode), chooser, Row(duplicate, remove), name, url, username, key, execGrid, autoStart, openCodeTools, model, Row(testConnection, importModels), limit, vision, deleteKey, state.Error }) state.Panel.Children.Add(item);
+        foreach (var item in new UIElement[] { Row(addOpenAi, addDeepSeek, addOpenCode), addComposite, chooser, Row(duplicate, remove), name, compositePanel, url, username, key, execGrid, autoStart, openCodeTools, model, Row(testConnection, importModels), limit, vision, deleteKey, state.Error }) state.Panel.Children.Add(item);
         Refresh(drafts.FirstOrDefault(x => x.Id == selectedProviderId) ?? drafts.FirstOrDefault());
         return state;
     }
@@ -284,9 +292,15 @@ public sealed partial class MainWindow
     string? ValidateProviderDrafts(ProviderEditorState editor)
     {
         editor.Commit();
+        if(db.PendingInputs.AsNoTracking().Select(x=>x.ProviderId).ToList().Any(id=>!editor.Drafts.Any(draft=>draft.Id==id)))return "Un fournisseur est utilisé par un message en attente. / Provider used by a queued message.";
         if (editor.Drafts.Any(x => string.IsNullOrWhiteSpace(x.Name))) return T("Le nom du fournisseur est requis.");
         foreach (var draft in editor.Drafts)
         {
+            if(draft.Kind=="composite")
+            {
+                try{CompositeModel.Read(draft.CompositeJson).Validate(editor.Drafts.Where(x=>x.Id>0).Select(x=>new Provider{Id=x.Id,Kind=x.Kind}));}
+                catch(Exception ex){return draft.Name+" : "+ex.Message;}continue;
+            }
             try { ChatEngine.Endpoint(draft.BaseUrl.Trim(), draft.Kind == "opencode" ? "global/health" : "chat/completions"); }
             catch { return T("URL HTTP(S) invalide.") + " " + draft.Name; }
             if (string.IsNullOrWhiteSpace(draft.Model) || draft.ContextLimit < 1024) return T("Modèle et limite de contexte requis.") + " " + draft.Name;
@@ -307,6 +321,12 @@ public sealed partial class MainWindow
             entity.ContextLimit = draft.ContextLimit; entity.SupportsImages = draft.SupportsImages;
             entity.Kind = draft.Kind; entity.Username = draft.Username.Trim(); entity.ExecutablePath = draft.ExecutablePath.Trim(); entity.AutoStart = draft.AutoStart;
             entity.OpenCodeTools = draft.OpenCodeTools;
+            entity.CompositeJson=draft.CompositeJson;
+            if(entity.IsComposite)
+            {
+                var config=CompositeModel.Read(entity.CompositeJson);var target=CompositeModel.Resolve(config.Orchestrator,db.Providers.Local);
+                entity.Model=target.Model;entity.ContextLimit=target.ContextLimit;entity.SupportsImages=target.SupportsImages;entity.BaseUrl="";entity.ProtectedKey=[];
+            }
             if (draft.DeleteKey) entity.ProtectedKey = [];
             else if (!string.IsNullOrWhiteSpace(draft.PendingKey)) entity.ProtectedKey = KeyVault.Encrypt(draft.PendingKey.Trim());
             entities[draft] = entity;

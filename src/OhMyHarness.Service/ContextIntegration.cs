@@ -18,7 +18,8 @@ public sealed partial class HarnessService
         var chat = await db.Chats.SingleAsync(x => x.Id == I(p, "chatId"), lifetime);
         var project = await db.Projects.SingleAsync(x => x.Id == chat.ProjectId, lifetime);
         var provider = await db.Providers.SingleAsync(x => x.Id == I(p, "providerId"), lifetime);
-        using var run = new ConversationSession(chat, project, provider, await db.States.SingleAsync(lifetime), "", [], database);
+        using var run = new ConversationSession(chat, project, provider, await db.States.SingleAsync(lifetime), "", [], database,await db.Providers.ToListAsync(lifetime));
+        provider=run.Provider;
         if (!runs.TryAdd(chat.Id, run)) throw new InvalidOperationException("Attendez la fin de la réponse / Wait for the response to finish.");
         using var registration = lifetime.Register(run.Cancellation.Cancel);
         var ct = run.Cancellation.Token;
@@ -47,6 +48,6 @@ public sealed partial class HarnessService
             return new { changed, details = await ReadContext(chat.Id, provider.Id, ct) };
         }
         catch (Exception ex) { error = ex is OperationCanceledException ? "Compactage arrêté / Compaction stopped" : ex.Message; throw; }
-        finally { runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status }); }
+        finally { runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status }); if(error.Length==0&&!ct.IsCancellationRequested)await SendNext(chat.Id,lifetime); }
     }
 }

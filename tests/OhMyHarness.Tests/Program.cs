@@ -9,6 +9,7 @@ void Check(bool condition, string name) { if (!condition) throw new Exception("�
 async Task Throws<T>(Func<Task> action, string name) where T : Exception
 { try { await action(); } catch (T) { Check(true, name); return; } throw new Exception("Exception attendue : " + name); }
 string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Serialize(value) + "\r\n\r\n";
+if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
 var stream = ": heartbeat\r\n\r\n" + Event(new { choices = new[] { new { delta = new { content = "Bonjour " } } } })
     + Event(new { choices = new[] { new { delta = new { content = "世界" } } } })
     + Event(new { choices = Array.Empty<object>(), usage = new { prompt_tokens = 87, completion_tokens = 4 } }) + "data: [DONE]\r\n\r\n";
@@ -524,6 +525,11 @@ try
     Check((await File.ReadAllTextAsync(Path.Combine(skillFolder, "exemple-revue", "SKILL.md"))).Contains("USER-CUSTOMIZATION"), "Le modèle de skill ne remplace pas les personnalisations");
     var runtimeChat = new Chat { Id = 1234, ExecutionMode = "plan", OrchestrationMode = "forced" };
     var runtimeProject = new Project { SourceFolder = featureRoot };
+    await using(var runtimeDb = new HarnessDb(Path.Combine(workspace,"runtime.sqlite")))
+    {
+        await runtimeDb.InitializeAsync(); runtimeDb.Projects.Add(runtimeProject);await runtimeDb.SaveChangesAsync();
+        runtimeChat.ProjectId=runtimeProject.Id;runtimeDb.Chats.Add(runtimeChat);await runtimeDb.SaveChangesAsync();
+    }
     using (var session = new ConversationSession(runtimeChat, runtimeProject, new Provider(), new AppState { EnabledSkills = "sources,write_sources,custom:exemple-revue" }, "Analyze", [], Path.Combine(workspace, "runtime.sqlite")))
     {
         runtimeChat.ExecutionMode = "execute";
@@ -539,6 +545,7 @@ try
         }, (_, _, _) => throw new Exception("No permission dialog should be needed."), _ => Task.CompletedTask);
         Check((await runtime.InitializeAsync(default)).Contains("ROOT-CONVENTION"), "Instructions transmises à l’orchestrateur");
         var report = await runtime.ForcedAsync(default);
+        Check(await session.Db.Subagents.CountAsync(x=>x.ChatId==runtimeChat.Id && x.Status=="completed")==2, "Sous-agents conservent leurs échanges et leur statut final");
         Check(childRequests == 4 && policyDenials == 2 && !File.Exists(Path.Combine(featureRoot, "forbidden.md")) && report.Contains("Exploration") && report.Contains("Validation"), "Forced lance deux sous-agents et bloque leurs écritures malgré un appel forgé");
     }
 
@@ -556,6 +563,8 @@ finally
 await WorkflowChecks.Run(Check);
 await SandboxChecks.Run(Check);
 await TerminalChecks.Run(Check);
+await FeatureChecks.Run(Check);
+await InboxChecks.Run(Check);
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

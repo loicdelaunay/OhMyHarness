@@ -188,10 +188,10 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         var history = await db.Messages.Where(x => x.ChatId == chat.Id && x.State == "complete").OrderBy(x => x.Id).ToListAsync();
         var priorHistory = history.ToList();
         var user = new Message { ChatId = chat.Id, Content = prompt, Attachments = run.Images };
-        db.Messages.Add(user);
         if (history.Count == 0) chat.Title = prompt.Length > 0 ? prompt[..Math.Min(50, prompt.Length)] : T("Discussion autour d’une image");
-        await db.SaveChangesAsync();
+        await ConversationInbox.SubmitAsync(run,user,ct);
         MarkRunSubmitted(run);
+        await RefreshInboxAsync();
         if (history.Count == 0) run.Messages.Children.Clear();
         AddMessage("user", prompt, user.Attachments, run.Messages);
         ScrollRunToBottom(run);
@@ -278,6 +278,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         catch (Exception ex)
         {
             run.Tracker = null;
+            run.Failed=true;
             SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message);
             if (active != null && assistantUi != null) assistantUi.UpdateContent(active.Content + T("\n[Réponse interrompue]"));
         }

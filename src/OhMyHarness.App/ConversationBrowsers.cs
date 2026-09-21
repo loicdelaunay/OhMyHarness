@@ -13,6 +13,7 @@ public sealed partial class MainWindow
         public WebView2 View { get; } = new();
         public Task? Initialization;
         public bool Ready;
+        public bool Closed;
         public string? PreviewFolder, PreviewHost;
         public double? PointerX, PointerY;
         public string Address = "about:blank";
@@ -63,6 +64,7 @@ public sealed partial class MainWindow
     void CloseConversationBrowser(int id)
     {
         if (!conversationBrowsers.Remove(id, out var item)) return;
-        (item.View.Parent as Panel)?.Children.Remove(item.View); item.View.Close();
+        item.Closed = true; item.Ready = false;
+        try { (item.View.Parent as Panel)?.Children.Remove(item.View); item.View.Close(); } catch (System.Runtime.InteropServices.COMException) { }
     }
 }

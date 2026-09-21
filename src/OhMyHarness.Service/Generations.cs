@@ -19,8 +19,9 @@ public sealed partial class HarnessService
         if (images.Count > 4 || images.Any(x => x.Data.Length > 8 * 1024 * 1024 || x.Mime is not ("image/png" or "image/jpeg" or "image/webp"))) throw new ArgumentException("4 PNG/JPEG/WebP images maximum, 8 MB each.");
         var text = S(p, "text").Trim();
         if (text.Length == 0 && images.Count == 0) throw new ArgumentException("Message required.");
-        using var run = new ConversationSession(chat, project, provider, options, text, images, database);
-        await using var mcp = CreateMcpSession();
+        using var run = new ConversationSession(chat, project, provider, options, text, images, database,await setup.Providers.ToListAsync(lifetime)){PendingInputId=I(p,"pendingInputId")};
+        provider=run.Provider;
+        await using var mcp = CreateMcpSession(chat.Id);
         if (!runs.TryAdd(chat.Id, run)) throw new InvalidOperationException("This conversation is already running.");
         using var cancel = lifetime.Register(run.Cancellation.Cancel);
         var ct = run.Cancellation.Token;
@@ -29,13 +30,15 @@ public sealed partial class HarnessService
         string completionStatus = "";
         try
         {
+            await emit(new{@event="started",chatId=chat.Id});
             await run.PrepareSandboxAsync(ct);
             var secret = await Decrypt(provider.ProtectedKey, ct);
             var history = await History(run, ct);
             if (!provider.SupportsImages && (images.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException("Choose a model that supports images.");
             var user = new Message { ChatId = chat.Id, Content = text, Attachments = run.Images };
             if (history.Count == 0) run.Chat.Title = text.Length == 0 ? "Images" : text[..Math.Min(50, text.Length)];
-            run.Db.Messages.Add(user); await run.Db.SaveChangesAsync(ct); history.Add(user);
+            await ConversationInbox.SubmitAsync(run,user,ct); history.Add(user);
+            await NotifyInbox(chat.Id);
             await emit(new { @event = "message", chatId = chat.Id, title = run.Chat.Title, message = MessageView(user) });
             var definitions = Definitions(run);
             var system = Skills.Prompt(options.EnabledSkills, options.Language, project.GetSourceFolders().Count > 0, browserAccess, Skills.Enabled(options.EnabledSkills, "write_sources"));
@@ -54,6 +57,7 @@ public sealed partial class HarnessService
             for (int round = 0; ; round++)
             {
                 ct.ThrowIfCancellationRequested();
+                if((await ApplySteering(run,ct)).Count>0){history=await History(run,ct);round=0;}
                 if (round > 0 && round % 12 == 0)
                 {
                     await using var current = Db();
@@ -108,7 +112,7 @@ public sealed partial class HarnessService
                         var arguments = call["function"]?["arguments"]?.GetValue<string>() ?? "{}";
                         ToolResult result;
                         if (!TerminalHub.IsBoundedWait(name, arguments)) await run.LoopGuard.CheckAsync(name, arguments, run.Workflow, ct);
-                        var ownsToolQueue = !AgentRuntime.Handles(name) && !TerminalHub.Handles(name);
+                        var ownsToolQueue = !AgentRuntime.Handles(name) && !TerminalHub.Handles(name) && !RagTools.Handles(name);
                         if (ownsToolQueue) await tools.WaitAsync(ct);
                         try
                         {
@@ -142,6 +146,8 @@ public sealed partial class HarnessService
                 foreach (var result in results) await emit(new { @event = "message", chatId = chat.Id, message = MessageView(result) });
                 await emit(new { @event = "message", chatId = chat.Id, message = MessageView(active) });
                 history = await History(run, ct);
+                var steered=await ApplySteering(run,ct);
+                if(steered.Count>0){history=await History(run,ct);round=0;}
                 if (!provider.IsOpenCode) history = await Compact(run, history, system, definitions, secret, ct);
                 else if (ContextWindow.ShouldCompact((completion.InputTokens ?? input) + (completion.OutputTokens ?? ContextWindow.EstimateText(active.Content)), provider.ContextLimit))
                 {
@@ -150,7 +156,7 @@ public sealed partial class HarnessService
                     run.Db.ExternalChatSessions.RemoveRange(links); await run.Db.SaveChangesAsync(ct);
                 }
                 active = null;
-                if (results.Count == 0) break;
+                if (results.Count == 0 && steered.Count==0) break;
             }
         }
         catch (Exception ex) { error = ex is OperationCanceledException ? "Génération arrêtée / Generation stopped" : ex.Message; throw; }
@@ -163,6 +169,7 @@ public sealed partial class HarnessService
             }
             finally { if (run.Sandbox != null) await terminals.StopChatAsync(chat.Id, true); runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status = completionStatus }); }
         }
+        if(error.Length==0 && !run.Cancellation.IsCancellationRequested)await SendNext(chat.Id,lifetime);
         return true;
     }
     static async Task<List<Message>> History(ConversationSession run, CancellationToken ct)
@@ -259,8 +266,9 @@ public sealed partial class HarnessService
             run.Db.ExternalChatSessions.Add(link); await run.Db.SaveChangesAsync(ct);
             system += "\nPrevious history:\n" + string.Join("\n", history.TakeLast(20).Select(x => $"[{x.Role}] {x.Content}"));
         }
-        return await engine.PromptAsync(p, password, directory, link.SessionId, run.Prompt, system,
-            run.Images.Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList(), update, ct,
+        var pendingUsers=history.AsEnumerable().Reverse().TakeWhile(x=>x.Role=="user").Reverse().ToList();
+        return await engine.PromptAsync(p, password, directory, link.SessionId, pendingUsers.Count>0?string.Join("\n\n",pendingUsers.Select(x=>x.Content)):run.Prompt, system,
+            (pendingUsers.Count>0?pendingUsers.SelectMany(x=>x.Attachments):run.Images).Select(x => new OpenCodeAttachment(x.Name, x.Mime, x.Data)).ToList(), update, ct,
             async (permission, token) => await Approve($"opencode|{p.Id}|{directory}|{permission.Action}|{string.Join('|', permission.Resources)}",
                 run.Chat.Title + " · OpenCode · " + permission.Action, string.Join('\n', permission.Resources) + "\n" + permission.Details, token) ? "once" : "reject", new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
     }

@@ -12,7 +12,7 @@ public sealed partial class MainWindow
     // Each generation owns its database context, captured configuration and message view.
     // UI selection is never used to route a response that is already running.
     sealed class ConversationRun(Chat chat, Project project, Provider provider, AppState options,
-        string prompt, IEnumerable<Attachment> images) : ConversationSession(chat, project, provider, options, prompt, images)
+        string prompt, IEnumerable<Attachment> images, IEnumerable<Provider>? availableProviders=null) : ConversationSession(chat, project, provider, options, prompt, images, availableProviders:availableProviders)
     {
         public required StackPanel Messages { get; init; }
         public GenerationSpeedTracker? Tracker { get; set; }
@@ -21,6 +21,7 @@ public sealed partial class MainWindow
         public (double Tokens, bool Estimated)? Context { get; set; }
         public string Status { get; set; } = "";
         public bool Submitted { get; set; }
+        public bool Failed { get; set; }
     }
 
     readonly Dictionary<int, ConversationRun> conversationRuns = [];
@@ -30,7 +31,7 @@ public sealed partial class MainWindow
     readonly SemaphoreSlim toolQueue = new(1, 1);
     ConversationRun? ActiveRun => chat != null ? conversationRuns.GetValueOrDefault(chat.Id) : null;
     static StackPanel CreateMessagePanel() => new() { Spacing = 14, Padding = new(4, 20, 12, 20) };
-    bool IsVisible(ConversationRun run) => chat?.Id == run.Chat.Id;
+    bool IsVisible(ConversationRun run) => selectedSubagent == null && chat?.Id == run.Chat.Id;
     IEnumerable<Message> VisibleHistory() => ActiveRun is { } active ? active.Db.Messages.Local :
         chat != null ? conversationHistory.GetValueOrDefault(chat.Id) ?? [] : [];
 
@@ -52,14 +53,16 @@ public sealed partial class MainWindow
     void RefreshGenerationControls()
     {
         // Keep navigation, settings and drafts usable; only sending to this running chat is blocked.
-        send.IsEnabled = chat != null && ActiveRun == null;
+        send.IsEnabled = selectedSubagent == null && chat != null;
+        deliveryMode.Visibility=ActiveRun!=null?Visibility.Visible:Visibility.Collapsed;
         stop.IsEnabled = ActiveRun != null;
-        composer.IsEnabled = true;
+        composer.IsEnabled = selectedSubagent == null;
         RefreshConversationProgress();
     }
 
     void RefreshConversationProgress()
     {
+        RefreshSubagentSidebar();
         static TElement? Find<TElement>(DependencyObject parent) where TElement : DependencyObject
         {
             if (parent is TElement found) return found;
@@ -127,28 +130,45 @@ public sealed partial class MainWindow
 
     async Task SendAsync()
     {
-        if (chat == null || provider == null || project == null || ActiveRun != null) return;
+        if (chat == null || provider == null || project == null) return;
         if (string.IsNullOrWhiteSpace(composer.Text) && pendingImages.Count == 0) return;
-        var secret = KeyVault.Decrypt(provider.ProtectedKey);
-        if ((!provider.IsOpenCode && secret.Length == 0) || string.IsNullOrWhiteSpace(provider.Model))
-        { await Settings(); return; }
-
-        var run = new ConversationRun(chat, project, provider, state, composer.Text.Trim(), pendingImages) { Messages = messages };
+        if(ActiveRun is { } active)
+        {
+            if(pendingImages.Count>0 && !(deliveryMode.SelectedIndex==1?active.Provider.SupportsImages:provider.SupportsImages))throw new InvalidOperationException("Ce modèle n’accepte pas les images.");
+            var text=composer.Text.Trim();var images=pendingImages.ToList();var id=chat.Id;var providerId=deliveryMode.SelectedIndex==1?active.SelectedProviderId:provider.Id;var mode=deliveryMode.SelectedIndex==1?"steering":"queued";
+            composer.Text="";pendingImages.Clear();UpdateAttachments();SaveConversationDraft();
+            try{await ConversationInbox.AddAsync(HarnessDb.DatabasePath,id,providerId,text,images,mode);}
+            catch{var draft=conversationDrafts.GetValueOrDefault(id);conversationDrafts[id]=(text+"\n"+draft.Text,[..images,..draft.Images??[]]);if(chat?.Id==id)RestoreConversationDraft();throw;}
+            await RefreshInboxAsync();
+            if(!conversationRuns.ContainsKey(id) && !active.Failed && !active.Cancellation.IsCancellationRequested)await RunNextQueuedAsync(id,active.Messages);
+            return;
+        }
+        var run = new ConversationRun(chat, project, provider, state, composer.Text.Trim(), pendingImages,db.Providers.Local) { Messages = messages };
+        var secret = KeyVault.Decrypt(run.Provider.ProtectedKey);
+        if ((!run.Provider.IsOpenCode && secret.Length == 0) || string.IsNullOrWhiteSpace(run.Provider.Model))
+        { run.Dispose();await Settings(); return; }
         conversationRuns.Add(run.Chat.Id, run); // Reserve before the first await, preventing duplicate sends.
         composer.Text = ""; pendingImages.Clear(); UpdateAttachments();
-        SaveConversationDraft(); RefreshGenerationControls();
+        SaveConversationDraft();await ExecuteRunAsync(run);
+    }
+    async Task ExecuteRunAsync(ConversationRun run)
+    {
+        bool success=false;
+        RefreshGenerationControls();
         SetRunStatus(run, T("Le modèle réfléchit…"));
         try
         {
+            var secret=KeyVault.Decrypt(run.Provider.ProtectedKey);
             await run.PrepareSandboxAsync(run.Cancellation.Token);
             if (run.Provider.IsOpenCode) await SendOpenCodeAsync(run, secret);
             else await SendCoreAsync(run, secret);
+            success=!run.Failed && !run.Cancellation.IsCancellationRequested;
         }
         catch (Exception ex)
         {
             SetRunStatus(run, ex is OperationCanceledException
                 ? T("Génération arrêtée. Réponse partielle conservée.") : T("Erreur : ") + ex.Message);
-            if (!run.Submitted)
+            if (!run.Submitted && run.PendingInputId==0)
             {
                 if (IsVisible(run)) SaveConversationDraft();
                 var draft = conversationDrafts.GetValueOrDefault(run.Chat.Id);
@@ -167,7 +187,9 @@ public sealed partial class MainWindow
             run.Dispose();
             RefreshGenerationControls();
             if (IsVisible(run)) RestoreRunMetrics(run);
+            await RefreshInboxAsync();
         }
+        if(success)await RunNextQueuedAsync(run.Chat.Id,run.Messages);
     }
 
     async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog, CancellationToken ct = default)
