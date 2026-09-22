@@ -39,7 +39,7 @@ public sealed class MarkdownRenderer
         var doc = MarkdownPipelineHelper.Parse(markdown);
         if (doc.Count == 0)
         {
-            var fallback = new RichTextBlock
+            var fallback = new TextBlock
             {
                 IsTextSelectionEnabled = true,
                 TextWrapping = TextWrapping.Wrap,
@@ -48,19 +48,19 @@ public sealed class MarkdownRenderer
             };
             var p = new Paragraph();
             p.Inlines.Add(new Run { Text = markdown });
-            fallback.Blocks.Add(p);
+            foreach(var inline in p.Inlines.ToList()) { p.Inlines.Remove(inline); fallback.Inlines.Add(inline); }
             container.Children.Add(fallback);
             return;
         }
 
-        RichTextBlock? textFlow = null;
+        TextBlock? textFlow = null;
         foreach (var block in doc)
         {
             if (CanJoinText(block))
             {
                 if (textFlow == null)
                 {
-                    textFlow = new RichTextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap,
+                    textFlow = new TextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap,
                         Foreground = FluentDesign.Primary, FontSize = 14.5, LineHeight = 22 };
                     container.Children.Add(textFlow);
                 }
@@ -79,21 +79,24 @@ public sealed class MarkdownRenderer
     static bool CanJoinText(MdBlock block) => block is ParagraphBlock or HeadingBlock ||
         block is ListBlock or ListItemBlock or QuoteBlock && ((ContainerBlock)block).All(CanJoinText);
 
-    void AppendText(MdBlock block, RichTextBlock flow, int depth, string prefix = "")
+    void AppendText(MdBlock block, TextBlock flow, int depth, string prefix = "")
     {
         if (block is ParagraphBlock paragraph || block is HeadingBlock)
         {
-            var p = new Paragraph { Margin = new Thickness(depth * 18, 2, 0, 6) };
+            var p = new Span();
+            if(flow.Inlines.Count > 0) flow.Inlines.Add(new LineBreak());
+            if(depth > 0) p.Inlines.Add(new Run { Text = new string(' ', depth * 2) });
             if (prefix.Length > 0) p.Inlines.Add(new Run { Text = prefix, Foreground = Brush(130, 175, 245) });
             if (block is HeadingBlock heading)
             {
                 p.FontSize = heading.Level switch { 1 => 21, 2 => 18, 3 => 16, _ => 14.5 };
                 p.FontWeight = FontWeights.SemiBold;
-                p.Margin = new Thickness(depth * 18, 8, 0, 4);
+
                 if (heading.Inline != null) RenderInlines(heading.Inline, p.Inlines);
             }
             else if (((ParagraphBlock)block).Inline is { } inline) RenderInlines(inline, p.Inlines);
-            flow.Blocks.Add(p);
+            flow.Inlines.Add(p);
+            flow.Inlines.Add(new LineBreak());
         }
         else if (block is ListBlock list)
         {
@@ -166,7 +169,7 @@ public sealed class MarkdownRenderer
             _ => (13.5, FontWeights.SemiBold, new Thickness(0, 3, 0, 2))
         };
 
-        var rtb = new RichTextBlock
+        var rtb = new TextBlock
         {
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
@@ -181,13 +184,13 @@ public sealed class MarkdownRenderer
         {
             RenderInlines(heading.Inline, p.Inlines);
         }
-        rtb.Blocks.Add(p);
+        foreach(var inline in p.Inlines.ToList()) { p.Inlines.Remove(inline); rtb.Inlines.Add(inline); }
         return rtb;
     }
 
     private FrameworkElement RenderParagraph(ParagraphBlock paragraph)
     {
-        var rtb = new RichTextBlock
+        var rtb = new TextBlock
         {
             IsTextSelectionEnabled = true,
             TextWrapping = TextWrapping.Wrap,
@@ -202,7 +205,7 @@ public sealed class MarkdownRenderer
         {
             RenderInlines(paragraph.Inline, p.Inlines);
         }
-        rtb.Blocks.Add(p);
+        foreach(var inline in p.Inlines.ToList()) { p.Inlines.Remove(inline); rtb.Inlines.Add(inline); }
         return rtb;
     }
 

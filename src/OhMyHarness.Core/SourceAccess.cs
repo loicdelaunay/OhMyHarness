@@ -48,6 +48,13 @@ public sealed partial class SourceAccess
 
     static string ResolveInRoot(string rootPath, string subpath)
     {
+        if (File.Exists(rootPath))
+        {
+            if (subpath != "." && !string.Equals(subpath, Path.GetFileName(rootPath), PlatformSupport.PathComparison))
+                throw new UnauthorizedAccessException("Seul le fichier explicitement associé est accessible.");
+            SandboxWorkspace.AssertNoLinks(rootPath);
+            return rootPath;
+        }
         var basePath = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var full = Path.GetFullPath(Path.Combine(basePath, subpath));
         if (!full.StartsWith(basePath, PlatformSupport.PathComparison) && full + Path.DirectorySeparatorChar != basePath)
@@ -145,7 +152,7 @@ public sealed partial class SourceAccess
 
         if (_roots.Count > 1 && (relative == "." || relative == ""))
         {
-            return string.Join('\n', _roots.Select(r => $"[dossier] {r.Alias}"));
+            return string.Join('\n', _roots.Select(r => $"[{(File.Exists(r.FullPath) ? "fichier" : "dossier")}] {r.Alias}"));
         }
 
         if (_roots.Count == 1)
@@ -157,6 +164,7 @@ public sealed partial class SourceAccess
                 subpath = subpath[(root.Alias.Length + 1)..];
 
             var directory = ResolveInRoot(root.FullPath, subpath);
+            if (File.Exists(directory)) return "[fichier] " + root.Alias;
             return string.Join('\n', Directory.EnumerateFileSystemEntries(directory)
                 .Where(p => !Excluded.Contains(Path.GetFileName(p)) && !Path.GetFileName(p).StartsWith(".env", StringComparison.OrdinalIgnoreCase))
                 .Where(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0)
@@ -201,6 +209,7 @@ public sealed partial class SourceAccess
         }
 
         var targetDir = ResolveInRoot(matchedRoot.FullPath, relInRoot);
+        if (File.Exists(targetDir)) return "[fichier] " + matchedRoot.Alias;
         return string.Join('\n', Directory.EnumerateFileSystemEntries(targetDir)
             .Where(p => !Excluded.Contains(Path.GetFileName(p)) && !Path.GetFileName(p).StartsWith(".env", StringComparison.OrdinalIgnoreCase))
             .Where(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) == 0)

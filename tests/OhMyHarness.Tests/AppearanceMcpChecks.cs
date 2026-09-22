@@ -6,9 +6,19 @@ static class AppearanceMcpChecks
 {
     public static async Task Run(Action<bool,string> check)
     {
-        check(AppearanceThemes.All.Count == 6 && AppearanceThemes.All.Count(x=>x.Dark)==3, "Six thèmes, trois sombres et trois clairs");
+        check(AppearanceThemes.All.Count == 8 && AppearanceThemes.All.Count(x=>x.Dark)==4, "Huit thèmes, quatre sombres et quatre clairs");
         var settings = FeatureSettings.Read(new FeatureSettings { Theme="ivory", ComposerInfoExpanded=false }.Json());
         check(settings.Theme=="ivory" && !settings.ComposerInfoExpanded, "Thème et panneau replié persistés dans les réglages");
+        var brandRoot=Path.Combine(Path.GetTempPath(),"omh-brand-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(brandRoot);
+        var ownLogo=Path.Combine(brandRoot,"logo personnalisé.png");await File.WriteAllBytesAsync(ownLogo,[1,2,3]);
+        check(await BrandingAssets.SaveLogoAsync(ownLogo,[1,2,3],brandRoot)=="logo personnalisé.png","Logo près de l’exécutable conservé en chemin relatif");
+        var external=Path.Combine(brandRoot+"-external","logo.png");Directory.CreateDirectory(Path.GetDirectoryName(external)!);await File.WriteAllBytesAsync(external,[4,5,6]);
+        var relative=await BrandingAssets.SaveLogoAsync(external,[4,5,6],brandRoot);
+        check(relative.StartsWith("branding/") && (await File.ReadAllBytesAsync(BrandingAssets.Resolve(relative,brandRoot))).SequenceEqual(new byte[]{4,5,6}),"Logo externe importé sans confondre deux dossiers au préfixe identique");
+        var copiedRoot=brandRoot+"-copy";Directory.CreateDirectory(Path.Combine(copiedRoot,"branding"));File.Copy(BrandingAssets.Resolve(relative,brandRoot),BrandingAssets.Resolve(relative,copiedRoot));
+        var brandSettings=FeatureSettings.Read(new FeatureSettings{ApplicationName="Fly workspace",LogoPath=relative,Theme="fly-dark"}.Json());
+        check(brandSettings.ApplicationName=="Fly workspace" && File.Exists(BrandingAssets.Resolve(brandSettings.LogoPath,copiedRoot)),"Nom et logo mémorisés restent valides après copie du dossier portable");
+        check(BrandingAssets.DisplayName("  ")==BrandingAssets.DefaultName && BrandingAssets.DisplayName("Fly\nworkspace")=="Fly workspace","Nom vide rétabli et retours de ligne normalisés");
         const string godot = """
         {"mcpServers":{"godot":{"command":"npx","args":["@coding-solo/godot-mcp"],"env":{"GODOT_PATH":"/path/to/godot","DEBUG":"true"}}}}
         """;

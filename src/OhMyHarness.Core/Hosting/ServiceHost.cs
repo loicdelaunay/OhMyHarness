@@ -2,8 +2,14 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using OhMyHarness.Service;
+using OhMyHarness.Core.Hosting;
 
+namespace OhMyHarness.Core.Hosting;
+
+public static class ServiceHost
+{
+public static async Task RunAsync(string[] args)
+{
 Console.InputEncoding = Console.OutputEncoding = new UTF8Encoding(false);
 var pathIndex = Array.IndexOf(args, "--database");
 if (pathIndex < 0 || pathIndex + 1 >= args.Length) throw new ArgumentException("--database requires an absolute SQLite path.");
@@ -73,4 +79,7 @@ finally
 {
     lifetime.Cancel(); service.CancelAll();
     try { await Task.WhenAll(pending.Values).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+}
+
+}
 }

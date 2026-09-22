@@ -2,8 +2,8 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {spawn}=require('node:child_process'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),http=require('node:http'),readline=require('node:readline');
 test('desktop service: SQLite, providers, skills, permissions and simultaneous conversations', {timeout:60000},async t=>{
   const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'omh-service-test-')));
-  const executable=path.resolve(__dirname,'../../src/OhMyHarness.Service/bin/Release/net10.0/OhMyHarness.Service.dll');
-  const child=spawn('dotnet',[executable,'--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+  const executable=path.resolve(__dirname,'../../src/OhMyHarness.App/bin/Release/net10.0-desktop/OhMyHarness.App.dll');
+  const child=spawn('dotnet',[executable,'--service','--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
   let index=0,stderr='',readyResolve,readyReject;const replies=new Map(),events=[],hosts=[];
   const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   child.stderr.on('data',data=>stderr+=data);
@@ -33,6 +33,11 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
       res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{embedding:[1,0,0]}]}));return;
     }
     requests++;active++;peak=Math.max(peak,active);requestLog.push({body,authorization:req.headers.authorization});
+    if(body.model==='deepseek-v4-fixture'){
+      active--;
+      if(body.thinking?.type!=='disabled'){res.writeHead(400,{'Content-Type':'application/json'});res.end('{"error":{"message":"Missing reasoning_content in thinking mode"}}');return;}
+      res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'Recovered from DeepSeek compatibility error.'}}]})+'\n\ndata: [DONE]\n\n');return;
+    }
     if(body.model==='vision-model'){
       visionRequests++;active--;assert.equal(req.headers.authorization,'Bearer vision-fixture-key');assert.ok(body.messages.at(-1).content.some(x=>x.type==='image_url'));assert.ok(!body.tools);
       res.writeHead(200,{'Content-Type':'text/event-stream'});res.end('data: '+JSON.stringify({choices:[{delta:{content:'Visible: red circle, label START.'}}]})+'\n\ndata: [DONE]\n\n');return;
@@ -110,6 +115,28 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   const exported=await rpc('chat.export',{chatId:chatA.id,providerId:provider.id});
   assert.equal(exported.useClipboard,true);assert.ok(exported.fileName.endsWith('.md'));
   assert.ok(exported.markdown.includes('Reply: alpha'));assert.ok(!exported.markdown.includes('Reply: beta'));
+  const fork=await rpc('chat.branch',{chatId:chatA.id,messageId:historyA[0].id});
+  assert.equal((await rpc('history',{chatId:fork.id})).length,1);
+  assert.equal((await rpc('history',{chatId:chatA.id})).length,2);
+  await rpc('chat.tasks',{id:fork.id,dismissed:true});assert.equal((await rpc('snapshot')).chats.find(x=>x.id===fork.id).todoDismissed,true);
+  const resourceFile=path.join(directory,'attached.txt');await fs.writeFile(resourceFile,'specific file');
+  await rpc('chat.resources',{id:fork.id,paths:[resourceFile]});
+  assert.equal(await rpc('files.read',{projectId:project.id,chatId:fork.id,path:resourceFile}),'specific file');
+  await assert.rejects(rpc('files.read',{projectId:project.id,chatId:fork.id,path:path.join(directory,'database.sqlite')}));
+  await fs.writeFile(path.join(directory,'permission.json'),'{"permissions":{"desktop":"deny","terminal":"ask"}}');
+  const reviewed=await rpc('project.permissions.preview',{id:project.id});
+  await rpc('project.permissions.apply',{id:project.id,reviewed});
+  await fs.writeFile(path.join(directory,'permission.json'),'{"permissions":{"desktop":"allow"}}');
+  await assert.rejects(rpc('project.permissions.apply',{id:project.id,reviewed}));
+  assert.equal(JSON.parse((await rpc('snapshot')).projects.find(x=>x.id===project.id).permissionProfileJson).desktop,'deny');
+  await rpc('project.permissions.apply',{id:project.id,clear:true});
+  const recovering=await rpc('provider.save',{...provider,id:0,name:'DeepSeek fallback',model:'deepseek-v4-fixture',kind:'deepseek',key:'fixture-not-a-real-key'});
+  const recoveryChat=await rpc('chat.save',{projectId:project.id,title:'Recovery'});
+  await rpc('send',{chatId:recoveryChat.id,providerId:recovering.id,text:'continue'});
+  const recovered=(await rpc('history',{chatId:recoveryChat.id})).at(-1);
+  assert.equal(recovered.state,'complete');assert.ok(recovered.content.includes('Recovered'));assert.ok(recovered.compatibilityNotice.includes('raisonnement'));
+  await rpc('chat.branch',{chatId:chatA.id,messageId:historyA[0].id,resume:true});
+  assert.equal((await rpc('history',{chatId:chatA.id})).length,1);
   const stopped=rpc('send',{chatId:chatA.id,providerId:provider.id,text:'cancel me'});stopped.catch(()=>{});
   while(!(await rpc('snapshot')).running.includes(chatA.id))await new Promise(r=>setTimeout(r,5));
   const other=rpc('send',{chatId:chatB.id,providerId:provider.id,text:'keep going'});

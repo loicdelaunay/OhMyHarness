@@ -20,8 +20,14 @@ internal static class FluentDesign
         "CardStrokeColorDefaultBrush" => ColorHelper.FromArgb(theme.Dark ? (byte)24 : (byte)32, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0),
         "SolidBackgroundFillColorBaseBrush" => Color(theme.Background),
         "SystemAccentColor" => Color(theme.Accent),
+        "AccentFillColorDefaultBrush" or "AccentTextFillColorPrimaryBrush" or "AccentTextFillColorSecondaryBrush" or "AccentTextFillColorTertiaryBrush" => Color(theme.Accent),
+        "AccentFillColorSecondaryBrush" => WithOpacity(Color(theme.Accent), 230),
+        "AccentFillColorTertiaryBrush" => WithOpacity(Color(theme.Accent), 204),
+        "TextOnAccentFillColorPrimaryBrush" => Color(theme.Dark ? theme.Background : "#FFFFFF"),
+        "TextOnAccentFillColorSecondaryBrush" => WithOpacity(Color(theme.Dark ? theme.Background : "#FFFFFF"), 200),
         _ => Color(theme.Surface)
     };
+    static Windows.UI.Color WithOpacity(Windows.UI.Color color, byte alpha) => ColorHelper.FromArgb(alpha, color.R, color.G, color.B);
     public static Brush Resource(string key)
     {
         if (!resources.TryGetValue(key, out var brush)) resources[key] = brush = new(ResourceColor(key));
@@ -45,6 +51,12 @@ internal static class FluentDesign
         theme = AppearanceThemes.Get(id);
         foreach (var (key,brush) in resources) brush.Color = ResourceColor(key);
         foreach (var (key,brush) in adapted) brush.Color = AdaptColor(key.R,key.G,key.B);
+        // Install shared brushes before controls are built, then mutate them on theme changes.
+        foreach (var key in new[] { "AccentFillColorDefaultBrush", "AccentFillColorSecondaryBrush", "AccentFillColorTertiaryBrush",
+            "AccentTextFillColorPrimaryBrush", "AccentTextFillColorSecondaryBrush", "AccentTextFillColorTertiaryBrush",
+            "TextOnAccentFillColorPrimaryBrush", "TextOnAccentFillColorSecondaryBrush" })
+            Application.Current.Resources[key] = Resource(key);
+        Application.Current.Resources["SystemAccentColor"] = Color(theme.Accent);
     }
     public static Brush Card => Resource("CardBackgroundFillColorDefaultBrush");
     public static Brush Stroke => Resource("CardStrokeColorDefaultBrush");
@@ -102,11 +114,13 @@ internal static class FluentDesign
 
     public static void WindowChrome(Window window)
     {
+#if WINDOWS
         window.SystemBackdrop = new MicaBackdrop();
         var bar = window.AppWindow.TitleBar;
         bar.BackgroundColor = bar.InactiveBackgroundColor = Color(theme.Background);
         bar.ForegroundColor = bar.ButtonForegroundColor = Color(theme.Text);
         bar.InactiveForegroundColor = bar.ButtonInactiveForegroundColor = Color(theme.Muted);
         bar.ButtonBackgroundColor = bar.ButtonInactiveBackgroundColor = Color(theme.Background);
+#endif
     }
 }

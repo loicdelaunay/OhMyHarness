@@ -21,6 +21,8 @@ public sealed partial class MainWindow
         public bool SupportsImages { get; set; } = true;
         public string Kind { get; set; } = "openai";
         public string CompositeJson { get; set; } = "";
+        public string DetectedModelsJson { get; set; } = "[]";
+        public string SelectedModelsJson { get; set; } = "";
         public string Username { get; set; } = "";
         public string ExecutablePath { get; set; } = "";
         public bool AutoStart { get; set; }
@@ -41,7 +43,7 @@ public sealed partial class MainWindow
     {
         var drafts = db.Providers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Id)
             .Select(x => new ProviderDraft { Id = x.Id, Name = x.Name, BaseUrl = x.BaseUrl, Model = x.Model, ProtectedKey = [.. x.ProtectedKey], ContextLimit = x.ContextLimit, SupportsImages = x.SupportsImages,
-                Kind = x.Kind, CompositeJson=x.CompositeJson, Username = x.Username, ExecutablePath = x.ExecutablePath, AutoStart = x.AutoStart, OpenCodeTools = x.OpenCodeTools })
+                DetectedModelsJson=x.DetectedModelsJson, SelectedModelsJson=x.SelectedModelsJson, Kind = x.Kind, CompositeJson=x.CompositeJson, Username = x.Username, ExecutablePath = x.ExecutablePath, AutoStart = x.AutoStart, OpenCodeTools = x.OpenCodeTools })
             .ToList();
         var state = new ProviderEditorState { Panel = new StackPanel(), Drafts = drafts, Error = Label("", 12) };
         state.Error.Tag = null;
@@ -89,7 +91,7 @@ public sealed partial class MainWindow
         }
 
         Provider AsProvider(ProviderDraft draft) => new() { Name = draft.Name, BaseUrl = draft.BaseUrl, Model = draft.Model, ContextLimit = draft.ContextLimit, SupportsImages = draft.SupportsImages,
-            Kind = draft.Kind, Username = draft.Username, ExecutablePath = draft.ExecutablePath, AutoStart = draft.AutoStart, OpenCodeTools = draft.OpenCodeTools };
+            DetectedModelsJson=draft.DetectedModelsJson, SelectedModelsJson=draft.SelectedModelsJson, Kind = draft.Kind, Username = draft.Username, ExecutablePath = draft.ExecutablePath, AutoStart = draft.AutoStart, OpenCodeTools = draft.OpenCodeTools };
         void Select(ProviderDraft? draft)
         {
             refreshing = true; state.Selected = draft;
@@ -119,7 +121,7 @@ public sealed partial class MainWindow
         }
         state.Commit = () =>
         {
-            if (state.Selected == null) return;
+            if (state.Selected == null || editor.Visibility != Visibility.Visible) return;
             if(state.Selected.Kind=="composite"){state.Selected.Name=name.Text;return;}
             state.Selected.Name = name.Text; state.Selected.BaseUrl = url.Text; state.Selected.Model = model.Text;
             if (double.IsFinite(limit.Value)) state.Selected.ContextLimit = (int)limit.Value;
@@ -171,7 +173,7 @@ public sealed partial class MainWindow
                 var picker = new Windows.Storage.Pickers.FileOpenPicker();
                 picker.FileTypeFilter.Add(".exe");
                 picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(settingsWindow ?? this));
+                InitializePicker(picker, settingsWindow ?? this);
                 var file = await picker.PickSingleFileAsync();
                 if (file != null && state.Selected != null)
                 {
@@ -218,7 +220,7 @@ public sealed partial class MainWindow
             state.Commit();
             var source = state.Selected;
             var draft = new ProviderDraft { Name = NextName(source.Name + " " + T("copie")), BaseUrl = source.BaseUrl, Model = source.Model, ContextLimit = source.ContextLimit, SupportsImages = source.SupportsImages,
-                Kind = source.Kind, CompositeJson=source.CompositeJson, Username = source.Username, ExecutablePath = source.ExecutablePath, AutoStart = source.AutoStart, OpenCodeTools = source.OpenCodeTools };
+                DetectedModelsJson=source.DetectedModelsJson, SelectedModelsJson=source.SelectedModelsJson, Kind = source.Kind, CompositeJson=source.CompositeJson, Username = source.Username, ExecutablePath = source.ExecutablePath, AutoStart = source.AutoStart, OpenCodeTools = source.OpenCodeTools };
             drafts.Add(draft); Refresh(draft); name.Focus(FocusState.Programmatic); name.SelectAll();
         };
         remove.Click += (_, _) =>
@@ -252,38 +254,33 @@ public sealed partial class MainWindow
             catch (Exception ex) { info.Text = ex.Message; }
             finally { testConnection.IsEnabled = true; }
         };
+        async Task Discover(ProviderDraft draft)
+        {
+            state.Commit();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+            var target = AsProvider(draft);
+            var endpoint = target.BaseUrl;
+            var secret = draft.PendingKey.Length > 0 ? draft.PendingKey : draft.DeleteKey ? "" : KeyVault.Decrypt(draft.ProtectedKey);
+            List<string> list;
+            if (target.IsOpenCode)
+            {
+                await EnsureOpenCodeServerAsync(target, secret, timeout.Token);
+                list = (await openCodeEngine.ModelsAsync(target, secret, project?.GetSourceFolders().FirstOrDefault(), timeout.Token)).Select(x => x.Reference).ToList();
+            }
+            else list = await engine.ModelsAsync(target, secret, timeout.Token);
+            if (draft.BaseUrl != endpoint) return;
+            ProviderModels.Refresh(target, list);
+            draft.DetectedModelsJson = target.DetectedModelsJson;
+            draft.SelectedModelsJson = target.SelectedModelsJson;
+            if (state.Selected == draft) { model.ItemsSource = list; model.Text = draft.Model; }
+            info.Text = $"{list.Count} modèles détectés / models detected";
+            RenderCards();
+        }
         importModels.Click += async (_, _) =>
         {
-            if (state.Selected == null) return;
+            if (state.Selected is not { } draft) return;
             importModels.IsEnabled = false;
-            info.Text = T("Importation des modèles…");
-            try
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
-                var secret = state.Selected.PendingKey.Length > 0 ? state.Selected.PendingKey : state.Selected.DeleteKey ? "" : KeyVault.Decrypt(state.Selected.ProtectedKey);
-                List<string> list;
-                if (state.Selected.Kind == "opencode")
-                {
-                    var target = AsProvider(state.Selected);
-                    await EnsureOpenCodeServerAsync(target, secret, timeout.Token);
-                    var discovered = await openCodeEngine.ModelsAsync(target, secret, project?.GetSourceFolders().FirstOrDefault(), timeout.Token);
-                    list = discovered.Select(x => x.Reference).ToList();
-                    var selectedModel = discovered.FirstOrDefault(x => x.Reference == state.Selected.Model) ?? discovered.FirstOrDefault();
-                    if (selectedModel != null)
-                    {
-                        if (string.IsNullOrWhiteSpace(state.Selected.Model) || !discovered.Any(x => x.Reference == state.Selected.Model))
-                        {
-                            state.Selected.Model = selectedModel.Reference;
-                        }
-                        if (selectedModel.ContextLimit is int context) { state.Selected.ContextLimit = context; limit.Value = context; }
-                        state.Selected.SupportsImages = selectedModel.SupportsImages; vision.IsChecked = selectedModel.SupportsImages;
-                    }
-                }
-                else list = await engine.ModelsAsync(new Provider { BaseUrl = state.Selected.BaseUrl.Trim() }, secret, timeout.Token);
-                var selected = state.Selected.Model; model.ItemsSource = list; model.Text = selected;
-                info.Text = string.Format(T("Connexion réussie · {0} modèles importés."), list.Count);
-            }
-            catch (Exception ex) { info.Text = ex.Message; }
+            try { await Discover(draft); } catch (Exception ex) { info.Text = ex.Message; }
             finally { importModels.IsEnabled = true; }
         };
 
@@ -295,7 +292,37 @@ public sealed partial class MainWindow
                 var gear = new Button { Width = 34, Height = 34, Padding = new(0) };
                 FluentDesign.IconButton(gear, "\uE713", WorkflowText("Réglages de ", "Settings for ") + draft.Name, false);
                 gear.Click += (_, _) => { state.Commit(); Refresh(draft); };
-                cards.Children.Add(FluentDesign.Setting(draft.Name, draft.Kind == "composite" ? WorkflowText("Modèle composé", "Composite model") : draft.Model + " · " + draft.Kind, gear));
+                var details = new StackPanel { Spacing = 6, Margin = new(0,12,0,0) };
+                if (draft.Kind != "composite")
+                {
+                    var refresh = new Button { Content = WorkflowText("↻ Actualiser les modèles", "↻ Refresh models") };
+                    var result = Label("", 12); result.Tag = null;
+                    refresh.Click += async (_, _) =>
+                    {
+                        refresh.IsEnabled = false;
+                        try { await Discover(draft); } catch (Exception ex) { result.Text = ex.Message; }
+                        finally { refresh.IsEnabled = true; }
+                    };
+                    details.Children.Add(refresh); details.Children.Add(result);
+                    var options = new StackPanel { Spacing = 3 };
+                    var selected = ProviderModels.Visible(AsProvider(draft)).ToHashSet(StringComparer.Ordinal);
+                    var models = ProviderModels.Normalize(ProviderModels.Available(AsProvider(draft)).Concat(selected).Append(draft.Model));
+                    foreach (var id in models)
+                    {
+                        var check = new CheckBox { Content = id, IsChecked = selected.Contains(id) };
+                        void UpdateSelection()
+                        {
+                            if (check.IsChecked == true) selected.Add(id); else selected.Remove(id);
+                            draft.SelectedModelsJson = System.Text.Json.JsonSerializer.Serialize(selected.Order().ToArray());
+                            if (!selected.Contains(draft.Model) && selected.Count > 0) draft.Model = selected.Order().First();
+                        }
+                        check.Checked += (_, _) => UpdateSelection(); check.Unchecked += (_, _) => UpdateSelection();
+                        options.Children.Add(check);
+                    }
+                    details.Children.Add(new ScrollViewer { Content = options, MaxHeight = 240 });
+                    details.Children.Add(Label(WorkflowText("Cochez les modèles à afficher dans le sélecteur.", "Check models to display in the picker."), 12));
+                }
+                cards.Children.Add(FluentDesign.Setting(draft.Name, draft.Kind == "composite" ? WorkflowText("Modèle composé", "Composite model") : draft.Kind, gear, details));
             }
             if (drafts.Count == 0) cards.Children.Add(Label(WorkflowText("Ajoutez un fournisseur pour commencer.", "Add a provider to get started.")));
         }
@@ -344,6 +371,7 @@ public sealed partial class MainWindow
             entity.Kind = draft.Kind; entity.Username = draft.Username.Trim(); entity.ExecutablePath = draft.ExecutablePath.Trim(); entity.AutoStart = draft.AutoStart;
             entity.OpenCodeTools = draft.OpenCodeTools;
             entity.CompositeJson=draft.CompositeJson;
+            entity.DetectedModelsJson=draft.DetectedModelsJson; entity.SelectedModelsJson=draft.SelectedModelsJson;
             if(entity.IsComposite)
             {
                 var config=CompositeModel.Read(entity.CompositeJson);var target=CompositeModel.Resolve(config.Orchestrator,db.Providers.Local);

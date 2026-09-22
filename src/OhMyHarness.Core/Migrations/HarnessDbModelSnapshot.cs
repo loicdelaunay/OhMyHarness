@@ -112,12 +112,19 @@ namespace OhMyHarness.Core.Migrations
                     b.Property<int>("ProjectId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ResourcePathsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("SandboxEnabled")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("TodoDismissed")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 
@@ -202,6 +209,10 @@ namespace OhMyHarness.Core.Migrations
 
                     b.Property<int>("ChatId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("CompatibilityNotice")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Content")
                         .IsRequired()
@@ -305,6 +316,10 @@ namespace OhMyHarness.Core.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PermissionProfileJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SourceFolder")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -353,6 +368,10 @@ namespace OhMyHarness.Core.Migrations
                     b.Property<int>("ContextLimit")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("DetectedModelsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ExecutablePath")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -375,6 +394,10 @@ namespace OhMyHarness.Core.Migrations
                     b.Property<byte[]>("ProtectedKey")
                         .IsRequired()
                         .HasColumnType("BLOB");
+
+                    b.Property<string>("SelectedModelsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("SupportsImages")
                         .HasColumnType("INTEGER");
@@ -428,6 +451,98 @@ namespace OhMyHarness.Core.Migrations
                     b.HasIndex("ProjectId", "Model");
 
                     b.ToTable("RagChunks");
+                });
+
+            modelBuilder.Entity("OhMyHarness.Core.ScheduledTask", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AutoContinue")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ContextLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Cron")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EnabledSkills")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExecutionMode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Instruction")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("LastChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastResult")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastRunUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("NextRunUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OrchestrationMode")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ProviderId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("RememberHistory")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResourcePathsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("SandboxEnabled")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("SupportsImages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ThinkingLevel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("Enabled", "NextRunUtc");
+
+                    b.ToTable("ScheduledTasks");
                 });
 
             modelBuilder.Entity("OhMyHarness.Core.SubagentRecord", b =>
@@ -520,6 +635,15 @@ namespace OhMyHarness.Core.Migrations
                 });
 
             modelBuilder.Entity("OhMyHarness.Core.RagChunk", b =>
+                {
+                    b.HasOne("OhMyHarness.Core.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("OhMyHarness.Core.ScheduledTask", b =>
                 {
                     b.HasOne("OhMyHarness.Core.Project", null)
                         .WithMany()

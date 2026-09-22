@@ -7,14 +7,15 @@ function applyAppearance(){
   }
   const expanded=config.ComposerInfoExpanded!==false;
   $('info-toggle').setAttribute('aria-expanded',String(expanded));
-  $('info-toggle').textContent=(expanded?'⌃  ':'⌄  ')+L('Modèle, débit et contexte','Model, speed and context');
+  $('info-toggle').textContent=(expanded?'⌄  ':'›  ')+L('Modèle, débit et contexte','Model, speed and context');
   document.querySelector('.metrics').hidden=!expanded;
 }
 const composerShell=document.createElement('div');composerShell.className='composer-shell';
 const metricsPanel=document.querySelector('.metrics'),composerPanel=document.querySelector('.composer');
 metricsPanel.before(composerShell);
 const infoToggle=document.createElement('button');infoToggle.id='info-toggle';infoToggle.type='button';
-composerShell.append(infoToggle,metricsPanel,$('inbox'),$('assets'),composerPanel);
+composerShell.append(infoToggle,metricsPanel,$('assets'),composerPanel);
+composerShell.before($('pinned-tasks'),$('inbox'));
 infoToggle.onclick=()=>guard(async()=>{
   const config=featureConfig();config.ComposerInfoExpanded=config.ComposerInfoExpanded===false;
   await call('state.save',{featuresJson:JSON.stringify(config)});await refresh();

@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OhMyHarness.Core;
 using System.Text.Json.Nodes;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {
@@ -23,8 +23,9 @@ public sealed partial class HarnessService
         {
             await using var db = Db();
             var mode = await db.States.Select(x => x.PermissionMode).SingleAsync(ct);
-            if (PermissionModes.AutomaticDecision(mode) is bool automatic) return automatic;
-            if (await db.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
+            var profile = permissionProject.Value?.PermissionProfileJson ?? "";
+            if (ProjectResources.AutomaticDecision(mode, profile, scope) is bool automatic) return automatic;
+            if (ProjectResources.Decision(profile, scope) != "ask" && await db.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
             var reply = await host("permission", Obj(new { title, details }), ct);
             ct.ThrowIfCancellationRequested();
             var choice = reply?.GetValue<string>();
@@ -97,6 +98,9 @@ public sealed partial class HarnessService
     }
     async Task<ToolResult> Tool(ConversationSession run, string name, JsonObject p, CancellationToken ct)
     {
+        permissionProject.Value = run.Project;
+        if (FeatureSettings.Read(run.Options.FeaturesJson).AutoFocusTool)
+            await emit(new { @event = "tool-focus", chatId = run.Chat.Id, name });
         AgentPolicy.Demand(run.Chat.ExecutionMode, name);
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();

@@ -194,6 +194,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         await RefreshInboxAsync();
         if (history.Count == 0) run.Messages.Children.Clear();
         AddMessage("user", prompt, user.Attachments, run.Messages);
+        AddHistoryActions(user, run.Messages);
         ScrollRunToBottom(run);
         Message? active = null; AssistantMessageUi? assistantUi = null;
         try
@@ -278,6 +279,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             if (ContextWindow.ShouldCompact(contextTokens, provider.ContextLimit))
                 await CompactOpenCodeSessionAsync(run, provider, password, directory, link, ct);
             else SetRunStatus(run, T("Réponse OpenCode terminée · historique enregistré."));
+            AddHistoryActions(active, run.Messages);
             active = null;
         }
         catch (Exception ex)

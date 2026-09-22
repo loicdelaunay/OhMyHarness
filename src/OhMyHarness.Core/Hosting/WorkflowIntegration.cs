@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using OhMyHarness.Core;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {

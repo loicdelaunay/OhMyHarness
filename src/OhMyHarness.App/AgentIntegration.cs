@@ -17,7 +17,7 @@ public sealed partial class MainWindow
         },
         (scope, diff, ct) => RequestAccessAsync(scope, "Sous-agent · Patch", diff, "Patch des sources", ct),
         text => { SetRunStatus(run, text); return Task.CompletedTask; },
-        _ => Task.FromResult(state.EnabledSkills), child => { UpdateSubagent(run,child); return Task.CompletedTask; },
+        _ => Task.FromResult(RunSkills(run)), child => { UpdateSubagent(run,child); return Task.CompletedTask; },
         async (target,wire,definitions,ct)=> {
             var key=KeyVault.Decrypt(target.ProtectedKey);
             if(!target.IsOpenCode)return await engine.StreamAsync(target,key,wire,definitions,_=>{},ct,run.Options.ThinkingLevel);

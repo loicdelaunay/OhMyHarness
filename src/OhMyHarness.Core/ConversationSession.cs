@@ -38,8 +38,9 @@ public class ConversationSession : IDisposable
         string prompt, IEnumerable<Attachment> images, string? databasePath = null, IEnumerable<Provider>? availableProviders = null)
     {
         Chat = new Chat { Id = chat.Id, ProjectId = chat.ProjectId, Title = chat.Title,
-            SandboxEnabled = chat.SandboxEnabled, ExecutionMode = AgentPolicy.Mode(chat.ExecutionMode), OrchestrationMode = AgentPolicy.Orchestration(chat.OrchestrationMode) };
-        Project = new Project { Id = project.Id, Name = project.Name, SourceFolder = project.SourceFolder };
+            SandboxEnabled = chat.SandboxEnabled, ResourcePathsJson = chat.ResourcePathsJson, TodoDismissed = chat.TodoDismissed, ExecutionMode = AgentPolicy.Mode(chat.ExecutionMode), OrchestrationMode = AgentPolicy.Orchestration(chat.OrchestrationMode) };
+        Project = new Project { Id = project.Id, Name = project.Name, PermissionProfileJson = project.PermissionProfileJson };
+        Project.SetSourceFolders(ProjectResources.For(chat, project));
         Provider = JsonSerializer.Deserialize<Provider>(JsonSerializer.Serialize(provider))!;
         SelectedProviderId=provider.Id;
         if(provider.IsComposite)

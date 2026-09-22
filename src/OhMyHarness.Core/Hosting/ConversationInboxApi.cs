@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OhMyHarness.Core;
 using System.Text.Json.Nodes;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 public sealed partial class HarnessService
 {
     static List<Attachment> InputImages(JsonObject p)
@@ -25,7 +25,6 @@ public sealed partial class HarnessService
             if (!runs.TryGetValue(id, out var active)) throw new InvalidOperationException("Aucune exécution en cours / No active run.");
             await using var db = Db();
             var input = await db.PendingInputs.AsNoTracking().SingleAsync(x => x.Id == I(p, "id") && x.ChatId == id, ct);
-            if (input.Images().Count > 0 && !active.Provider.SupportsImages && !VisionBridge.Enabled(await db.States.Select(x=>x.EnabledSkills).SingleAsync(ct))) throw new InvalidOperationException("Le modèle en cours n’accepte pas les images.");
             providerId = active.SelectedProviderId;
         }
         await ConversationInbox.UpdateAsync(database, id, I(p, "id"), S(p, "expectedText"), S(p, "text"), steer, providerId, ct);
@@ -39,7 +38,6 @@ public sealed partial class HarnessService
         var providerId=mode=="steering"&&active!=null?active.SelectedProviderId:I(p,"providerId");
         var provider=all.Single(x=>x.Id==providerId);
         if(provider.IsComposite){var composite=CompositeModel.Read(provider.CompositeJson);composite.Validate(all);provider=CompositeModel.Resolve(composite.Orchestrator,all);}
-        if(images.Count>0 && !(mode=="steering"&&active!=null?active.Provider:provider).SupportsImages && !VisionBridge.Enabled(await db.States.Select(x=>x.EnabledSkills).SingleAsync(ct)))throw new InvalidOperationException("Ce modèle n’accepte pas les images.");
         await ConversationInbox.AddAsync(database,id,providerId,S(p,"text"),images,mode,ct);
         await NotifyInbox(id);return new{running=runs.ContainsKey(id),autoStart=active==null||!active.Cancellation.IsCancellationRequested};
     }

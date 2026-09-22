@@ -3,10 +3,10 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 // Native calls are isolated here: no Windows DLL is loaded on macOS, or vice versa.
-static class DesktopInput
+public static class DesktopInput
 {
     public static long Foreground() => OperatingSystem.IsMacOS() ? Mac.Foreground() : OperatingSystem.IsWindows() ? Win.GetForegroundWindow().ToInt64() : 0;
     public static void Restore(long target)

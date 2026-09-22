@@ -3,7 +3,7 @@ const {spawn}=require('node:child_process');
 
 test('MCP transports, permissions, live toggles and automatic continuation', {timeout:90000}, async t=>{
   const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'omh-mcp-'))),marker=path.join(directory,'fixture.log');
-  const child=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.Service/bin/Release/net10.0/OhMyHarness.Service.dll'),'--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+  const child=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.App/bin/Release/net10.0-desktop/OhMyHarness.App.dll'),'--service','--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true});
   let sequence=0,readyResolve,readyReject,stderr='',onPermission,apiCalls=0,httpMcpCalls=0,authHeader;
   const pending=new Map(),events=[],httpMethods=[];const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   const write=value=>child.stdin.write(JSON.stringify(value)+'\n');

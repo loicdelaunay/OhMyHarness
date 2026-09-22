@@ -28,3 +28,30 @@ label,.body,.message .role{color:var(--text)}
 .provider-card p{margin:6px 0 0}
 .provider-card button{margin:0;width:34px;height:34px}
 #mcp-json{font-family:"Cascadia Code",Consolas,monospace;white-space:pre;min-height:280px;max-height:50vh}
+.composer-shell,.pinned-checklist,#inbox{border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+#chat>footer{display:flex;flex-direction:column;gap:6px}
+#inbox{padding:8px 10px;max-height:210px;overflow:auto}
+.inbox-header{font-size:12px;color:var(--muted);padding:2px 2px 8px}
+.inbox-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px;border-radius:7px;background:color-mix(in srgb,var(--text) 4%,transparent);margin:4px 0}
+.queue-index{font-size:12px;color:var(--accent);text-align:center}
+.queue-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.4}
+.inbox-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.inbox-actions button,.message-actions button{font-size:12px;padding:5px 9px}
+.pinned-checklist summary{position:relative;padding:9px 42px 9px 12px;color:var(--text);font-size:12px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;list-style:none}
+.pinned-checklist summary::-webkit-details-marker{display:none}
+.pinned-checklist summary::before{content:'›';display:inline-block;width:20px;color:var(--muted)}
+.pinned-checklist[open] summary::before{content:'⌄'}
+.pinned-checklist summary button{position:absolute;right:6px;top:5px;width:26px;height:26px;padding:0;background:transparent;border:0}
+.checklist-items{padding:0 12px 8px;max-height:140px;overflow:auto}
+#status:not(:empty){box-shadow:0 0 22px color-mix(in srgb,var(--accent) 26%,transparent);border-color:color-mix(in srgb,var(--accent) 28%,var(--line))}
+.message-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px;margin-top:12px}
+.message-actions button{background:transparent;color:var(--muted)}
+.compatibility-notice{padding:10px 12px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);font-size:12px}
+.resource-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 8px;border:1px solid var(--line);border-radius:20px;font-size:12px;color:var(--accent)}
+.resource-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px}.resource-chip button{padding:0 4px;background:transparent;border:0}
+#assets .resource-chip button{position:static;flex:none}#assets{gap:6px;flex-wrap:wrap}
+.drop-active{outline:2px dashed var(--accent);outline-offset:3px}
+#git-preview-mode{margin:6px 0 6px 8px;width:auto}.git-unified{width:max-content;min-width:100%}.git-unified>div{padding:2px 8px}
+.theme-light .diff-added{color:#146c35;background:#1a7f3712}.theme-light .diff-removed{color:#b42318;background:#d92d2012}
+#project-permissions pre{max-height:150px;overflow:auto;white-space:pre-wrap;font-size:12px}
+@media(max-width:750px){.inbox-row{grid-template-columns:20px minmax(0,1fr)}.inbox-actions{grid-column:2;justify-content:flex-start}}

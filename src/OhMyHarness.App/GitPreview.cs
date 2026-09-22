@@ -7,6 +7,14 @@ namespace OhMyHarness.App;
 
 public sealed partial class MainWindow
 {
+    bool unifiedGit;
+    (GitChangedFile File, GitWorkspace.DiffPreview Preview)? lastGitPreview;
+    UIElement GitPreviewSelector()
+    {
+        var mode = new ComboBox { ItemsSource = new[] { WorkflowText("Avant / après", "Before / after"), WorkflowText("Diff combiné", "Unified diff") }, SelectedIndex = 0, MinWidth = 160 };
+        mode.SelectionChanged += (_, _) => { unifiedGit = mode.SelectedIndex == 1; if (lastGitPreview is { } cached) RenderGitPreview(cached.File, cached.Preview); };
+        return mode;
+    }
     void BuildGitTree(List<GitChangedFile> files)
     {
         foreach (var repo in files.GroupBy(x => x.Repository))
@@ -39,7 +47,15 @@ public sealed partial class MainWindow
 
     void RenderGitPreview(GitChangedFile file, GitWorkspace.DiffPreview preview)
     {
+        lastGitPreview = (file, preview); gitDiff.Children.Clear();
         gitDiff.Children.Add(new TextBlock { Text = file.Path, IsTextSelectionEnabled = true, Margin = new(0, 8, 0, 8) });
+        if (unifiedGit)
+        {
+            foreach (var line in preview.Rows)
+                gitDiff.Children.Add(new TextBlock { Text = line.Kind == "removed" ? $"− {line.BeforeLine,5} {line.Before}" : line.Kind == "added" ? $"+ {line.AfterLine,5} {line.After}" : $"  {line.AfterLine,5} {line.After ?? line.Before}", FontFamily = new FontFamily("Cascadia Code, Consolas"), FontSize = 12, IsTextSelectionEnabled = true, Foreground = line.Kind == "removed" ? Brush(255,145,145) : line.Kind == "added" ? Brush(110,220,150) : FluentDesign.Primary });
+            if (preview.Notice != null) gitDiff.Children.Add(new TextBlock { Text = preview.Notice, TextWrapping = TextWrapping.Wrap });
+            return;
+        }
         var table = new Grid { ColumnSpacing = 12, MinWidth = 560 };
         table.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
         table.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });

@@ -22,7 +22,7 @@ public sealed partial class SourceAccess
             {
                 ct.ThrowIfCancellationRequested();
                 ResolveInRoot(root.FullPath, Path.GetRelativePath(root.FullPath, directory));
-                foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+                foreach (var path in File.Exists(directory) ? new[] { directory } : Directory.EnumerateFileSystemEntries(directory))
                 {
                     ct.ThrowIfCancellationRequested();
                     if (++visited > 20000 || hits >= 300 || result.Length >= 60000) { truncated = true; break; }
@@ -31,8 +31,8 @@ public sealed partial class SourceAccess
                     var attributes = File.GetAttributes(path);
                     if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
                     if ((attributes & FileAttributes.Directory) != 0) { directories.Push(path); continue; }
-                    var relative = Path.GetRelativePath(root.FullPath, path).Replace('\\', '/');
-                    var display = _roots.Count > 1 ? root.Alias + "/" + relative : relative;
+                    var relative = File.Exists(root.FullPath) ? root.Alias : Path.GetRelativePath(root.FullPath, path).Replace('\\', '/');
+                    var display = _roots.Count > 1 && !File.Exists(root.FullPath) ? root.Alias + "/" + relative : relative;
                     if (!matcher.IsMatch(relative) && !matcher.IsMatch(display)) continue;
                     if (search is null) { result.AppendLine(display); hits++; continue; }
                     if (!Extensions.Contains(Path.GetExtension(path)) || new FileInfo(path).Length > 128000) continue;

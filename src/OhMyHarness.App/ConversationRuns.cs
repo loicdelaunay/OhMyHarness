@@ -22,6 +22,7 @@ public sealed partial class MainWindow
         public string Status { get; set; } = "";
         public bool Submitted { get; set; }
         public bool Failed { get; set; }
+        public bool IsScheduled { get; init; }
     }
 
     readonly Dictionary<int, ConversationRun> conversationRuns = [];
@@ -30,6 +31,8 @@ public sealed partial class MainWindow
     readonly Dictionary<int, List<Message>> conversationHistory = [];
     readonly SemaphoreSlim toolQueue = new(1, 1);
     ConversationRun? ActiveRun => chat != null ? conversationRuns.GetValueOrDefault(chat.Id) : null;
+    string RunSkills(ConversationRun run) => run.IsScheduled ? run.Options.EnabledSkills : state.EnabledSkills;
+    string ToolSkills => automaticToolRun.Value is { } run ? RunSkills(run) : state.EnabledSkills;
     static StackPanel CreateMessagePanel() => new() { Spacing = 16, Padding = new(4, 20, 12, 20), MaxWidth = 1120, HorizontalAlignment = HorizontalAlignment.Stretch };
     bool IsVisible(ConversationRun run) => selectedSubagent == null && chat?.Id == run.Chat.Id;
     IEnumerable<Message> VisibleHistory() => ActiveRun is { } active ? active.Db.Messages.Local :
@@ -67,7 +70,7 @@ public sealed partial class MainWindow
             if (parent is TElement found) return found;
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
                 if (Find<TElement>(VisualTreeHelper.GetChild(parent, i)) is { } child) return child;
-            return null;
+            return default;
         }
         foreach (var item in chats.Items.OfType<Chat>())
         {
@@ -130,10 +133,10 @@ public sealed partial class MainWindow
     async Task SendAsync()
     {
         if (chat == null || provider == null || project == null) return;
+        if(!ProviderModels.Visible(provider).Contains(provider.Model)) { status.Text=WorkflowText("Cochez un modèle dans les réglages des fournisseurs.","Select a model in provider settings."); return; }
         if (string.IsNullOrWhiteSpace(composer.Text) && pendingImages.Count == 0) return;
         if(ActiveRun is { } active)
         {
-            if(pendingImages.Count>0 && !provider.SupportsImages && !VisionBridge.Enabled(state.EnabledSkills))throw new InvalidOperationException("Activez Bypass image AI ou choisissez un modèle vision.");
             var text=composer.Text.Trim();var images=pendingImages.ToList();var id=chat.Id;var providerId=provider.Id;var mode="queued";
             composer.Text="";pendingImages.Clear();UpdateAttachments();SaveConversationDraft();
             try{await ConversationInbox.AddAsync(HarnessDb.DatabasePath,id,providerId,text,images,mode);}
@@ -152,6 +155,8 @@ public sealed partial class MainWindow
     }
     async Task ExecuteRunAsync(ConversationRun run)
     {
+        permissionProject.Value = run.Project;
+        automaticToolRun.Value = run;
         bool success=false;
         RefreshGenerationControls();
         SetRunStatus(run, T("Le modèle réfléchit…"));
@@ -165,6 +170,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
+            run.Failed = true;
             SetRunStatus(run, ex is OperationCanceledException
                 ? T("Génération arrêtée. Réponse partielle conservée.") : T("Erreur : ") + ex.Message);
             if (!run.Submitted && run.PendingInputId==0)
@@ -179,7 +185,7 @@ public sealed partial class MainWindow
         finally
         {
             try { await run.Db.SaveChangesAsync(); }
-            catch (Exception ex) { SetRunStatus(run, T("Erreur : ") + ex.Message); }
+            catch (Exception ex) { run.Failed = true; success = false; SetRunStatus(run, T("Erreur : ") + ex.Message); }
             if (run.Submitted) conversationHistory[run.Chat.Id] = run.Db.Messages.Local.ToList();
             if (run.Sandbox != null) await terminals.StopChatAsync(run.Chat.Id, true);
             conversationRuns.Remove(run.Chat.Id);

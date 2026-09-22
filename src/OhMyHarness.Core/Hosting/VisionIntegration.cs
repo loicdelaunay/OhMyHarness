@@ -1,6 +1,6 @@
 using OhMyHarness.Core;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {

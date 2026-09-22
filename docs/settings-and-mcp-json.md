@@ -1,6 +1,6 @@
 # Réglages, thèmes et MCP.json
 
-Général propose six thèmes persistés dans le champ de réglages SQLite existant : Fluent sombre, Minuit, Forêt, Fluent clair, Ivoire et Brume. Les raccourcis de saisie restent actifs, mais leur ancien label a été retiré des paramètres.
+Général propose huit thèmes persistés dans le champ de réglages SQLite existant : Fluent sombre, Minuit, Forêt, Fluent clair, Ivoire, Brume, Fly dark et Fly light. Le nom affiché et le logo sont personnalisables dans la même section ; voir [le stockage portable du logo](branding.md). Les raccourcis de saisie restent actifs, mais leur ancien label a été retiré des paramètres.
 
 Les fournisseurs sont affichés en cartes. La roue dentée ouvre le formulaire de la connexion concernée ; ajout, duplication, suppression et modèles composés restent disponibles.
 
@@ -38,6 +38,6 @@ Les noms des serveurs doivent être uniques. Les ajouts, suppressions et toggles
 ## Validation
 
 - Contrôles .NET de persistance, parsing du format Godot, absence d’export des secrets, synchronisation et conflits de fichier.
-- Tests du service pour les API JSON, les six thèmes et la synchronisation des toggles.
+- Tests du service pour les API JSON, les huit thèmes et la synchronisation des toggles.
 - Smoke Electron : thème clair, cartes fournisseurs, éditeur JSON et repli du panneau de saisie.
 - Compilation et publication WinUI Windows ; validation native visuelle interrompue par l’utilisateur (Échap). Aucun contrôle visuel macOS réalisé.

@@ -11,13 +11,10 @@ jobs:
         include:
           - os: windows-latest
             rid: win-x64
-            pack: --win --x64 --dir
           - os: macos-15
             rid: osx-arm64
-            pack: --mac --arm64 --dir
           - os: macos-15-intel
             rid: osx-x64
-            pack: --mac --x64 --dir
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -29,18 +26,16 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: desktop/package-lock.json
-      - run: dotnet build OhMyHarness.Desktop.slnx -c Release
-      - run: dotnet run --project tests/OhMyHarness.Tests -c Release --no-build
+      - run: dotnet build src/OhMyHarness.App -f net10.0-desktop -c Release
+      - if: runner.os == 'Windows'
+        run: dotnet build src/OhMyHarness.App -f net10.0-windows10.0.19041.0 -c Release
+      - run: dotnet run --project tests/OhMyHarness.Tests -c Release
       - run: npm ci
         working-directory: desktop
       - run: npm test
         working-directory: desktop
-      - run: node desktop/scripts/publish-service.cjs ${{ matrix.rid }}
-      - run: npx electron-builder ${{ matrix.pack }}
-        working-directory: desktop
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: dotnet publish src/OhMyHarness.App -f net10.0-desktop -p:OhMyHarnessDesktopOnly=true -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -o artifacts/uno/${{ matrix.rid }}
       - uses: actions/upload-artifact@v4
         with:
           name: OhMyHarness-${{ matrix.rid }}
-          path: desktop/dist/
+          path: artifacts/uno/

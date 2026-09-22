@@ -9,6 +9,7 @@ namespace OhMyHarness.App;
 public sealed partial class MainWindow
 {
     readonly Border pinnedTasks = new() { Visibility = Visibility.Collapsed };
+    readonly Dictionary<int, bool> taskExpansion = new();
     async Task RefreshPinnedTasksAsync()
     {
         var id = chat?.Id;
@@ -19,7 +20,7 @@ public sealed partial class MainWindow
     void ShowPinnedTasks(string? json)
     {
         var items = string.IsNullOrWhiteSpace(json) ? new JsonArray() : JsonNode.Parse(json) as JsonArray ?? [];
-        if (selectedSubagent != null || !items.Any(x => x?["status"]?.GetValue<string>() is "pending" or "in_progress"))
+        if (selectedSubagent != null || chat?.TodoDismissed == true || !items.Any(x => x?["status"]?.GetValue<string>() is "pending" or "in_progress"))
         { pinnedTasks.Child = null; pinnedTasks.Visibility = Visibility.Collapsed; return; }
         var panel = new StackPanel { Spacing = 4 };
         foreach (var item in items)
@@ -34,9 +35,19 @@ public sealed partial class MainWindow
             Grid.SetColumn(label, 1); row.Children.Add(label);
             panel.Children.Add(row);
         }
-        var expanded = (pinnedTasks.Child as Expander)?.IsExpanded ?? true;
-        pinnedTasks.Child = new Expander { Header = WorkflowText("À faire", "To do") + $" · {items.Count(x => x?["status"]?.GetValue<string>() == "completed")}/{items.Count}",
-            Content = new ScrollViewer { Content = panel, MaxHeight = 140 }, IsExpanded = expanded, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var owner = chat!;
+        var expanded = taskExpansion.GetValueOrDefault(owner.Id, true);
+        var current = items.FirstOrDefault(x => x?["status"]?.GetValue<string>() == "in_progress") ?? items.First(x => x?["status"]?.GetValue<string>() == "pending");
+        var index = items.IndexOf(current) + 1;
+        var header = new Grid(); header.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var toggle = Action((expanded ? "⌄  " : "›  ") + WorkflowText("Étape", "Step") + $" {index}/{items.Count} · " + current?["content"]?.GetValue<string>(), () => { taskExpansion[owner.Id] = !expanded; ShowPinnedTasks(json); return Task.CompletedTask; });
+        toggle.HorizontalAlignment = HorizontalAlignment.Stretch; toggle.HorizontalContentAlignment = HorizontalAlignment.Left;
+        header.Children.Add(toggle);
+        var close = Action("×", async () => { owner.TodoDismissed = true; await db.SaveChangesAsync(); if (chat?.Id == owner.Id) ShowPinnedTasks(json); });
+        ToolTipService.SetToolTip(close, WorkflowText("Masquer la liste · réouvrir depuis +", "Hide list · reopen from +")); Grid.SetColumn(close, 1); header.Children.Add(close);
+        var content = new StackPanel { Spacing = 6 }; content.Children.Add(header);
+        content.Children.Add(new ScrollViewer { Content = panel, MaxHeight = 140, Visibility = expanded ? Visibility.Visible : Visibility.Collapsed });
+        pinnedTasks.Child = FluentDesign.Surface(content, 10);
         pinnedTasks.Visibility = Visibility.Visible;
     }
     string WorkflowText(string fr, string en) => state.Language == "en" ? en : fr;

@@ -19,9 +19,10 @@ public sealed partial class MainWindow
         var pending=id==null?new List<PendingInput>():await context.PendingInputs.Where(x=>x.ChatId==id).OrderBy(x=>x.Id).ToListAsync();
         if(chat?.Id!=id)return;
         inboxPanel.Children.Clear();
+        if (pending.Count > 0) inboxPanel.Children.Add(new TextBlock { Text = WorkflowText("Messages en attente", "Queued messages") + $" · {pending.Count}", FontSize = 12, Foreground = FluentDesign.Secondary, Margin = new(12, 4, 12, 4) });
         foreach(var item in pending)
         {
-            var text=Label((item.Mode=="steering"?"↳ Prochaine étape : ":"⏳ En attente : ")+item.Text[..Math.Min(120,item.Text.Length)],12);
+            var text=Label((item.Mode=="steering"?"↳ ":$"{pending.IndexOf(item)+1}. ")+item.Text[..Math.Min(220,item.Text.Length)] + (item.Text.Length > 220 ? "…" : "") + (item.Images().Count > 0 ? $"  · {item.Images().Count} image(s)" : ""),12);
             text.TextWrapping = TextWrapping.Wrap;
             var row = new StackPanel { Spacing = 4 };
             row.Children.Add(text);
@@ -41,13 +42,12 @@ public sealed partial class MainWindow
             var steer = Action("Steer", async()=>
             {
                 if (!conversationRuns.TryGetValue(item.ChatId, out var active)) throw new InvalidOperationException(WorkflowText("Aucune exécution en cours.", "No active run."));
-                if (item.Images().Count > 0 && !active.Provider.SupportsImages && !VisionBridge.Enabled(state.EnabledSkills)) throw new InvalidOperationException(WorkflowText("Le modèle en cours n’accepte pas les images.", "The active model does not support images."));
                 await ConversationInbox.UpdateAsync(HarnessDb.DatabasePath, item.ChatId, item.Id, item.Text, item.Text, true, active.SelectedProviderId);
                 await RefreshInboxAsync();
             });
             steer.IsEnabled = item.Mode == "queued" && conversationRuns.ContainsKey(item.ChatId);
             ToolTipService.SetToolTip(steer, WorkflowText("Transmettre à l’agent à sa prochaine étape", "Send to the agent at its next step"));
-            actions.Children.Add(steer); row.Children.Add(actions); inboxPanel.Children.Add(row);
+            actions.Children.Add(steer); row.Children.Add(actions); inboxPanel.Children.Add(FluentDesign.Surface(row, 10));
         }
         if(pending.Count>0 && ActiveRun==null)inboxPanel.Children.Add(Action("Reprendre la file / Resume queue",()=>RunNextQueuedAsync(id!.Value,messages)));
     }

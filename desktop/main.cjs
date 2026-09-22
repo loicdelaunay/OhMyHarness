@@ -22,6 +22,7 @@ const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyRe
 const requests = new Map(); let sequence = 0, dialogs = Promise.resolve();
 const uiUrl = pathToFileURL(path.join(__dirname, 'ui/index.html')).href;
 const serviceMethods = new Set(['snapshot','history','subagents','chat.export','project.save','project.delete','chat.save','chat.delete','provider.save','provider.delete','provider.models',
+  'project.permissions.preview','project.permissions.apply','chat.resources','chat.tasks','chat.branch',
   'sandbox.review','sandbox.apply','sandbox.close','terminals.list','terminals.create','terminals.delete','terminals.start','terminals.stop','context.details','context.compact','question.answer','chat.modes','state.save','template.save','template.delete','mcp.json.get','mcp.json.save','mcp.save','mcp.delete','mcp.toggle','mcp.test','permission.revoke','browser.access','files.list','files.read','git','git.files','git.diff','git.preview','terminal','preview','send','stop','inbox.list','inbox.add','inbox.update','inbox.delete','inbox.resume']);
 const uiHostMethods = new Set(['conversation.export','pick.folders','pick.images','pick.file','browser.select','browser.navigate','browser.bounds','browser.back','browser.reload','system.permissions']);
 function trusted(event) {
@@ -85,13 +86,13 @@ async function start() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   browser = createBrowserPool(win);
-  const executable = process.platform === 'win32' ? 'OhMyHarness.Service.exe' : 'OhMyHarness.Service';
+  const executable = process.platform === 'win32' ? 'OhMyHarness.App.exe' : 'OhMyHarness.App';
   const serviceFile = app.isPackaged ? path.join(process.resourcesPath, 'service', executable)
     : path.join(__dirname, 'sidecar', `${process.platform === 'darwin' ? 'mac' : 'win'}-${process.arch}`, executable);
   await fs.mkdir(directory, { recursive: true });
   const dbFile = path.join(directory, 'database.sqlite');
   await fs.access(directory, require('node:fs').constants.W_OK);
-  service = spawn(serviceFile, ['--database', dbFile], { stdio: ['pipe','pipe','pipe'], windowsHide: true,
+  service = spawn(serviceFile, ['--service','--database', dbFile], { stdio: ['pipe','pipe','pipe'], windowsHide: true,
     env: { ...process.env, PATH: process.platform === 'darwin' ? `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || '/usr/bin:/bin'}` : process.env.PATH } });
   service.on('error', error => readyReject(error));
   let startupError = '';

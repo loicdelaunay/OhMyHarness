@@ -2,9 +2,5 @@
   <Folder Name="/src/">
     <Project Path="src/OhMyHarness.App/OhMyHarness.App.csproj" />
     <Project Path="src/OhMyHarness.Core/OhMyHarness.Core.csproj" />
-    <Project Path="src/OhMyHarness.Service/OhMyHarness.Service.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/OhMyHarness.Tests/OhMyHarness.Tests.csproj" />
   </Folder>
 </Solution>

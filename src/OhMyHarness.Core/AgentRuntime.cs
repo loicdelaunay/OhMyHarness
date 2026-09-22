@@ -133,6 +133,7 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
                         if (!authorized) throw new UnauthorizedAccessException("Skill désactivé ou outil interdit au sous-agent.");
                         if (!definitions.Any(x => x?["function"]?["name"]?.GetValue<string>() == tool)) throw new UnauthorizedAccessException("Outil non disponible pour ce sous-agent.");
                         var args = JsonNode.Parse(call!["function"]!["arguments"]!.GetValue<string>())!.AsObject();
+                        await ProjectResources.DemandToolAsync(run.Project, tool, args.ToJsonString(), approve, ct);
                         if (tool is "load_skill" or "read_skill_resource" or "question") result = await CallAsync(tool, args, ct);
                         else if (SourceTools.Handles(tool)) result = await SourceTools.ExecuteAsync(source, tool, args, () => enabled,
                             async (scope, diff, token) => {

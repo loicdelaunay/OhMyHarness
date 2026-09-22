@@ -1,80 +1,49 @@
-# Windows et macOS
+# Windows et macOS avec Uno Platform
 
-L’interface WinUI 3 originale dépend de Windows. Elle est conservée, avec son EXE autonome et WebView2. Le dossier `desktop` fournit une seconde interface Electron pour macOS (Apple Silicon et Intel) et Windows. Les migrations EF Core, SQLite, les clients fournisseurs et la protection des sources restent partagés dans `OhMyHarness.Core`.
+La solution possède deux projets applicatifs : `OhMyHarness.Core` et `OhMyHarness.App`. Le second utilise Uno Platform pour partager l’interface, les réglages, les conversations et les outils entre Windows et macOS. L’ancien service JSON se trouve dans `Core/Hosting` ; le dossier Electron `desktop` est conservé pour compatibilité, sans être nécessaire à la nouvelle publication.
 
-Le processus Electron lance `OhMyHarness.Service` et communique par son entrée/sortie standard : aucun port réseau privilégié n’est ouvert. Les pages du navigateur intégré sont isolées de l’interface et n’ont accès ni à Node.js, ni aux clés, ni au pont IPC de l’application.
+Voir [le guide Uno, tâches et modèles](uno-tasks-models.md) pour l’architecture et les nouvelles fonctions.
 
-## Fonctions et adaptations
+## Compiler et publier
 
-| Fonction | Windows WinUI | Interface desktop sur macOS |
+Sur Mac, installer le SDK .NET 10 et les outils de ligne de commande Xcode :
+
+```bash
+dotnet build src/OhMyHarness.App -f net10.0-desktop -c Release
+dotnet run --project src/OhMyHarness.App -f net10.0-desktop -c Release
+dotnet run --project tests/OhMyHarness.Tests -c Release
+
+bash ./publish-macos.sh arm64 # Apple Silicon
+bash ./publish-macos.sh x64   # Intel
+```
+
+La publication autonome se trouve dans `artifacts/release/osx-arm64` ou `osx-x64`, avec le lanceur `OhMyHarness.App`. Elle ne nécessite ni installation .NET ni Electron. Le script ne produit pas de DMG signé et ne configure pas de notarisation Apple. Pour une distribution publique, signer et notariser sur Mac ; conserver les dépendances natives livrées avec la publication.
+
+Sur Windows, `publish.ps1` conserve la cible WinUI native. `publish.ps1 -UnoDesktop -OutputDirectory artifacts/release-uno` permet de publier la cible Uno Desktop. Le dossier `artifacts/official` reste destiné aux publications réalisées par l’utilisateur.
+
+## Adaptations
+
+| Fonction | Windows natif | Uno Desktop / macOS |
 | --- | --- | --- |
-| Fournisseurs multiples, OpenAI compatible, DeepSeek | Conservés | Implémentés avec les clients Core partagés |
-| OpenCode | Connexion au serveur et lancement configuré | Connexion à `opencode serve` ou lancement du CLI installé ; chemin configurable |
-| Projets, sources multiples, images, historique | Conservés | Implémentés, même schéma SQLite et migrations |
-| Conversations simultanées, arrêt indépendant, brouillons | Conservés | Implémentés, progression par conversation |
-| Débit et contexte, compaction à 95 % | Conservés | Implémentés ; estimation locale en attendant les compteurs API |
-| Réglages FR/EN, skills, templates | Conservés | Implémentés |
-| Web, inspection DOM et interactions | WebView2 | Chromium isolé ; mêmes catégories d’outils |
-| Fichiers HTML locaux et ressources | Approbation avant ouverture | Approbation puis origine locale limitée au dossier validé |
-| Terminal | PowerShell | `/bin/zsh -c`, nouvelle session par commande |
-| Git | Lecture des modifications et diffs | Identique ; nécessite Git dans le PATH |
-| Souris, clic gauche/droit, double-clic, défilement | API Windows | CoreGraphics, permission Accessibilité macOS |
-| Clavier et liste des touches | Ctrl, Alt, Shift, Win | Command/Cmd, Option/Alt, Control/Ctrl, Shift ; touches filtrées par plateforme |
-| Capture avec curseur | Capture Windows | `screencapture -C`, permission d’enregistrement de l’écran |
-| Permissions demander/refuser/automatique et autorisations permanentes | Conservées | Même politique applicative, avec permissions système macOS supplémentaires |
-| Chiffrement des clés | DPAPI CurrentUser | Electron safeStorage, adossé au trousseau macOS |
+| Interface, modèles, CRON, historique, agents, skills | Interface partagée | Interface partagée |
+| Navigateur | WebView2 intégré | Fenêtre Chrome/Edge dédiée par conversation, pilotée par CDP |
+| DOM, JavaScript, capture et clavier web | API WebView2 | API CDP |
+| Aperçus locaux | Origine virtuelle approuvée | Serveur loopback limité au dossier approuvé |
+| Terminal | PowerShell | zsh sur Mac, PowerShell sur Windows |
+| Souris et clavier | API Windows | CoreGraphics sur Mac |
+| Capture bureau/application | API Windows | `screencapture`, cible par identifiant de fenêtre, curseur superposé |
+| Clés API | DPAPI CurrentUser | Trousseau macOS |
 
-Les outils souris/clavier/capture sont disponibles uniquement lorsque leur skill est activé. `keyboard_keys` expose la liste adaptée à l’OS ; le prompt indique aussi le système et son shell. Un appui relâche les touches immédiatement. Les outils de bureau et du navigateur partagés sont sérialisés entre conversations. Les chemins macOS sont comparés sans supprimer la distinction majuscules/minuscules ; les protections contre les sorties de dossier, liens et fichiers sensibles s’appliquent aussi sur Mac.
+Installer Chrome ou Edge pour le navigateur Uno Desktop, ou renseigner son chemin dans les réglages. Le processus possède un profil par conversation dans `Browser/` et son arrêt ne ferme pas les autres panneaux. Chrome MCP reste optionnel et nécessite Node.js. Git, OpenCode, Docker et les serveurs MCP sont nécessaires uniquement aux fonctions qui les utilisent.
 
-OpenCode utilise ses propres outils et permissions lorsqu’ils sont activés dans la connexion. Installer son CLI séparément ou indiquer l’URL d’un serveur existant ; le lancement du binaire interne d’OpenCode Desktop n’est pas pris en charge par ce nouvel hôte.
+Les données (`database.sqlite`, `skills/`, `MCP.json`, profils, Python et temporaires) restent dans le dossier portable de l’exécutable. Placer la publication dans un dossier accessible en écriture. Les clés sont liées au compte système : celles provenant de Windows DPAPI ou de l’ancienne interface Electron doivent être ressaisies dans Uno sur Mac. Le reste de l’historique est conservé par les migrations EF Core. Ne pas ouvrir une ancienne version sur la base migrée sans sauvegarde.
 
-## Compiler sur Mac
-
-Prérequis de développement : SDK .NET 10, Node.js 24 avec npm, et outils de ligne de commande Xcode. Git est nécessaire au panneau Git. Le packaging doit être exécuté sur macOS.
-
-```bash
-# Depuis la racine du dépôt, sur Apple Silicon :
-bash ./publish-macos.sh arm64
-
-# Variante Intel :
-bash ./publish-macos.sh x64
-```
-
-Le script compile la solution portable, exécute ses tests, publie un service .NET autonome puis produit les paquets `.dmg` et `.zip` dans `desktop/dist`. L’utilisateur final n’a besoin ni de Node.js, ni du runtime .NET, ni de WebView2 : Chromium et le service sont embarqués dans le bundle `.app`. Ce n’est pas un EXE Windows sur Mac.
-
-Pour développer sans packaging :
-
-```bash
-dotnet build OhMyHarness.Desktop.slnx -c Release
-cd desktop
-npm ci
-node scripts/publish-service.cjs osx-arm64 # osx-x64 sur Intel
-npm test
-npm start
-```
-
-Pour tester ce nouvel hôte sur Windows, utiliser `win-x64` à la place de `osx-arm64`. La version WinUI reste publiée par `publish.ps1` ; sa solution est `OhMyHarness.slnx`. Sur Mac, utiliser uniquement `OhMyHarness.Desktop.slnx`, qui n’inclut pas WinUI.
-
-## Données et permissions macOS
-
-En version packagée, `database.sqlite` est créé **à côté du bundle `OhMyHarness.app`**, hors de son contenu signé. Placer l’application dans un dossier utilisateur accessible en écriture et sortir l’application du DMG avant de l’utiliser. En développement, la base se trouve dans `desktop/.data/database.sqlite`. Le cache et les cookies Chromium utilisent le dossier portable `browser/`, distinct de cette base.
-
-Le profil Chromium (`browser/`), les skills (`skills/`), les copies sandbox (`sandboxes/`), les temporaires (`temp/`), les journaux et rapports de crash sont également placés à côté du bundle `.app`. Le profil navigateur de l’ancienne version Electron n’est pas importé automatiquement. Configuration, historique, images et autorisations sont stockés dans SQLite. Les clés sont chiffrées par le trousseau macOS, sans repli en clair. Une base copiée depuis Windows conserve ses données, mais ses clés DPAPI doivent être ressaisies sur Mac ; l’inverse s’applique également. Ne pas ouvrir la même base simultanément depuis les deux interfaces. La signature et l’identité de l’application doivent rester stables pour conserver l’accès au trousseau.
-
-Dans les réglages de l’application, le bouton de permissions macOS aide à vérifier **Accessibilité** et **Enregistrement de l’écran**. Accorder les droits nécessaires dans **Réglages Système → Confidentialité et sécurité**, puis relancer l’application si macOS le demande. En développement, macOS peut afficher Electron ou le service comme processus demandeur. La politique « Acceptation automatique » de l’application n’accorde pas ces droits système à sa place. Les permissions caméra, microphone, localisation et les téléchargements du navigateur restent refusés.
-
-Les commandes terminal autorisées s’exécutent avec les droits du compte utilisateur. Elles ne constituent pas un environnement isolé. L’installation de Git/OpenCode et les changements du système restent à la charge de l’utilisateur.
-
-## Signature et distribution
-
-La configuration electron-builder inclut le service dans la signature et fournit les entitlements nécessaires à Electron/.NET (JIT et chargement de bibliothèques natives). Pour une distribution publique, configurer une identité Developer ID et les identifiants de notarisation Apple via les mécanismes sécurisés d’electron-builder ; ne pas les placer dans le dépôt. Aucune identité Apple ni notarisation n’a été configurée ici.
-
-Le workflow `.github/workflows/desktop.yml` prépare des builds Windows, Mac ARM64 et Mac Intel. Il n’a pas été exécuté pendant cette modification. Il nécessite GitHub Actions ; sur une forge Gitea, prévoir un runner et un workflow adaptés, avec un hôte macOS pour produire l’application Mac.
+Dans **Réglages Système → Confidentialité et sécurité**, autoriser l’**Accessibilité** pour souris/clavier et l’**Enregistrement de l’écran** pour les captures. Les permissions applicatives restent nécessaires et ne remplacent pas les droits macOS. `keyboard_keys` décrit les touches disponibles pour l’OS.
 
 ## Validation
 
-Vérifié depuis Windows : compilation de WinUI et du service portable, publication autonome du service pour `win-x64`, `osx-arm64` et `osx-x64`, tests Core et intégration avec fournisseur HTTP simulé. Un test Electron vérifie le rendu, le streaming, le changement de conversation pendant une réponse et l’absence du pont privilégié dans une page distante.
+Les builds Windows natif et Uno Desktop, les 413 contrôles Core, les deux EXE autonomes et les neuf contrôles Chromium ont été vérifiés. Le test UI contrôle aussi les cases des modèles et deux exécutions d’une tâche avec outil et historique, via un fournisseur local simulé. Les cibles macOS ARM64 et Intel ont été compilées depuis Windows. Le workflow `.github/workflows/desktop.yml` prévoit les builds et tests Windows, Mac ARM64 et Mac Intel.
 
-**À valider sur un Mac réel avant diffusion :** lancement du bundle signé, accès au trousseau après redémarrage/mise à jour, permissions TCC, clics gauche/droit, raccourcis Command/Option sur clavier français, saisie Unicode, curseur dans les captures Retina/multi-écrans, et signature/notarisation des paquets. La compilation croisée du service ne valide pas ces interactions natives. Les appels réels aux fournisseurs nécessitent les clés de l’utilisateur.
+**À vérifier sur un Mac réel :** démarrage et fermeture, pickers, trousseau après redémarrage, permissions TCC, touches Command/Option et Unicode, curseur et coordonnées des captures Retina/multi-écrans, lancement de Python embarqué, signature/notarisation. Une compilation croisée ne valide pas ces interactions natives.
 
-Références : [WinUI 3](https://learn.microsoft.com/en-us/windows/apps/winui/winui3/), [chiffrement Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage), [signature .NET sur macOS](https://learn.microsoft.com/en-us/dotnet/core/deploying/macos), [packaging macOS electron-builder](https://www.electron.build/v26/docs/mac/).
+Référence : [publication Uno Desktop](https://platform.uno/docs/articles/uno-publishing-desktop.html).

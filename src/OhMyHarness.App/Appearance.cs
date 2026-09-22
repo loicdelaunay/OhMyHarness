@@ -13,12 +13,17 @@ public sealed partial class MainWindow
     void ApplyAppearance()
     {
         var config = FeatureSettings.Read(state.FeaturesJson);
+        TextZoom.Set(config.FontZoomPercent);
         FluentDesign.SetTheme(config.Theme);
+        ApplyBranding();
         root.RequestedTheme = AppearanceThemes.Get(config.Theme).Dark ? ElementTheme.Dark : ElementTheme.Light;
         root.Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush");
+        shell.PaneBackground = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush");
         FluentDesign.WindowChrome(this);
         if (settingsWindow?.Content is FrameworkElement settingsRoot)
         { settingsRoot.RequestedTheme = root.RequestedTheme; FluentDesign.WindowChrome(settingsWindow); }
+        if (tasksWindow?.Content is FrameworkElement tasksRoot)
+        { tasksRoot.RequestedTheme = root.RequestedTheme; FluentDesign.WindowChrome(tasksWindow); }
         composerInfoExpanded = config.ComposerInfoExpanded;
         UpdateInfoPanel();
     }
@@ -26,7 +31,7 @@ public sealed partial class MainWindow
     {
         bool expanded = composerInfoExpanded;
         floatingInfoBar.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;
-        infoToggle.Content = (expanded ? "⌃  " : "⌄  ") + WorkflowText("Modèle, débit et contexte", "Model, speed and context");
+        infoToggle.Content = (expanded ? "⌄  " : "›  ") + WorkflowText("Modèle, débit et contexte", "Model, speed and context");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(infoToggle, WorkflowText("Afficher les informations du modèle", "Show model information"));
     }
     UIElement BuildComposerSurface()

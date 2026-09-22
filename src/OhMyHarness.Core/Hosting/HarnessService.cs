@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Markdig;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService(string database, Func<string, JsonObject, CancellationToken, Task<JsonNode?>> host, Func<object, Task> emit) : IAsyncDisposable
 {
@@ -18,6 +18,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     readonly SemaphoreSlim permissions = new(1, 1), tools = new(1, 1), startup = new(1, 1);
     readonly List<Process> servers = [];
     bool browserAccess, domAccess;
+    readonly AsyncLocal<Project?> permissionProject = new();
     static string S(JsonObject p, string name, string fallback = "") => p[name]?.GetValue<string>() ?? fallback;
     static int I(JsonObject p, string name, int fallback = 0) => p[name]?.GetValue<int>() ?? fallback;
     static bool B(JsonObject p, string name, bool fallback = false) => p[name]?.GetValue<bool>() ?? fallback;
@@ -31,7 +32,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         LocalFileLinks.Decorate(document);
         return CodeHighlight.Html(Markdig.Markdown.ToHtml(document, Markdown));
     }
-    static object MessageView(Message m) => new { m.Id, m.ChatId, m.Role, m.Content, m.State, m.InputTokens, m.OutputTokens, m.Seconds,
+    static object MessageView(Message m) => new { m.Id, m.ChatId, m.Role, m.Content, m.State, m.InputTokens, m.OutputTokens, m.Seconds, m.CompatibilityNotice,
+        canBranch = m.State is "complete" or "compacted" && m.Role is "user" or "assistant" && (string.IsNullOrEmpty(m.WireJson) || JsonNode.Parse(m.WireJson)?["tool_calls"] is not JsonArray { Count: > 0 }),
         html = Html(m.Content), reasoning = string.IsNullOrEmpty(m.WireJson) ? "" : JsonNode.Parse(m.WireJson)?["reasoning_content"]?.GetValue<string>() ?? "",
         attachments = m.Attachments.Select(x => new { x.Name, x.Mime, data = Convert.ToBase64String(x.Data) }) };
 
@@ -53,8 +55,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "snapshot":
                 var mcpConfigError = await SyncMcpFile(ct);
                 return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database, mcpConfigError, appearanceThemes = AppearanceThemes.All,
-                    projects = await db.Projects.AsNoTracking().Select(x => new { x.Id, x.Name, x.SourceFolder }).ToListAsync(ct),
-                    chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled }).ToListAsync(ct),
+                    projects = await db.Projects.AsNoTracking().Select(x => new { x.Id, x.Name, x.SourceFolder, x.PermissionProfileJson }).ToListAsync(ct),
+                    chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled, x.ResourcePathsJson, x.TodoDismissed }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
                     mcpServers = (await db.McpServers.AsNoTracking().ToListAsync(ct)).Select(McpView),
                     state = await db.States.SingleAsync(ct), templates = await db.Templates.ToListAsync(ct),
@@ -76,6 +78,24 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 project.SetSourceFolders(folders);
                 if (project.Id == 0) { project.Chats.Add(new Chat()); db.Projects.Add(project); }
                 await db.SaveChangesAsync(ct); return new { project.Id };
+            case "project.permissions.preview":
+                return await ProjectResources.ReadPermissionsAsync(await db.Projects.SingleAsync(x => x.Id == I(p, "id"), ct), ct);
+            case "project.permissions.apply":
+                var permissionOwner = await db.Projects.SingleAsync(x => x.Id == I(p, "id"), ct);
+                var reviewed = B(p, "clear") ? "" : await ProjectResources.ReadPermissionsAsync(permissionOwner, ct);
+                if (!B(p, "clear") && reviewed != S(p, "reviewed")) throw new InvalidOperationException("permission.json a changé. Relisez le profil avant de l'importer.");
+                permissionOwner.PermissionProfileJson = reviewed; await db.SaveChangesAsync(ct); return true;
+            case "chat.resources":
+                var resourceChat = await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct);
+                resourceChat.ResourcePathsJson = B(p, "inherit") ? "" : ProjectResources.Serialize(ProjectResources.Validate((p["paths"] as JsonArray ?? []).Select(x => x!.GetValue<string>())));
+                await db.SaveChangesAsync(ct); return true;
+            case "chat.tasks":
+                var taskChat = await db.Chats.SingleAsync(x => x.Id == I(p, "id"), ct);
+                taskChat.TodoDismissed = B(p, "dismissed"); await db.SaveChangesAsync(ct); return true;
+            case "chat.branch":
+                if (B(p, "resume") && runs.ContainsKey(I(p, "chatId"))) throw new InvalidOperationException("Arrêtez la génération avant de reprendre plus haut.");
+                var branch = await ConversationBranches.CreateAsync(database, I(p, "chatId"), I(p, "messageId"), B(p, "resume"), ct);
+                return new { branch.Id };
             case "project.delete":
                 if (runs.Values.Any(x => x.Project.Id == I(p, "id"))) throw new InvalidOperationException("Stop this project's conversations before deleting it.");
                 foreach (var terminalChat in await db.Chats.Where(x => x.ProjectId == I(p, "id")).Select(x => x.Id).ToListAsync(ct)) await terminals.RemoveChatAsync(terminalChat);
@@ -156,6 +176,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "browser.access": browserAccess = B(p, "enabled"); domAccess = B(p, "dom"); return true;
             case "files.list": case "files.read": case "git": case "git.files": case "git.diff": case "git.preview": case "terminal":
                 var workspace = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
+                if (I(p, "chatId") != 0) workspace = ProjectResources.Effective(await db.Chats.SingleAsync(x => x.Id == I(p, "chatId") && x.ProjectId == workspace.Id, ct), workspace);
                 var source = new SourceAccess(workspace.GetSourceFolders());
                 if (method == "files.list") return source.List(S(p, "path", "."));
                 if (method == "files.read") return await source.ReadAsync(S(p, "path"), ct);
@@ -170,6 +191,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "preview":
                 var previewChat = await db.Chats.SingleAsync(x => x.Id == I(p, "chatId"), ct);
                 var previewProject = await db.Projects.SingleAsync(x => x.Id == previewChat.ProjectId, ct);
+                previewProject = ProjectResources.Effective(previewChat, previewProject);
+                permissionProject.Value = previewProject;
                 return await Preview(previewProject, S(p, "path"), ct, previewChat.Id);
             case "mcp.json.get": case "mcp.json.save": case "mcp.save": case "mcp.delete": case "mcp.toggle": case "mcp.test": return await DispatchMcp(method, p, ct);
             case "send": return await Send(p, ct);

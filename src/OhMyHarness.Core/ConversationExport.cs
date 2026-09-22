@@ -63,7 +63,9 @@ public static class ConversationExport
         Setting(L("Continuation automatique", "Auto-continue"), state.AutoContinue);
         Setting("Skills", state.EnabledSkills);
         Setting(L("Accès navigateur / DOM", "Browser / DOM access"), $"{browser} / {dom}");
-        Setting(L("Sources associées", "Attached sources"), string.Join(", ", project.GetSourceFolders()));
+        Setting(L("Sources associées", "Attached sources"), string.Join(", ", ProjectResources.For(chat, project)));
+        Setting(L("Ouverture automatique des outils", "Auto-focus tools"), features.AutoFocusTool);
+        if (project.PermissionProfileJson.Length > 0) Setting("permission.json (profil importé / imported profile)", project.PermissionProfileJson);
         foreach (var server in servers)
             Setting("MCP", $"{server.Name} · {server.Transport} · {L("activé", "enabled")}={server.Enabled}");
         b.AppendLine().AppendLine("## " + L("Échanges", "Conversation")).AppendLine();
@@ -80,6 +82,7 @@ public static class ConversationExport
             var reasoning = live?.Reasoning ?? wire?["reasoning_content"]?.ToString() ?? wire?["reasoning"]?.ToString();
             if (!string.IsNullOrEmpty(reasoning)) b.AppendLine().AppendLine("#### " + L("Raisonnement", "Reasoning")).AppendLine().AppendLine(reasoning);
             b.AppendLine().AppendLine(live?.Text ?? message.Content).AppendLine();
+            if (message.CompatibilityNotice.Length > 0) b.AppendLine("> " + message.CompatibilityNotice).AppendLine();
             if (wire?["tool_calls"] is { } calls) b.AppendLine("#### " + L("Appels d’outils", "Tool calls")).AppendLine().AppendLine(Fence(calls.ToJsonString(), "json"));
             if (wire?["tool_call_id"] is { } callId) Setting("Tool call ID", callId.ToString());
             foreach (var attachment in message.Attachments)

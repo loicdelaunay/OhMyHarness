@@ -21,7 +21,7 @@ public sealed partial class MainWindow
             {
                 if(provider.SelectedItem is not ProviderDraft source)return;
                 assignment.ProviderId=source.Id;
-                model.ItemsSource=ModelCatalog.GetModelsForProvider(new Provider{Name=source.Name,BaseUrl=source.BaseUrl,Kind=source.Kind,Model=source.Model});
+                model.ItemsSource=ModelCatalog.GetModelsForProvider(new Provider{Name=source.Name,BaseUrl=source.BaseUrl,Kind=source.Kind,Model=source.Model,DetectedModelsJson=source.DetectedModelsJson,SelectedModelsJson=source.SelectedModelsJson});
                 if(reset||string.IsNullOrWhiteSpace(assignment.Model))model.Text=assignment.Model=source.Model;
                 Save();
             }

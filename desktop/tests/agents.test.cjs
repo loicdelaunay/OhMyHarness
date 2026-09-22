@@ -4,7 +4,7 @@ const {spawn}=require('node:child_process');
 test('agent modes: Plan enforcement, delegation, project instructions and lazy custom skills',{timeout:60000},async t=>{
   const directory=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'omh-agents-'))),skillRoot=path.join(directory,'skills');
   await fs.writeFile(path.join(directory,'AGENTS.md'),'PROJECT-CONVENTION-TEST');
-  const child=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.Service/bin/Release/net10.0/OhMyHarness.Service.dll'),'--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,OHMYHARNESS_SKILLS_DIR:skillRoot}});
+  const child=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.App/bin/Release/net10.0-desktop/OhMyHarness.App.dll'),'--service','--database',path.join(directory,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...process.env,OHMYHARNESS_SKILLS_DIR:skillRoot}});
   let sequence=0,readyResolve,readyReject,stderr='',calls=0,hostActions=0,childCalls=0,rootCalls=0,scenario='plan';
   const pending=new Map(),events=[],payloads=[];const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   const write=value=>child.stdin.write(JSON.stringify(value)+'\n');

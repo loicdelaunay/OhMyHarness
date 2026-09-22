@@ -14,8 +14,10 @@ const inboxes=new Map();
 async function refreshInbox(){const id=chatId;if(!id){$('inbox').replaceChildren();return;}inboxes.set(id,await call('inbox.list',{chatId:id}));if(chatId===id)renderInbox();}
 function renderInbox(){
   const area=$('inbox');area.replaceChildren();const id=chatId,items=inboxes.get(id)||[];
+  area.hidden=items.length===0;
+  if(items.length)area.append(el('div',L('Messages en attente','Queued messages')+' · '+items.length,'inbox-header'));
   for(const item of items){
-    const row=el('div',null,'inbox-row');row.append(el('span',(item.mode==='steering'?L('↳ Prochaine étape : ','↳ Next step: '):L('⏳ En attente : ','⏳ Queued: '))+item.text.slice(0,150)));
+    const row=el('div',null,'inbox-row');row.append(el('span',item.mode==='steering'?'↳':String(items.indexOf(item)+1),'queue-index'),el('span',item.text.slice(0,220)+(item.text.length>220?'…':''),'queue-text'));
     const actions=el('div',null,'inbox-actions');
     button(actions,L('Supprimer','Delete'),async()=>{await call('inbox.delete',{id:item.id,chatId:id});});
     button(actions,L('Modifier','Edit'),async()=>{

@@ -1,5 +1,4 @@
 <Solution>
   <Project Path="src/OhMyHarness.Core/OhMyHarness.Core.csproj" />
-  <Project Path="src/OhMyHarness.Service/OhMyHarness.Service.csproj" />
-  <Project Path="tests/OhMyHarness.Tests/OhMyHarness.Tests.csproj" />
+  <Project Path="src/OhMyHarness.App/OhMyHarness.App.csproj" />
 </Solution>

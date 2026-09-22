@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OhMyHarness.Core;
 using System.Text.Json.Nodes;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {
@@ -13,6 +13,7 @@ public sealed partial class HarnessService
         await using var db = Db();
         var chat = await db.Chats.SingleAsync(x => x.Id == id, ct);
         var project = await db.Projects.SingleAsync(x => x.Id == chat.ProjectId, ct);
+        project = ProjectResources.Effective(chat, project);
         string terminal = S(p, "terminalId");
         switch (method)
         {

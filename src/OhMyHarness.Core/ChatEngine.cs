@@ -7,17 +7,19 @@ namespace OhMyHarness.Core;
 
 public record GenerationUpdate(string Text, string Reasoning, int? InputTokens, int? OutputTokens, double Seconds)
 {
+    public string CompatibilityNotice { get; init; } = "";
     public double TokensPerSecond => (OutputTokens ?? Math.Ceiling((Text.Length + Reasoning.Length) / 4d)) / Math.Max(.1, Seconds);
 }
 public record Completion(JsonObject Message, int? InputTokens, int? OutputTokens, double Seconds);
 
 public sealed class ChatEngine(HttpClient http)
 {
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, ProviderCompatibility> compatibility = new();
     public static Uri Endpoint(string baseUrl, string resource)
     {
         if (!Uri.TryCreate(baseUrl.TrimEnd('/') + "/", UriKind.Absolute, out var uri) ||
-            (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) || !string.IsNullOrEmpty(uri.UserInfo))
-            throw new ArgumentException("Utilisez une URL HTTPS (HTTP permis uniquement en local).");
+            (uri.Scheme != "https" && uri.Scheme != "http") || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new ArgumentException("Utilisez une URL HTTP ou HTTPS sans identifiants dans l’URL.");
         return new Uri(uri, resource);
     }
     public async Task<List<string>> ModelsAsync(Provider provider, string key, CancellationToken ct)
@@ -39,14 +41,36 @@ public sealed class ChatEngine(HttpClient http)
         {
             payload["reasoning_effort"] = reasoningEffort.ToLowerInvariant();
         }
-        using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint(provider.BaseUrl, "chat/completions"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"API : HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). Vérifiez la clé, le modèle et ses capacités.");
-        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
-        return await ParseStreamAsync(reader, update, ct);
+        var compatibilityKey = provider.Id + "|" + provider.BaseUrl + "|" + provider.Model + "|" + provider.SupportsImages;
+        var profile = compatibility.GetOrAdd(compatibilityKey, _ => new()).Copy();
+        if (!provider.SupportsImages && messages.OfType<JsonObject>().Any(m => m["content"] is JsonArray a && a.Any(p => p?["type"]?.GetValue<string>() == "image_url"))) profile.DisableImages();
+        for (int attempt = 0; ; attempt++)
+        {
+            var actual = (JsonObject)payload.DeepClone(); var compatibilityNotice = profile.NoticeFor(actual); profile.Apply(actual);
+            using var request = new HttpRequestMessage(HttpMethod.Post, Endpoint(provider.BaseUrl, "chat/completions"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+            request.Content = new StringContent(actual.ToJsonString(), Encoding.UTF8, "application/json");
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                string detail;
+                try
+                {
+                    var error = JsonNode.Parse(body);
+                    detail = error?["error"] is JsonObject nested ? nested["message"]?.ToString() ?? nested.ToJsonString()
+                        : (error?["message"] ?? error?["error"] ?? error?["detail"])?.ToString() ?? "Aucun détail retourné par le fournisseur.";
+                }
+                catch { detail = "Réponse d’erreur du fournisseur non structurée."; }
+                if (key.Length > 0) detail = detail.Replace(key, "[secret]");
+                detail = detail[..Math.Min(detail.Length, 1500)];
+                if ((int)response.StatusCode is 400 or 422 && attempt < 4 && profile.Learn(detail, provider.Kind == "deepseek" || provider.Model.Contains("deepseek", StringComparison.OrdinalIgnoreCase))) continue;
+                throw new HttpRequestException($"API : HTTP {(int)response.StatusCode} ({response.ReasonPhrase}). {detail}");
+            }
+            using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(ct));
+            compatibility[compatibilityKey] = profile.Copy();
+            return await ParseStreamAsync(reader, value => update(value with { CompatibilityNotice = compatibilityNotice }), ct);
+        }
     }
     public static async Task<Completion> ParseStreamAsync(TextReader reader, Action<GenerationUpdate> update, CancellationToken ct)
     {

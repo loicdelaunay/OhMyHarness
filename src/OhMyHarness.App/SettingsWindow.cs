@@ -39,7 +39,7 @@ public sealed partial class MainWindow
         // Settings must never reserve approvalQueue or a ContentDialog slot:
         // agents still need to display permission requests in the main window.
         var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var window = new Window { Title = $"OhMyHarness · {T("Réglages")}" };
+        var window = new Window { Title = $"{DisplayApplicationName} · {T("Réglages")}" };
         settingsWindow = window;
         var panel = new Grid
         {
@@ -75,8 +75,10 @@ public sealed partial class MainWindow
             completed.TrySetResult(false);
         };
         FluentDesign.WindowChrome(window);
+        ApplyBrandingIcon(window);
         window.Content = panel;
-        window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1000, 840));
+        ObserveTextZoom(panel);
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 1000, Height = 840 });
         window.Activate();
         return await completed.Task;
     }

@@ -67,6 +67,13 @@ public sealed class VisionBridge(ConversationSession run, HttpClient http,
     public async Task<JsonArray> PrepareAsync(JsonArray wire, CancellationToken ct)
     {
         if (run.Provider.SupportsImages) return wire;
+        if (!Enabled(run.Options.EnabledSkills))
+        {
+            if (!run.Provider.IsOpenCode) return wire; // ChatEngine supplies a visible compatibility notice.
+            var payload = new JsonObject { ["messages"] = wire.DeepClone() };
+            var fallback = new ProviderCompatibility(); fallback.DisableImages(); fallback.Apply(payload);
+            return payload["messages"]!.AsArray();
+        }
         var result = (JsonArray)wire.DeepClone();
         foreach (var message in result.OfType<JsonObject>())
         {

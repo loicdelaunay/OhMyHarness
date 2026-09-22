@@ -11,6 +11,7 @@ public sealed class Project
     public int Id { get; set; }
     public string Name { get; set; } = "Mon projet";
     public string SourceFolder { get; set; } = "";
+    public string PermissionProfileJson { get; set; } = "";
     public List<Chat> Chats { get; set; } = [];
     public override string ToString() => Name;
 
@@ -34,6 +35,8 @@ public sealed class Chat
     public string ExecutionMode { get; set; } = "execute";
     public string OrchestrationMode { get; set; } = "disabled";
     public bool SandboxEnabled { get; set; }
+    public string ResourcePathsJson { get; set; } = "";
+    public bool TodoDismissed { get; set; }
     public List<Message> Messages { get; set; } = [];
     public override string ToString() => Title;
 }
@@ -43,6 +46,7 @@ public sealed class Message
     public int ChatId { get; set; }
     public string Role { get; set; } = "user";
     public string Content { get; set; } = "";
+    public string CompatibilityNotice { get; set; } = "";
     public string WireJson { get; set; } = "";
     public string State { get; set; } = "complete";
     public int? InputTokens { get; set; }
@@ -60,6 +64,8 @@ public sealed class Attachment
 }
 public sealed class Provider
 {
+    public string DetectedModelsJson { get; set; } = "[]";
+    public string SelectedModelsJson { get; set; } = "";
     public string CompositeJson { get; set; } = "";
     public bool IsComposite => Kind.Equals("composite", StringComparison.OrdinalIgnoreCase);
     public int Id { get; set; }
@@ -148,6 +154,7 @@ public sealed class HarnessDb : DbContext
         this.path = Path.GetFullPath(usesDefaultPath ? DatabasePath : path!);
     }
     public DbSet<SubagentRecord> Subagents => Set<SubagentRecord>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
     public DbSet<PendingInput> PendingInputs => Set<PendingInput>();
     public DbSet<RagChunk> RagChunks => Set<RagChunk>();
     public DbSet<Project> Projects => Set<Project>();
@@ -164,6 +171,8 @@ public sealed class HarnessDb : DbContext
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<ScheduledTask>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<ScheduledTask>().HasIndex(x => new { x.Enabled, x.NextRunUtc });
         model.Entity<PendingInput>().HasOne<Chat>().WithMany().HasForeignKey(x=>x.ChatId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<PendingInput>().HasIndex(x=>new{x.ChatId,x.Id});
         model.Entity<SubagentRecord>().HasOne<Chat>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
@@ -246,9 +255,16 @@ public sealed class DesignFactory : IDesignTimeDbContextFactory<HarnessDb>
 {
     public HarnessDb CreateDbContext(string[] args) => new();
 }
-[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public static class KeyVault
 {
-    public static byte[] Encrypt(string key) => ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser);
-    public static string Decrypt(byte[] key) => key.Length == 0 ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(key, null, DataProtectionScope.CurrentUser));
+    public static byte[] Encrypt(string key) => OperatingSystem.IsWindows()
+        ? ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser)
+        : MacKeychain.Store(key);
+    public static string Decrypt(byte[] key)
+    {
+        if (key.Length == 0) return "";
+        if (Encoding.UTF8.GetString(key).StartsWith(MacKeychain.Prefix, StringComparison.Ordinal)) return MacKeychain.Read(key);
+        if (OperatingSystem.IsWindows()) return Encoding.UTF8.GetString(ProtectedData.Unprotect(key, null, DataProtectionScope.CurrentUser));
+        throw new InvalidOperationException("Ressaisissez cette clé sur ce système : son ancien coffre n’est pas disponible. / Re-enter this key on this OS.");
+    }
 }

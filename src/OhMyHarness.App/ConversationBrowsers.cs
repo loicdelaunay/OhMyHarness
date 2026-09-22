@@ -10,7 +10,13 @@ public sealed partial class MainWindow
     sealed class ConversationBrowser(int id)
     {
         public int Id { get; } = id;
-        public WebView2 View { get; } = new();
+#if WINDOWS
+        public Microsoft.UI.Xaml.Controls.WebView2 View { get; } = new();
+#else
+        public Grid View { get; } = new();
+        public ChromiumBrowser Chrome { get; } = new();
+        public LocalPreviewServer? PreviewServer;
+#endif
         public Task? Initialization;
         public bool Ready;
         public bool Closed;
@@ -37,7 +43,11 @@ public sealed partial class MainWindow
             return value;
         }
     }
-    WebView2 browser => CurrentBrowser.View;
+#if WINDOWS
+    Microsoft.UI.Xaml.Controls.WebView2 browser => CurrentBrowser.View;
+#else
+    Grid browser => CurrentBrowser.View;
+#endif
     bool browserReady { get => CurrentBrowser.Ready; set => CurrentBrowser.Ready = value; }
     string? previewFolder { get => CurrentBrowser.PreviewFolder; set => CurrentBrowser.PreviewFolder = value; }
     string? previewHost { get => CurrentBrowser.PreviewHost; set => CurrentBrowser.PreviewHost = value; }
@@ -65,6 +75,12 @@ public sealed partial class MainWindow
     {
         if (!conversationBrowsers.Remove(id, out var item)) return;
         item.Closed = true; item.Ready = false;
-        try { (item.View.Parent as Panel)?.Children.Remove(item.View); item.View.Close(); } catch (System.Runtime.InteropServices.COMException) { }
+        try { (item.View.Parent as Panel)?.Children.Remove(item.View);
+#if WINDOWS
+            item.View.Close();
+#else
+            item.Chrome.Dispose(); item.PreviewServer?.Dispose();
+#endif
+ } catch (System.Runtime.InteropServices.COMException) { }
     }
 }

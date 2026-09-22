@@ -5,7 +5,11 @@ namespace OhMyHarness.Core;
 public sealed class FeatureSettings
 {
     public string Theme { get; set; } = "fluent-dark";
+    public string ApplicationName { get; set; } = "OhMyHarness";
+    public string LogoPath { get; set; } = "";
+    public int FontZoomPercent { get; set; } = 100;
     public bool ComposerInfoExpanded { get; set; } = true;
+    public bool AutoFocusTool { get; set; }
     public string BrowserMode { get; set; } = "embedded";
     public string ChromePath { get; set; } = "";
     public string RagMode { get; set; } = "local";

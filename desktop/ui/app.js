@@ -116,12 +116,14 @@ async function selectChat(id){
   if(!histories.has(id)||!running.has(id))histories.set(id,await call('history',{chatId:id}));
   const children=await call('subagents',{chatId:id});
   if(chatId!==id)return;for(const child of children){if(child.status==='running'&&!running.has(id))child.status='interrupted';subagents.set(child.id,child);}renderMessages(true);renderChats();
-  if(!$('tools').hidden){if(tab==='git')guard(refreshGit);if(tab==='files'&&selectedProject()?.sourceFolder)guard(loadFiles);}
+  if(!$('tools').hidden){if(tab==='git')guard(refreshGit);if(tab==='files'&&conversationResources().length)guard(loadFiles);}
   await call('state.save',{chatId:id,projectId});
 }
 function updateControls(){if(typeof renderInbox==='function')renderInbox();$('composer').disabled=!!selectedChild;$('send').disabled=!!selectedChild||!chatId||!providerId;$('stop').disabled=!running.has(chatId);$('rename-chat').disabled=$('delete-chat').disabled=!chatId;$('new-chat').disabled=!projectId;}
 function renderAssets(){
+  // Attachments and source access are kept per conversation.
   $('assets').replaceChildren();currentDraft().images.forEach((image,index)=>{const box=el('div',null,'asset');const img=el('img');img.src=`data:${image.mime};base64,${image.data}`;img.alt=image.name;const remove=el('button','×');remove.onclick=()=>{currentDraft().images.splice(index,1);renderAssets();};box.append(img,remove);$('assets').append(box);});
+  renderResourceChips();
 }
 function renderMessage(message){
   if(message.role==='tasks')return renderTasks(message);
@@ -130,6 +132,8 @@ function renderMessage(message){
   const body=el('div',null,'body');if(message.html)body.innerHTML=message.html;else body.textContent=message.content||'…';node.append(body);
   for(const image of message.attachments||[]){const img=el('img',null,'attachment');img.src=`data:${image.mime};base64,${image.data}`;img.alt=image.name;node.append(img);}
   if(message.state==='interrupted'&&!running.has(chatId))node.append(el('p',L('Réponse interrompue','Interrupted response'),'interrupted'));
+  if(message.compatibilityNotice)node.append(el('p',message.compatibilityNotice,'compatibility-notice'));
+  messageBranchActions(node,message);
   return node;
 }
 function renderMessages(bottom=false){
@@ -171,6 +175,7 @@ async function send(){
   finally{inflight.delete(id);running.delete(id);renderChats();updateControls();if(chatId===id){histories.set(id,await call('history',{chatId:id}));renderMessages();}}
 }
 api.onEvent(event=>{
+  if(event.event==='tool-focus'){if(event.chatId===chatId&&!selectedChild)focusLatestTool(event.name);return;}
   if(event.event==='started'){running.add(event.chatId);renderChats();updateControls();return;}
   if(event.event==='inbox'){inboxes.set(event.chatId,event.items);if(chatId===event.chatId)renderInbox();return;}
   if(event.event==='subagent'){subagents.set(event.child.id,event.child);renderChats();if(event.chatId===chatId){if(selectedChild===event.child.id)renderChild();else if(!selectedChild){renderChildBubbles();followMessages();}}return;}
@@ -180,7 +185,7 @@ api.onEvent(event=>{
   if(event.event==='fatal'){status(event.error,true);return;}
   if(event.event==='browser'){if(event.chatId===chatId)$('address').value=event.url;return;}
   if(event.event==='stream'){
-    running.add(event.chatId);metrics.set(event.chatId,event);updateMessage(event.chatId,{id:event.messageId,role:'assistant',content:event.text,html:event.html,reasoning:event.reasoning,state:'streaming'});if(event.chatId===chatId)renderMetrics();
+    running.add(event.chatId);metrics.set(event.chatId,event);updateMessage(event.chatId,{id:event.messageId,role:'assistant',content:event.text,html:event.html,reasoning:event.reasoning,compatibilityNotice:event.compatibilityNotice,state:'streaming'});if(event.chatId===chatId)renderMetrics();
   }else if(event.event==='message'){
     if(event.title){const chat=snapshot.chats.find(x=>x.id===event.chatId);if(chat)chat.title=event.title;if(event.chatId===chatId)$('chat-title').textContent=event.title;renderChats();}
     updateMessage(event.chatId,event.message);
@@ -199,7 +204,7 @@ $('delete-chat').onclick=()=>guard(async()=>{if(!confirm(L('Supprimer cette conv
 function showDialog(id){$(id).showModal();updateBrowserBounds();}
 document.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>$(button.dataset.close).close());
 document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('close',updateBrowserBounds));
-function projectDialog(existing){projectEdit=existing||null;projectFolders=existing?.sourceFolder?.split(/[|;\r\n]/).filter(Boolean)||[];$('project-name').value=existing?.name||'';$('project-delete').hidden=!existing;renderSources();showDialog('project-dialog');}
+function projectDialog(existing){projectEdit=existing||null;projectFolders=existing?.sourceFolder?.split(/[|;\r\n]/).filter(Boolean)||[];$('project-name').value=existing?.name||'';$('project-delete').hidden=!existing;renderSources();renderProjectPermissions();showDialog('project-dialog');}
 function renderSources(){$('project-sources').replaceChildren(...projectFolders.map((folder,i)=>{const row=el('div',null,'source-item');const remove=el('button','×');remove.type='button';remove.onclick=()=>{projectFolders.splice(i,1);renderSources();};row.append(el('span',folder),remove);return row;}));}
 $('new-project').onclick=()=>projectDialog();$('manage-project').onclick=()=>projectDialog(selectedProject());
 $('project-folders').onclick=()=>guard(async()=>{projectFolders=[...new Set([...projectFolders,...await api.host('pick.folders')])];renderSources();});
@@ -208,7 +213,8 @@ $('project-delete').onclick=()=>guard(async()=>{if(!confirm(L('Supprimer le proj
 $('plus').onclick=()=>{
   const menu=$('composer-menu');menu.replaceChildren();function item(label,fn){const button=el('button',label);button.onclick=()=>guard(async()=>{await fn();});menu.append(button);}
   item(L('Joindre des images','Attach images'),async()=>{const images=await api.host('pick.images');if(currentDraft().images.length+images.length>4)throw new Error('4 images maximum');currentDraft().images.push(...images);renderAssets();});
-  item(L('Dossiers sources','Source folders'),()=>projectDialog(selectedProject()));
+  item(L('Fichiers et dossiers de la conversation','Conversation files and folders'),resourceDialog);
+  item(L('Afficher la liste de tâches','Show task list'),async()=>{await call('chat.tasks',{id:chatId,dismissed:false});await refresh();renderPinnedTasks();});
   const selectedChat=snapshot.chats.find(x=>x.id===chatId);
   if(selectedChat){
     addSandboxMenu(menu, selectedChat);
@@ -276,7 +282,8 @@ let gitRevision=0,fileRevision=0;
 async function refreshGit(){
   const revision=++gitRevision,selectedProjectId=projectId;
   $('git-files').replaceChildren();$('git-diff').replaceChildren();$('git-summary').textContent=L('Chargement…','Loading…');
-  const result=await call('git.files',{projectId:selectedProjectId});if(revision!==gitRevision||projectId!==selectedProjectId)return;
+  cachedGitPreview=null;
+  const result=await call('git.files',{projectId:selectedProjectId,chatId});if(revision!==gitRevision||projectId!==selectedProjectId)return;
   $('git-summary').textContent=!result.hasRepository?L('Aucun dépôt Git dans les sources.','No Git repository in sources.'):result.files.length?L('Modifications depuis le dernier commit','Changes since last commit'):L('Aucun fichier modifié.','No modified files.');
   const folders=new Map();
   function folder(key,name,parent){if(!folders.has(key)){const node=document.createElement('details');node.open=true;node.append(el('summary','📁 '+name));parent.append(node);folders.set(key,node);}return folders.get(key);}
@@ -287,27 +294,24 @@ async function refreshGit(){
     button.append(el('span',file.added==null?' —':' +'+file.added,'diff-added'),el('span',file.removed==null?'':' −'+file.removed,'diff-removed'));
     button.onclick=()=>guard(async()=>{const request=++gitRevision;$('git-diff').replaceChildren();
       for(const row of $('git-files').querySelectorAll('button'))row.classList.toggle('selected',row===button);
-      const preview=await call('git.preview',{projectId:selectedProjectId,repository:file.repository,path:file.path});if(request!==gitRevision||projectId!==selectedProjectId)return;
-      $('git-diff').append(el('div',file.path));const table=el('div',null,'git-comparison');
-      table.append(el('div',L('Avant · HEAD','Before · HEAD'),'diff-hunk'),el('div',L('Après · Dossier de travail','After · Working tree'),'diff-hunk'));
-      for(const row of preview.rows){table.append(el('div',row.before==null?'':(row.beforeLine??'')+'  '+row.before,row.kind==='removed'?'diff-removed':row.kind==='hunk'?'diff-hunk':''),el('div',row.after==null?'':(row.afterLine??'')+'  '+row.after,row.kind==='added'?'diff-added':row.kind==='hunk'?'diff-hunk':''));}
-      $('git-diff').append(table);if(preview.notice)$('git-diff').append(el('div',preview.notice));
+      const preview=await call('git.preview',{projectId:selectedProjectId,chatId,repository:file.repository,path:file.path});if(request!==gitRevision||projectId!==selectedProjectId)return;
+      renderGitComparison(file,preview);
     });parent.append(button);
   }
 }
 $('git-refresh').onclick=()=>guard(refreshGit);
 async function loadFiles(){
   const id=chatId,project=projectId,revision=++fileRevision;
-  const text=await call('files.list',{projectId:project,path:$('file-path').value});
+  const text=await call('files.list',{projectId:project,chatId:id,path:$('file-path').value});
   if(id!==chatId||project!==projectId||revision!==fileRevision)return;
   $('file-list').replaceChildren();$('file-content').textContent='';$('file-preview').hidden=true;
   for(const line of text.split('\n').filter(Boolean)){
-    const directory=line.startsWith('[dossier] '),name=directory?line.slice(10):line;
+    const directory=line.startsWith('[dossier] '),name=directory||line.startsWith('[fichier] ')?line.slice(10):line;
     const button=el('button',(directory?'📁 ':'📄 ')+name);
     button.onclick=()=>guard(async()=>{
       if(id!==chatId||project!==projectId)return;
       if(directory){$('file-path').value=name;await loadFiles();}
-      else {const request=++fileRevision;const content=await call('files.read',{projectId:project,path:name});
+      else {const request=++fileRevision;const content=await call('files.read',{projectId:project,chatId:id,path:name});
         if(id!==chatId||project!==projectId||request!==fileRevision)return;
         fileSelected=name;$('file-content').textContent=content;$('file-preview').hidden=false;
       }
@@ -339,9 +343,13 @@ function renderSettings(){
     const theme=field(area,L('Thème','Theme'),'select');theme.id='theme-selector';for(const t of snapshot.appearanceThemes)theme.append(option(t.id,L(t.french,t.english)));theme.value=featureConfig().Theme||'fluent-dark';
     const language=field(area,L('Langue','Language'),'select');language.append(option('fr','Français'),option('en','English'));language.value=snapshot.state.language;
     const showReasoning=field(area,L('Afficher les détails du raisonnement','Show reasoning details'),'checkbox',snapshot.state.showReasoningDetails!==false);
+    showReasoning.id='show-reasoning';
+    const autoFocus=field(area,L('Ouvrir et sélectionner le dernier outil utilisé par l’IA','Open and focus the latest AI tool'),'checkbox',featureConfig().AutoFocusTool===true);
+    autoFocus.id='auto-focus-tool';
     const auto=field(area,L('Continuer automatiquement après 12 étapes','Automatically continue after 12 steps'),'checkbox',snapshot.state.autoContinue);
+    auto.id='auto-continue';
     area.append(el('p',L('Poursuit les outils jusqu’à la réponse finale ou Arrêter. Des tokens supplémentaires peuvent être consommés ; les autorisations restent applicables.','Continue tools until the final answer or Stop. May consume additional tokens; permissions still apply.'),'muted'));
-    button(area,L('Enregistrer','Save'),async()=>{await call('state.save',{language:language.value,autoContinue:auto.checked,showReasoningDetails:showReasoning.checked,featuresJson:JSON.stringify({...featureConfig(),Theme:theme.value})});await refresh();renderSettings();renderMessages();});
+    button(area,L('Enregistrer','Save'),async()=>{await call('state.save',{language:language.value,autoContinue:auto.checked,showReasoningDetails:showReasoning.checked,featuresJson:JSON.stringify({...featureConfig(),Theme:theme.value,AutoFocusTool:autoFocus.checked})});await refresh();renderSettings();renderMessages();});
     area.append(el('p',snapshot.database,'muted'));button(area,L('Vérifier les autorisations système','Check system permissions'),async()=>{const result=await api.host('system.permissions');area.append(el('pre',JSON.stringify(result,null,2)));});
   }else if(settingsTab==='skills'){
     area.append(el('p',L('Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Le modèle exemple-revue est fourni.','Custom skills: copy a folder containing SKILL.md here, then reopen settings. The exemple-revue template is included.')+' '+snapshot.skillsDirectory,'muted'));
@@ -383,7 +391,7 @@ function mcpForm(server){
 function providerForm(provider){
   if(provider.kind==='composite')return compositeForm(provider);
   const area=$('settings-content');area.replaceChildren();const form=el('form');area.append(form);providerActions(form,provider);
-  const name=field(form,L('Nom','Name'),'text',provider.name),url=field(form,'URL','url',provider.baseUrl),model=field(form,L('Modèle','Model'),'text',provider.model),key=field(form,L('Clé API / mot de passe (vide : conserver)','API key / password (blank: keep existing)'),'password','');
+  const name=field(form,L('Nom','Name'),'text',provider.name),url=field(form,'URL · HTTP / HTTPS','url',provider.baseUrl),model=field(form,L('Modèle','Model'),'text',provider.model),key=field(form,L('Clé API / mot de passe (vide : conserver)','API key / password (blank: keep existing)'),'password','');
   const limit=field(form,L('Limite de contexte','Context limit'),'number',provider.contextLimit),vision=field(form,L('Images acceptées','Supports images'),'checkbox',provider.supportsImages),deleteKey=field(form,L('Supprimer la clé enregistrée','Delete saved key'),'checkbox',false);
   let username,executable,autoStart,openCodeTools;
   if(provider.kind==='opencode'){username=field(form,L('Utilisateur','Username'),'text',provider.username||'opencode');executable=field(form,L('Exécutable CLI opencode (facultatif)','opencode CLI executable (optional)'),'text',provider.executablePath);autoStart=field(form,L('Démarrer automatiquement le serveur','Start server automatically'),'checkbox',provider.autoStart);openCodeTools=field(form,L('Activer les outils OpenCode','Enable OpenCode tools'),'checkbox',provider.openCodeTools);}
@@ -406,8 +414,11 @@ function renderPinnedTasks(){
   const region=$('pinned-tasks');if(!region)return;
   const expanded=region.querySelector('details')?.open??true;region.replaceChildren();
   const message=(histories.get(chatId)||[]).find(x=>x.role==='tasks');let tasks=[];try{tasks=JSON.parse(message?.content||'[]');}catch{}
-  region.hidden=!!selectedChild||!tasks.some(x=>x.status==='pending'||x.status==='in_progress');if(region.hidden)return;
-  const card=el('details',null,'pinned-checklist');card.open=expanded;card.append(el('summary',L('À faire','To do')+' · '+tasks.filter(x=>x.status==='completed').length+'/'+tasks.length));
+  region.hidden=!!selectedChild||snapshot.chats.find(x=>x.id===chatId)?.todoDismissed||!tasks.some(x=>x.status==='pending'||x.status==='in_progress');if(region.hidden)return;
+  const current=tasks.find(x=>x.status==='in_progress')||tasks.find(x=>x.status==='pending');
+  const card=el('details',null,'pinned-checklist');card.open=expanded;
+  const summary=el('summary',L('Étape ','Step ')+(tasks.indexOf(current)+1)+'/'+tasks.length+' · '+current.content),close=el('button','×');close.title=L('Masquer · réouvrir depuis +','Hide · reopen from +');
+  close.onclick=event=>{event.preventDefault();event.stopPropagation();const id=chatId;guard(async()=>{await call('chat.tasks',{id,dismissed:true});await refresh();renderPinnedTasks();});};summary.append(close);card.append(summary);
   const list=el('div',null,'checklist-items');
   for(const task of tasks){const row=el('div',null,'checklist-row task-'+task.status),check=document.createElement('input');check.type='checkbox';check.checked=task.status==='completed';check.disabled=true;row.append(check,el('span',(task.status==='in_progress'?'◉ ':task.status==='cancelled'?'— ':'')+task.content));list.append(row);}
   card.append(list);region.append(card);

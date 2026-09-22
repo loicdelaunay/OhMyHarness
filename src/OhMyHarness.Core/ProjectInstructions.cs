@@ -16,15 +16,14 @@ public static class ProjectInstructions
             {
                 ct.ThrowIfCancellationRequested();
                 if (++visited > 2000) throw new IOException("Trop de dossiers pour charger AGENTS.md : associez un dossier source plus précis.");
-                var path = Path.Combine(directory, "AGENTS.md");
-                if (File.Exists(path))
+                foreach (var path in new[] { "AGENTS.md", "Agent.md", "AGENT.md" }.Select(name => Path.Combine(directory, name)).Distinct(PlatformSupport.PathComparer).Where(File.Exists))
                 {
                     access.Resolve(path);
                     if (new FileInfo(path).Length > 32000) throw new IOException($"AGENTS.md trop volumineux : {path} (32 Ko max).");
                     var content = await File.ReadAllTextAsync(path, ct);
                     total += content.Length;
                     if (total > 64000) throw new IOException("Les instructions AGENTS.md dépassent 64 Ko ; réduisez les dossiers associés.");
-                    result.AppendLine($"\n--- AGENTS.md scope: {directory} ---\n{content}\n--- End AGENTS.md ---");
+                    result.AppendLine($"\n--- {Path.GetFileName(path)} scope: {directory} ---\n{content}\n--- End project instructions ---");
                 }
                 foreach (var child in Directory.EnumerateDirectories(directory).OrderDescending())
                     try { access.Resolve(child); pending.Push(child); } catch (UnauthorizedAccessException) { }

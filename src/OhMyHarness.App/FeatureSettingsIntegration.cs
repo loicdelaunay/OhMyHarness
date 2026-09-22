@@ -11,7 +11,13 @@ public sealed partial class MainWindow
     {
         var config = FeatureSettings.Read(state.FeaturesJson);
         var browser = new StackPanel { Spacing=12 };
-        var mode = new ComboBox { Header=WorkflowText("Navigateur", "Browser"), ItemsSource=new[] { WorkflowText("WebView2 intégré", "Embedded WebView2"), "Chrome · MCP", WorkflowText("Désactivé", "Disabled") }, SelectedIndex=config.BrowserMode=="chrome"?1:config.BrowserMode=="disabled"?2:0 };
+#if WINDOWS
+        var browserLabel=WorkflowText("WebView2 intégré","Embedded WebView2");
+#else
+        var browserLabel=WorkflowText("Chromium isolé par conversation","Isolated Chromium per conversation");
+        browser.Children.Add(Label(WorkflowText("Uno Desktop ouvre Chrome/Edge dans une fenêtre dédiée par conversation. Le DOM, JavaScript, clavier, souris et captures sont pilotés depuis l’application. Chrome/Edge est requis ; Node.js est uniquement nécessaire pour le mode MCP.","Uno Desktop uses a dedicated Chrome/Edge window per conversation with DOM, JavaScript, input and screenshots. Chrome/Edge is required; Node.js is only needed for MCP mode."),13));
+#endif
+        var mode = new ComboBox { Header=WorkflowText("Navigateur", "Browser"), ItemsSource=new[] { browserLabel, "Chrome · MCP", WorkflowText("Désactivé", "Disabled") }, SelectedIndex=config.BrowserMode=="chrome"?1:config.BrowserMode=="disabled"?2:0 };
         var executable = new TextBox { Header=WorkflowText("Chemin de Chrome (facultatif)", "Chrome path (optional)"), Text=config.ChromePath };
         browser.Children.Add(mode);browser.Children.Add(executable);
         browser.Children.Add(Label(WorkflowText("Le panneau Outils fonctionne sans navigateur. WebView2 démarre uniquement à la demande. En mode Chrome, l’IA utilise Chrome DevTools MCP dans une fenêtre externe, avec un profil par conversation. Chrome et Node.js doivent être installés. Les autorisations MCP restent applicables.", "Tools work without a browser. Chrome mode uses an external MCP browser with a per-conversation profile; Chrome and Node.js are required."),13));
@@ -27,6 +33,7 @@ public sealed partial class MainWindow
         ragMode.SelectionChanged += (_, _) => RefreshApiFields(); RefreshApiFields();
         rag.Children.Add(Label(WorkflowText("Activez le skill RAG, puis demandez une indexation à l’IA. MiniLM multilingue (quantifié, ~118 Mo) fonctionne hors ligne en français et en anglais, avec recherche entre les langues. L’index reste dans SQLite. Réindexez vos sources après le passage de l’ancien modèle anglais au modèle multilingue, ou après modification des fichiers. En mode API, les textes sélectionnés sont transmis après autorisation.", "Enable RAG and ask the agent to index. Multilingual MiniLM (~118 MB) works offline in French and English, including cross-language search. Re-index after upgrading from the English model or editing sources. API transmission requires approval."),13));
         var targetProjectId=project?.Id;
+        rag.Children.Add(Label(WorkflowText("Tous formats : extraction texte PDF/Office ; métadonnées et chaînes lisibles pour les binaires inconnus. Pas d’OCR pour les PDF scannés. Limites : 32 Mio et 500 000 caractères extraits par fichier.", "All formats: PDF/Office text extraction; metadata and printable strings for unknown binaries. No OCR for scanned PDFs. Limits: 32 MiB and 500,000 extracted characters per file."), 12));
         rag.Children.Add(Action(WorkflowText("Effacer l’index du projet", "Clear project index"), async()=> { if(targetProjectId!=null) {await using var context=new HarnessDb();await context.RagChunks.Where(x=>x.ProjectId==targetProjectId).ExecuteDeleteAsync();} }));
         var vision = new StackPanel { Spacing = 10 };
         var visionProvider = new ComboBox { Header = WorkflowText("Fournisseur vision", "Vision provider"), ItemsSource = providers,

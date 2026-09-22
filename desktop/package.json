@@ -28,7 +28,7 @@
       "hardenedRuntime": true,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
-      "binaries": ["Contents/Resources/service/OhMyHarness.Service"],
+      "binaries": ["Contents/Resources/service/OhMyHarness.App"],
       "extendInfo": {
         "NSHighResolutionCapable": true,
         "NSAppleEventsUsageDescription": "OhMyHarness uses desktop tools only after your approval.",

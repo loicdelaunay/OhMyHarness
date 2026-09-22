@@ -4,7 +4,7 @@ test('structured tasks, interactive questions, concurrent chats and loop decisio
   const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'omh-workflow-')));
   await fs.writeFile(path.join(dir,'read.txt'),'test');
   await fs.writeFile(path.join(dir,'range.txt'),'first\nsecond\nthird\nfourth');
-  const process=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.Service/bin/Release/net10.0/OhMyHarness.Service.dll'),'--database',path.join(dir,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...global.process.env,OHMYHARNESS_SKILLS_DIR:path.join(dir,'skills')}});
+  const process=spawn('dotnet',[path.resolve(__dirname,'../../src/OhMyHarness.App/bin/Release/net10.0-desktop/OhMyHarness.App.dll'),'--service','--database',path.join(dir,'database.sqlite')],{stdio:['pipe','pipe','pipe'],windowsHide:true,env:{...global.process.env,OHMYHARNESS_SKILLS_DIR:path.join(dir,'skills')}});
   let seq=0,readyResolve,readyReject,stderr='',autoAnswer=false,decisions=0,emptySummary=false,holdSummary=false,summaryPending=false,releaseSummary;const pending=new Map(),events=[],payloads=[];
   const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
   const write=value=>process.stdin.write(JSON.stringify(value)+'\n');

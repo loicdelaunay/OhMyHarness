@@ -9,6 +9,7 @@ void Check(bool condition, string name) { if (!condition) throw new Exception("�
 async Task Throws<T>(Func<Task> action, string name) where T : Exception
 { try { await action(); } catch (T) { Check(true, name); return; } throw new Exception("Exception attendue : " + name); }
 string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Serialize(value) + "\r\n\r\n";
+if(args.Contains("--browser-smoke")) { await ChromiumChecks.Run(Check); return; }
 if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
 var stream = ": heartbeat\r\n\r\n" + Event(new { choices = new[] { new { delta = new { content = "Bonjour " } } } })
     + Event(new { choices = new[] { new { delta = new { content = "世界" } } } })
@@ -89,7 +90,7 @@ using (var client = new HttpClient(new FakeHandler(async request =>
 }
 using (var client = new HttpClient(new FakeHandler(_ => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized)))))
     await Throws<HttpRequestException>(() => new ChatEngine(client).StreamAsync(new Provider(), "invalid", new JsonArray(), new JsonArray(), _ => { }, default), "Erreur API 401 remontée");
-await Throws<ArgumentException>(() => Task.FromResult(ChatEngine.Endpoint("http://example.com", "models")), "Clé API refusée sur HTTP distant");
+Check(ChatEngine.Endpoint("http://example.com/v1", "models").AbsoluteUri == "http://example.com/v1/models", "Connexion fournisseur HTTP distante autorisée explicitement");
 var openCodeProvider = new Provider { Kind = "opencode", BaseUrl = "http://127.0.0.1:4096", Username = "opencode", Model = "test/coder" };
 using (var client = new HttpClient(new FakeHandler(request =>
 {
@@ -442,18 +443,9 @@ try
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ValidatePath(@"\\server\share\file.html")), "Chemin réseau refusé pour aperçu local");
         await Throws<UnauthorizedAccessException>(() => Task.FromResult(LocalPreview.ValidatePath(Path.Combine(sources, "a.cs:secret"))), "Flux alternatif NTFS refusé");
     }
-    var deepseekProvider = new Provider { Name = "DeepSeek", BaseUrl = "https://api.deepseek.com", Model = "deepseek-reasoner" };
-    var dsModels = ModelCatalog.GetModelsForProvider(deepseekProvider);
-    Check(dsModels.Contains("deepseek-chat") && dsModels.Contains("deepseek-reasoner") && dsModels.Contains("deepseek-r1:7b") && dsModels.Contains("deepseek-r1:70b") && dsModels.Contains("deepseek-coder-v2:16b"), "Catalogue DeepSeek avec sous-modèles complets");
-    var customProvider = new Provider { Name = "DeepSeek", BaseUrl = "https://api.deepseek.com", Model = "custom-deepseek-fine-tuned" };
-    var customList = ModelCatalog.GetModelsForProvider(customProvider);
-    Check(customList[0] == "custom-deepseek-fine-tuned" && customList.Contains("deepseek-chat"), "Modèle personnalisé inclus dans le catalogue");
-    var openaiProvider = new Provider { Name = "OpenAI", BaseUrl = "https://api.openai.com/v1", Model = "gpt-4o" };
-    var oaiModels = ModelCatalog.GetModelsForProvider(openaiProvider);
-    Check(oaiModels.Contains("gpt-4o") && oaiModels.Contains("gpt-4o-mini") && oaiModels.Contains("o1"), "Catalogue OpenAI correctement sélectionné");
-    var ocCatalogProvider = new Provider { Name = "OpenCode", Kind = "opencode", BaseUrl = "http://127.0.0.1:4096", Model = "opencode/big-pickle" };
-    var ocModels = ModelCatalog.GetModelsForProvider(ocCatalogProvider);
-    Check(ocModels.Contains("opencode/big-pickle") && ocModels.Contains("opencode/nemotron-3.5-lightning-free") && ocModels.Contains("opencode/muse-spark-1.2-contributor-free"), "Catalogue OpenCode avec modèles gratuits par défaut");
+    var known = new Provider { Name="DeepSeek", Model="configured", DetectedModelsJson="[\"configured\",\"discovered\"]" };
+    Check(ModelCatalog.GetModelsForProvider(known).SequenceEqual(new[]{"configured","discovered"}),"Catalogue constitué des modèles configurés et détectés uniquement");
+    Check(ModelCatalog.GetModelsForProvider(null).Count==0,"Aucun catalogue supposé sans fournisseur");
     Check(ModelCatalog.GetDefaultContextLimit("opencode/big-pickle") == 200_000, "Limite de contexte big-pickle");
     Check(ModelCatalog.GetDefaultContextLimit("opencode/muse-spark-1.2-contributor-free") == 1_048_576, "Limite de contexte muse-spark");
     Check(OpenCodeEngine.IsFreeModel(null, "opencode/big-pickle") && OpenCodeEngine.IsFreeModel(null, "nemotron-3.5-lightning-free"), "Détection des modèles gratuits OpenCode");
@@ -582,6 +574,8 @@ await InboxChecks.Run(Check);
 await AppearanceMcpChecks.Run(Check);
 await VisionChecks.Run(Check);
 ApplicationChecks.Run(Check);
+await WorkspaceEnhancementChecks.Run(Check);
+await SchedulingChecks.Run(Check);
 Console.WriteLine($"\n{passed} contrôles réussis.");
 
 sealed class FakeHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> action) : HttpMessageHandler

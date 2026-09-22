@@ -3,15 +3,21 @@
 Le mode **+ → Sandbox** et ses prérequis sont décrits dans [docs/sandbox.md](docs/sandbox.md).
 Le panneau de terminaux à onglets et les outils IA asynchrones sont décrits dans [docs/terminals.md](docs/terminals.md).
 
-Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1. La version Windows native reste en **WinUI 3 / .NET 10**. Une nouvelle interface **Electron + service .NET partagé** ajoute macOS Apple Silicon et Intel, et peut aussi être utilisée sous Windows.
+Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1. Le socle est **Uno Platform / .NET 10**, avec deux projets : **Core** (données, agents et outils) et **App** (interface commune Windows/macOS). Windows dispose de la cible WinUI native et de la cible Uno Desktop ; macOS utilise Uno Desktop.
 
-**macOS :** voir [le guide de compilation, les adaptations et les validations restantes](docs/macos.md). WinUI 3 lui-même ne fonctionne pas sur Mac. Le service compile pour les deux architectures Mac ; les permissions système et les interactions natives restent à valider sur un Mac réel. Les sections ci-dessous décrivent principalement la version WinUI Windows.
+Voir [Uno, tâches CRON et catalogue des modèles](docs/uno-tasks-models.md), ainsi que [le guide macOS et les validations restantes](docs/macos.md). Les interactions natives doivent encore être validées sur un Mac réel. L’ancienne interface Electron reste dans `desktop` pour compatibilité ; elle n’est plus le socle de publication.
 
 ## Démarrer
 
-Lancer `artifacts\official\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Cet écran gère de zéro à autant de connexions que nécessaire, y compris plusieurs instances OpenAI compatibles ou DeepSeek. Les boutons de création et de duplication sont indépendants du type : chaque instance conserve sa propre clé chiffrée, son nom, son URL, son modèle, sa capacité image et sa limite de contexte. Elles peuvent avoir le même nom ou le même endpoint et être modifiées ou supprimées séparément. Le fournisseur sélectionné dans Réglages devient actif et reste ensuite interchangeable depuis la barre supérieure. **Charger les modèles / tester la clé** interroge `/models` pour l’instance éditée ; certains serveurs compatibles peuvent ne pas exposer cette route, le modèle reste saisissable manuellement.
+Lancer `artifacts\official\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Chaque connexion possède sa card, sa clé, son URL et son catalogue. **Actualiser les modèles** détecte les modèles ; cocher ceux à afficher puis **Enregistrer**. Le sélecteur du chat regroupe les modèles cochés de toutes les connexions et change automatiquement de fournisseur. Plusieurs connexions du même type restent indépendantes. Pour les API sans route `/models`, le modèle reste saisissable manuellement dans l’éditeur et peut être coché dans la card.
+
+**Tâches planifiées**, dans un projet, permet de créer un planning CRON avec picker, instruction, modèle, réflexion, ressources, skills et choix entre conversation neuve ou historique continu. Les tâches s’exécutent pendant que l’application est ouverte ; elles ne réveillent pas le PC.
 
 **Réglages → Général** permet de choisir Français ou English. La langue est appliquée après Enregistrer et conservée entre les lancements ; les noms des projets et le contenu des conversations ne sont pas traduits. Dans le champ de message, **Entrée envoie**, **Ctrl+Entrée insère un saut de ligne** à la position du curseur (ou remplace la sélection).
+
+**Général → Nom et logo de l’application** permet de personnaliser le nom affiché et de charger un logo avec aperçu. Les réglages sont mémorisés en SQLite ; les logos externes sont copiés dans `branding/`, et les chemins restent relatifs au dossier portable. Copier le dossier complet conserve la personnalisation. Les huit thèmes comprennent **Fly dark** et **Fly light**, inspirés du bleu Airbus officiel. Voir [la personnalisation portable](docs/branding.md).
+
+**Ctrl + molette** ajuste les polices de l’interface par paliers de 10 %, de 80 à 150 %. **Ctrl + 0** rétablit 100 %. La taille est conservée en SQLite et s’applique aussi aux nouveaux messages, au code, au raisonnement et aux fenêtres de réglages, sans désactiver l’auto-scroll. Le contenu du navigateur conserve son propre zoom.
 
 Sous Windows WinUI, les réglages s’ouvrent dans une fenêtre indépendante : les agents continuent leurs générations et leurs outils en arrière-plan. Leurs demandes d’autorisation restent accessibles dans la fenêtre principale. Enregistrer applique les modifications ; Annuler ou fermer la fenêtre abandonne les brouillons des réglages.
 
@@ -61,15 +67,15 @@ Le bouton **Exporter**, à côté d’**Outils**, copie la conversation en Markd
 
 Le dossier contenant l’exécutable doit donc être accessible en écriture. Pour un usage portable, placer l’EXE dans un dossier utilisateur plutôt que dans `Program Files`.
 
-Les données gérées par OhMyHarness sont regroupées dans ce dossier : `database.sqlite` (et ses journaux SQLite), `skills/`, `WebView2/` pour le navigateur Windows natif, `browser/` pour Electron, `sandboxes/`, `temp/`, et les fichiers de travail `OpenCodeWorkspaces/`/`opencode-runner.mjs`. Electron y place également ses logs et rapports de crash. Aucun repli vers AppData n’est effectué si le dossier n’est pas accessible en écriture. Le service Electron utilise le dossier de la base fourni par le host, pas son dossier interne `Resources`. Sur Mac, les données sont à côté du bundle `.app`, pour préserver sa signature. Les anciens dossiers WinUI `WebView2` et `OpenCodeWorkspaces` d’AppData sont copiés au premier démarrage si leur destination portable n’existe pas, sans supprimer les originaux.
+Les données gérées par OhMyHarness sont regroupées dans ce dossier : `database.sqlite` (et ses journaux SQLite), `skills/`, `MCP.json`, `WebView2/` pour Windows natif, `Browser/` pour Uno Desktop, `sandboxes/`, `temp/`, Python et les fichiers de travail `OpenCodeWorkspaces/`/`opencode-runner.mjs`. Aucun repli vers AppData n’est effectué si le dossier n’est pas accessible en écriture. Les anciens dossiers WinUI `WebView2` et `OpenCodeWorkspaces` d’AppData sont copiés au premier démarrage si leur destination portable n’existe pas, sans supprimer les originaux.
 
 Pour sauvegarder ou déplacer l’application, fermer toutes ses instances puis copier **le dossier complet**. Les dossiers sources associés restent des références à des projets externes. Les logiciels externes (serveur OpenCode, MCP, Docker/Podman et commandes exécutées) conservent leurs propres installations et stockages ; ce mode portable n’est pas une sandbox système. Le runtime .NET de l’EXE unique peut extraire ses composants dans le cache temporaire système. Les clés restent liées au compte système comme indiqué ci-dessous.
 
-Les clés API sont chiffrées avec **Windows DPAPI / CurrentUser**. Copier la base vers un autre compte Windows ne permet pas de récupérer les clés : il faut les ressaisir. Le reste de la base n’est pas chiffré. Les données effectivement utilisées (messages, images, fichiers lus et pages lues) sont transmises au fournisseur sélectionné lors de l’envoi.
+Les clés API sont protégées par **Windows DPAPI / CurrentUser** ou le **trousseau macOS**. Copier la base vers un autre compte ou OS impose de ressaisir les clés ; les anciennes clés Electron doivent aussi être ressaisies dans Uno. Le reste de la base n’est pas chiffré. Les données effectivement utilisées (messages, images, fichiers lus et pages lues) sont transmises au fournisseur sélectionné lors de l’envoi.
 
 Le skill d’édition des sources permet de créer et modifier les fichiers du dossier associé ; sans ce skill, les outils sources restent en lecture seule. Les chemins hors du dossier nécessitent une autorisation ponctuelle. Les liens symboliques/jonctions, `.env*`, `secrets.json`, `.git`, `bin`, `obj`, `node_modules` et certains dossiers de build sont exclus des outils sources et de l’aperçu local. La lecture texte est limitée à 128 Ko, une ressource d’aperçu Web à 32 Mo. Ces restrictions ne constituent pas un sandbox pour les commandes terminal autorisées.
 
-Le profil Chromium (cache/cookies) est conservé par WebView2 dans `%LOCALAPPDATA%\OhMyHarness\WebView2`, hors de la base applicative. Permissions caméra/micro/localisation et téléchargements sont désactivés. L’accès IA au navigateur doit être réactivé à chaque lancement.
+Les profils navigateur (cache/cookies) sont isolés par conversation dans le dossier portable, hors de la base applicative. Windows natif utilise WebView2 intégré ; Uno Desktop pilote une fenêtre Chrome/Edge dédiée via CDP. Permissions caméra/micro/localisation et téléchargements sont désactivés.
 
 ## Compiler et publier
 
@@ -77,7 +83,7 @@ Prérequis de développement : Windows 10 1809+ / Windows 11, SDK .NET 10, SDK W
 
 ```powershell
 dotnet build src/OhMyHarness.App -c Release
-dotnet run --project src/OhMyHarness.App -c Release
+dotnet run --project src/OhMyHarness.App -f net10.0-windows10.0.19041.0 -c Release
 dotnet run --project tests/OhMyHarness.Tests -c Release
 .\publish.ps1
 ```
@@ -99,10 +105,9 @@ dotnet ef migrations add NomMigration --project src/OhMyHarness.Core --output-di
 
 | Projet | Rôle |
 | --- | --- |
-| `src/OhMyHarness.Core` | EF Core, entités, migrations, DPAPI, client HTTP/SSE, accès aux sources |
-| `src/OhMyHarness.App` | Application WinUI 3, interface, WebView2, orchestration des outils |
-| `src/OhMyHarness.Service` | Service portable : conversations parallèles, fournisseurs, outils, permissions, entrées natives Windows/macOS |
-| `desktop` | Interface Electron Windows/macOS, navigateur isolé, Keychain, capture avec curseur, packaging et tests d’intégration |
+| `src/OhMyHarness.Core` | EF Core, agents, fournisseurs, outils Windows/macOS, CRON, service JSON de compatibilité dans `Hosting` |
+| `src/OhMyHarness.App` | Interface Uno Platform Windows/macOS, navigateur, réglages et tâches |
+| `desktop` | Ancienne interface Electron et tests d’intégration, conservés pour compatibilité |
 | `OhMyHarness.Desktop.slnx` | Solution portable sans dépendance WinUI, à utiliser sur macOS |
 | `tests/OhMyHarness.Tests` | Exécutable de tests hors ligne, sans clé API |
 
@@ -119,3 +124,4 @@ Références : [Chat Completions OpenAI](https://developers.openai.com/api/refer
 Le chat suit les nouvelles réponses uniquement lorsque le défilement est en bas ; consulter l’historique suspend ce suivi. Le skill web expose `browser_javascript` (avec accès navigateur et DOM activés) pour lire les scripts et variables ou modifier le JavaScript de la page après autorisation. Le code est synchrone, limité à 32 000 caractères et 5 secondes, exécuté dans la page de la conversation, sans accès Node. Les changements sont temporaires jusqu’au rechargement ; utiliser les outils sources pour les enregistrer. Cet outil est interdit en mode Plan et en sandbox.
 
 - Navigateur démarré à la demande, Chrome MCP, lecture de fichiers étendue, suivi Auto, coloration du code, RAG configurable et vues de sous-agents : [guide et limites](docs/browser-rag-agents.md).
+- Ressources par conversation, dossiers par défaut, `permission.json`, reprise/fork, TODO, deux vues Git et compatibilité HTTP/DeepSeek : [guide des conversations](docs/conversation-workspace.md).

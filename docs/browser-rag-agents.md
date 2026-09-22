@@ -23,7 +23,9 @@ Dans **Réglages → Skills**, activer **Recherche sémantique RAG** : ses régl
 
 L'agent dispose de `rag_index` (reconstruire), `rag_search` (chercher par sens), `rag_sources` (parcourir les chemins indexés) et `rag_read` (lire les lignes actuelles d'un résultat). L'index est stocké dans SQLite par projet et modèle, avec empreintes des fichiers. La reconstruction est atomique ; les fichiers modifiés depuis l'indexation sont écartés des résultats jusqu'à la prochaine reconstruction. Chaque résultat contient un chemin, une plage de lignes, un extrait et un score de similarité.
 
-Limites : 1 à 2 000 fichiers selon le réglage (500 par défaut), 5 000 passages, 512 Ko par fichier, 1 à 20 résultats (5 par défaut). Les binaires, dépendances et fichiers protégés ne sont pas indexés automatiquement. Les passages très longs sont tronqués pour l'embedding ; utiliser `rag_read` pour lire leur contexte. L'indexation peut prendre du temps et consommer des appels API. Les autres conversations continuent pendant l'indexation. La reconstruction est indisponible en mode Plan ; RAG est indisponible en sandbox, où les outils sources lisent la copie isolée.
+Toutes les extensions peuvent être indexées : textes UTF-8/UTF-16 et Windows-1252, texte PDF, Office/OpenDocument/EPUB. Les archives inconnues donnent un inventaire ; les binaires inconnus donnent leurs métadonnées et chaînes imprimables, explicitement marquées comme extraction partielle. Les images, vidéos, sons, documents chiffrés et PDF scannés ne sont pas interprétés visuellement par cet extracteur ; utiliser le skill vision pour une image. `rag_read` lit les lignes du texte extrait pour PDF/Office, pas des numéros de lignes du format binaire original.
+
+Limites : 1 à 2 000 fichiers selon le réglage (500 par défaut), 5 000 passages, 32 Mio et 500 000 caractères extraits par fichier, 1 à 20 résultats (5 par défaut). Au-delà de la taille limite, seules les métadonnées sont indexées. Les exclusions des sources restent appliquées. Les passages très longs sont tronqués pour l'embedding ; utiliser `rag_read` pour lire leur contexte. L'indexation peut prendre du temps et consommer des appels API. Les résultats et le catalogue sont filtrés par les ressources de la conversation ; reconstruire ses ressources ne supprime pas les passages d’autres sources du projet. La reconstruction est indisponible en mode Plan ; RAG est indisponible en sandbox.
 
 Après la mise à jour de l'ancien modèle local anglais, demander à l'agent de **réindexer les sources avec `rag_index`**. Les anciens vecteurs sont ignorés pour éviter des comparaisons incompatibles, puis remplacés à la reconstruction. Les index API ne changent pas.
 
@@ -47,7 +49,7 @@ Les sous-agents conservent les limites de l’orchestrateur OhMyHarness : 8 éta
 
 ## Messages pendant une génération
 
-La saisie et le bouton d’envoi restent utilisables. Le sélecteur au-dessus de la saisie propose :
+La saisie et le bouton d’envoi restent utilisables. Un envoi pendant une génération va par défaut dans la file. Chaque ligne propose Supprimer, Modifier et Steer :
 
 - **File d’attente** (par défaut) : démarrer un nouveau tour après le travail courant, avec le fournisseur sélectionné au moment de l’envoi.
 - **Dans l’exécution en cours** : intégrer une consigne et ses images à la prochaine étape, avec le modèle de l’exécution actuelle. La requête HTTP déjà en cours ne peut pas être modifiée. L’insertion attend la fin de la réponse et de ses appels d’outils pour conserver un historique valide. Pour le serveur OpenCode, il faut attendre la fin de sa réponse courante.

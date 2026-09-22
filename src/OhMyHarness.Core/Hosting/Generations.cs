@@ -3,7 +3,7 @@ using OhMyHarness.Core;
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {
@@ -20,6 +20,7 @@ public sealed partial class HarnessService
         var text = S(p, "text").Trim();
         if (text.Length == 0 && images.Count == 0) throw new ArgumentException("Message required.");
         using var run = new ConversationSession(chat, project, provider, options, text, images, database,await setup.Providers.ToListAsync(lifetime)){PendingInputId=I(p,"pendingInputId")};
+        permissionProject.Value = run.Project;
         provider=run.Provider;
         await using var mcp = CreateMcpSession(chat.Id);
         if (!runs.TryAdd(chat.Id, run))
@@ -38,7 +39,6 @@ public sealed partial class HarnessService
             await run.PrepareSandboxAsync(ct);
             var secret = await Decrypt(provider.ProtectedKey, ct);
             var history = await History(run, ct);
-            if (!provider.SupportsImages && !VisionBridge.Enabled(options.EnabledSkills) && (images.Count > 0 || history.Any(x => x.Attachments.Count > 0))) throw new InvalidOperationException("Enable Bypass image AI or choose a vision model.");
             var user = new Message { ChatId = chat.Id, Content = text, Attachments = run.Images };
             if (history.Count == 0) run.Chat.Title = text.Length == 0 ? "Images" : text[..Math.Min(50, text.Length)];
             await ConversationInbox.SubmitAsync(run,user,ct); history.Add(user);
@@ -87,6 +87,7 @@ public sealed partial class HarnessService
                 var speedTracker = new GenerationSpeedTracker();
                 void Update(GenerationUpdate update)
                 {
+                    if (update.CompatibilityNotice.Length > 0) active.CompatibilityNotice = update.CompatibilityNotice;
                     run.ExportProgress = new(active.Id, update);
                     speedTracker.AddSample(update.Seconds, update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning));
                     active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
@@ -94,7 +95,7 @@ public sealed partial class HarnessService
                     lastUpdate = DateTime.UtcNow;
                     // The stdout writer serializes events; blocking here preserves ordering without unobserved tasks.
                     emit(new { @event = "stream", chatId = chat.Id, messageId = active.Id, text = update.Text, reasoning = update.Reasoning,
-                        html = Html(update.Text), speed = update.TokensPerSecond,
+                        html = Html(update.Text), speed = update.TokensPerSecond, compatibilityNotice = active.CompatibilityNotice,
                         speedMin = speedTracker.MinSpeed, speedMax = speedTracker.MaxSpeed, speedAverage = speedTracker.AverageSpeed,
                         speedEstimated = !update.OutputTokens.HasValue,
                         tokens = (update.InputTokens ?? input) + (update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning)),
@@ -126,6 +127,7 @@ public sealed partial class HarnessService
                             {
                                 AgentPolicy.Demand(run.Chat.ExecutionMode, name);
                                 SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
+                                await ProjectResources.DemandToolAsync(run.Project, name, arguments, (scope, details, token) => Approve(scope, "Projet · " + name, details, token), ct);
                                 if (AgentRuntime.Handles(name)) result = new(await agent.CallAsync(name, JsonNode.Parse(arguments) as JsonObject ?? [], ct));
                                 else if (name.StartsWith("mcp_", StringComparison.Ordinal))
                                 {

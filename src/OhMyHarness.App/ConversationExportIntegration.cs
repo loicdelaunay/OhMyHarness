@@ -2,7 +2,7 @@ using OhMyHarness.Core;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Pickers;
-using WinRT.Interop;
+
 using static OhMyHarness.App.UiText;
 
 namespace OhMyHarness.App;
@@ -30,7 +30,7 @@ public sealed partial class MainWindow
         }
         var picker = new FileSavePicker { SuggestedFileName = Path.GetFileNameWithoutExtension(document.FileName) };
         picker.FileTypeChoices.Add("Markdown", new List<string> { ".md" });
-        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        InitializePicker(picker, this);
         var file = await picker.PickSaveFileAsync();
         if (file == null) { status.Text = T("Export annulé."); return; }
         await FileIO.WriteTextAsync(file, document.Markdown);

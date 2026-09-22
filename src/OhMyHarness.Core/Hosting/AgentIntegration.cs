@@ -1,7 +1,7 @@
 using OhMyHarness.Core;
 using Microsoft.EntityFrameworkCore;
 
-namespace OhMyHarness.Service;
+namespace OhMyHarness.Core.Hosting;
 
 public sealed partial class HarnessService
 {

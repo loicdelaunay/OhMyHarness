@@ -31,6 +31,7 @@ public sealed partial class MainWindow
     {
         scroll.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler((_, e) =>
         {
+            if (ControlPressed()) return;
             if (!IsChatScrollInput(e.OriginalSource)) return;
             var delta = e.GetCurrentPoint(scroll).Properties.MouseWheelDelta;
             if (e.GetCurrentPoint(scroll).Properties.IsHorizontalMouseWheel || delta == 0) return;
@@ -62,6 +63,7 @@ public sealed partial class MainWindow
         }
         scroll.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(EndDrag), true);
         scroll.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(EndDrag), true);
+#if WINDOWS
         scroll.DirectManipulationStarted += (_, _) => manipulatingChatScroll = true;
         scroll.DirectManipulationCompleted += (_, _) => { manipulatingChatScroll = false; chatScrollInputUntil = Environment.TickCount64 + 750; };
         scroll.ViewChanging += (_, e) =>
@@ -71,6 +73,16 @@ public sealed partial class MainWindow
             if (Math.Abs(delta) > 1) chatScrollMayResume = delta > 0;
             if (delta < -1) SetChatFollow(false);
         };
+#else
+        double lastOffset=0;
+        scroll.ViewChanged += (_, _) =>
+        {
+            var delta=scroll.VerticalOffset-lastOffset; lastOffset=scroll.VerticalOffset;
+            if (!draggingChatScroll && Environment.TickCount64 >= chatScrollInputUntil) return;
+            if (delta < -1) SetChatFollow(false);
+            if (Math.Abs(delta)>1) chatScrollMayResume=delta>0;
+        };
+#endif
         scroll.ViewChanged += (_, _) =>
         {
             if (chatScrollMayResume && (draggingChatScroll || manipulatingChatScroll || Environment.TickCount64 < chatScrollInputUntil)
