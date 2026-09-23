@@ -91,7 +91,7 @@ Chaque conversation possède sa propre vue du navigateur dans le panneau Outils.
 
 ## Compiler et publier
 
-Prérequis de développement : Windows 10 1809+ / Windows 11, SDK .NET 10, SDK Windows et outils de développement WinUI installés via Visual Studio. Ouvrir `OhMyHarness.slnx` dans Visual Studio/Rider ou utiliser :
+Prérequis de développement : Windows 10 1809+ / Windows 11, SDK .NET 10, Git LFS pour récupérer le modèle RAG local, SDK Windows et outils de développement WinUI installés via Visual Studio. Ouvrir `OhMyHarness.slnx` dans Visual Studio/Rider ou utiliser :
 
 ```powershell
 dotnet build src/OhMyHarness.App -c Release
