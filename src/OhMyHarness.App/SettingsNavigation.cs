@@ -43,7 +43,7 @@ public sealed class SettingsNavigation : Grid
     }
     public void Add(string title,UIElement page)
     {
-        string[] icons = ["\uE713", "\uE968", "\uE945", "\uE8D4", "\uE8A5", "\uE72E", "\uE774"];
+        string[] icons = ["\uE713", "\uE968", "\uE945", "\uE8F1", "\uE8D4", "\uE8A5", "\uE72E", "\uE774"];
         navigation.MenuItems.Add(new NavigationViewItem { Content = title, Icon = FluentDesign.Icon(icons[Math.Min(pages.Count, icons.Length - 1)]) });
         pages.Add(page); if (pages.Count == 1) SelectedIndex = 0;
     }

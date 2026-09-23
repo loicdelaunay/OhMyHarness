@@ -8,7 +8,8 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
     Func<JsonArray, JsonArray, CancellationToken, Task<Completion>> complete,
     Func<string, string, CancellationToken, Task<bool>> approve,
     Func<string, Task> progress, Func<CancellationToken, Task<string>>? liveSkills = null, Func<SubagentRecord, Task>? childUpdate = null,
-    Func<Provider, JsonArray, JsonArray, CancellationToken, Task<Completion>>? completeWithProvider = null)
+    Func<Provider, JsonArray, JsonArray, CancellationToken, Task<Completion>>? completeWithProvider = null,
+    Func<string, CancellationToken, Task>? enableSkill = null)
 {
     int delegated;
     string context = "";
@@ -20,7 +21,7 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
         var tasks = run.Workflow == null ? null : await run.Db.Messages.AsNoTracking().Where(x => x.ChatId == run.Chat.Id && x.Role == "tasks").Select(x => x.Content).FirstOrDefaultAsync(ct);
         var browserInstructions = FeatureSettings.Read(run.Options.FeaturesJson).BrowserMode == "chrome" ? "\nBROWSER BACKEND: Chrome DevTools MCP. Use the exposed MCP Chrome tools and their current schemas, starting with list_pages to obtain page IDs. The embedded browser_* tools are unavailable. Chrome uses a separate profile for this conversation.\n" : "";
         return browserInstructions + (run.Chat.SandboxEnabled ? "\nSANDBOX: all sources are private copies. No network, host desktop/browser, MCP or OpenCode. Terminal is Linux sh in a disposable container; source files persist, dependencies and background processes do not. Never claim changes are applied to the original project. User must review/apply via the + menu.\n" : "") + context + (tasks == null ? "" : "\nCurrent structured tasks (update when needed):\n" + tasks) + WorkflowTools.Instructions + AgentPolicy.Prompt(run.Chat.ExecutionMode, run.Chat.OrchestrationMode) +
-            (run.Provider.IsOpenCode ? "\nOpenCode session: use your native read tool for the explicit SKILL.md paths and their resources. Local tool names load_skill/read_skill_resource/delegate_tasks do not exist here; use native task only if actually available. Disabled tools must remain disabled." : "");
+            (run.Provider.IsOpenCode ? "\nOpenCode session: use your native read tool for the explicit SKILL.md paths and their resources. Local tool names load_skill/read_skill_resource/skill_locations/create_skill/delegate_tasks and memory_* do not exist here; use native task only if actually available. Do not access the application's SQLite file as a substitute for missing memory tools. Disabled tools must remain disabled." : "");
     }
     static void Add(JsonArray definitions, string name, string description, JsonObject properties, params string[] required) => definitions.Add(new JsonObject {
         ["type"] = "function", ["function"] = new JsonObject { ["name"] = name, ["description"] = description,
@@ -28,6 +29,8 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
                 ["required"] = new JsonArray(required.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()) } } });
     public void AddDefinitions(JsonArray definitions, bool child = false)
     {
+        MemoryTools.AddDefinitions(definitions, run.Options.EnabledSkills);
+        SkillAuthoring.AddDefinitions(definitions, run.Options.EnabledSkills);
         if (run.Workflow != null) WorkflowTools.AddDefinitions(definitions, child);
         if (skills.Catalog(run.Options.EnabledSkills).Length > 0)
         {
@@ -39,11 +42,29 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
             new() { ["tasks"] = new JsonObject { ["type"] = "array", ["minItems"] = 1, ["maxItems"] = 3, ["items"] = new JsonObject { ["type"] = "object", ["properties"] = new JsonObject {
                 ["name"] = new JsonObject { ["type"] = "string" }, ["prompt"] = new JsonObject { ["type"] = "string" } }, ["required"] = new JsonArray("name", "prompt"), ["additionalProperties"] = false } } }, "tasks");
     }
-    public static bool Handles(string name) => WorkflowTools.Handles(name) || name is "load_skill" or "read_skill_resource" or "delegate_tasks";
+    public static bool Handles(string name) => MemoryTools.Handles(name) || SkillAuthoring.Handles(name) || WorkflowTools.Handles(name) || name is "load_skill" or "read_skill_resource" or "delegate_tasks";
     public async Task<string> CallAsync(string name, JsonObject args, CancellationToken ct)
     {
         AgentPolicy.Demand(run.Chat.ExecutionMode, name);
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
+        if (SkillAuthoring.Handles(name))
+        {
+            var enabledSkills = liveSkills == null ? run.Options.EnabledSkills : await liveSkills(ct);
+            if (!Skills.Enabled(enabledSkills, SkillAuthoring.SkillId)) throw new UnauthorizedAccessException("Auto-création de skills désactivée.");
+            if (name == "skill_locations") return SkillAuthoring.Locations(skills, run.Project.GetSourceFolders());
+            return await SkillAuthoring.CreateAsync(skills, run.Project.GetSourceFolders(), args, async (scope, details, token) => {
+                    var allowed = await approve(scope, details, token);
+                    var current = liveSkills == null ? run.Options.EnabledSkills : await liveSkills(token);
+                    return allowed && Skills.Enabled(current, SkillAuthoring.SkillId);
+                },
+                async (id, token) => {
+                    if (enableSkill != null) await enableSkill(id, token);
+                    if (!Skills.Enabled(run.Options.EnabledSkills, id)) run.Options.EnabledSkills += "," + id;
+                }, ct);
+        }
+        if (MemoryTools.Handles(name)) return await MemoryTools.CallAsync(run, name, args,
+            liveSkills ?? (_ => Task.FromResult(run.Options.EnabledSkills)),
+            (scope, title, details, token) => approve(scope, title + "\n\n" + details, token), ct);
         if (WorkflowTools.Handles(name)) return await (run.Workflow ?? throw new InvalidOperationException("Questions unavailable")).CallAsync(name, args, ct);
         if (name == "delegate_tasks")
         {
@@ -85,7 +106,8 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
         AddDefinitions(definitions, child: true); AgentPolicy.Filter(definitions, mode);
         SandboxWorkspace.Filter(definitions, run.Chat.SandboxEnabled);
         var system = Skills.Prompt(enabled, run.Options.Language, source.Roots.Count > 0, false, Skills.Enabled(enabled, "write_sources")) + context + AgentPolicy.Prompt(mode, "disabled") +
-            "\nYou are a bounded subagent. Report findings, actual edits, validation and remaining limitations to your parent. Never invoke delegate_tasks. Browser, terminal, MCP and desktop tools are unavailable.";
+            "\nYou are a bounded subagent. Report findings, actual edits, validation and remaining limitations to your parent. Never invoke delegate_tasks. Browser, terminal, MCP and desktop tools are unavailable." +
+            (provider.IsOpenCode ? "\nOpenCode does not expose memory_* tools. Do not claim to have saved application memory and do not access its SQLite file through other tools." : "");
         var wire = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = prompt });
         var child = new SubagentRecord { ChatId=run.Chat.Id,Name=name,Task=$"{provider.Name} · {provider.Model}\n{prompt}",Activity="Démarrage / Starting" };
         bool stored=false;
@@ -129,12 +151,14 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
                             "write_source" or "edit_source" => Skills.Enabled(enabled, "write_sources"),
                             "glob_sources" or "grep_sources" => Skills.Enabled(enabled, "code_search"),
                             "patch_sources" => Skills.Enabled(enabled, "patch_sources"),
-                            "load_skill" or "read_skill_resource" or "question" => true, _ => false };
+                            "load_skill" or "read_skill_resource" or "question" => true,
+                            "skill_locations" or "create_skill" => Skills.Enabled(enabled, SkillAuthoring.SkillId),
+                            "memory_search" or "memory_read" or "memory_save" or "memory_delete" => Skills.Enabled(enabled, MemoryTools.ConversationSkill) || Skills.Enabled(enabled, MemoryTools.SharedSkill), _ => false };
                         if (!authorized) throw new UnauthorizedAccessException("Skill désactivé ou outil interdit au sous-agent.");
                         if (!definitions.Any(x => x?["function"]?["name"]?.GetValue<string>() == tool)) throw new UnauthorizedAccessException("Outil non disponible pour ce sous-agent.");
                         var args = JsonNode.Parse(call!["function"]!["arguments"]!.GetValue<string>())!.AsObject();
                         await ProjectResources.DemandToolAsync(run.Project, tool, args.ToJsonString(), approve, ct);
-                        if (tool is "load_skill" or "read_skill_resource" or "question") result = await CallAsync(tool, args, ct);
+                        if (MemoryTools.Handles(tool) || SkillAuthoring.Handles(tool) || tool is "load_skill" or "read_skill_resource" or "question") result = await CallAsync(tool, args, ct);
                         else if (SourceTools.Handles(tool)) result = await SourceTools.ExecuteAsync(source, tool, args, () => enabled,
                             async (scope, diff, token) => {
                                 var allowed = await approve(scope, diff, token);

@@ -23,7 +23,7 @@ public sealed partial class MainWindow
             {
                 var data = new DataPackage(); data.SetText(document.Markdown);
                 Clipboard.SetContent(data); Clipboard.Flush();
-                status.Text = T("Conversation copiée en Markdown.");
+                ShowStatus(T("Conversation copiée en Markdown."));
                 return;
             }
             catch (Exception) { /* Clipboard busy/unavailable: offer the same lossless file export. */ }
@@ -32,8 +32,8 @@ public sealed partial class MainWindow
         picker.FileTypeChoices.Add("Markdown", new List<string> { ".md" });
         InitializePicker(picker, this);
         var file = await picker.PickSaveFileAsync();
-        if (file == null) { status.Text = T("Export annulé."); return; }
+        if (file == null) { ShowStatus(T("Export annulé.")); return; }
         await FileIO.WriteTextAsync(file, document.Markdown);
-        status.Text = T("Conversation enregistrée : ") + file.Path;
+        ShowStatus(T("Conversation enregistrée : ") + file.Path);
     }
 }

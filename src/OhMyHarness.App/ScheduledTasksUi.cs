@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         scheduleTimer.Tick += async (_, _) =>
         {
             try { await scheduler.TickAsync(DateTime.UtcNow); }
-            catch (Exception ex) { status.Text = "Planification : " + ex.Message; }
+            catch (Exception ex) { ShowStatus("Planification : " + ex.Message, StatusKind.Error); }
         };
         scheduleTimer.Start();
         Closed += (_, _) => { scheduleTimer.Stop(); scheduler.Dispose(); tasksWindow?.Close(); };
@@ -24,6 +24,8 @@ public sealed partial class MainWindow
     {
         var input=await ScheduledTaskInput.PrepareAsync(HarnessDb.DatabasePath,task,id=>conversationRuns.ContainsKey(id),ct);
         var conversation=input.Chat;var owner=input.Project;var target=input.Provider;var options=input.Options;var configured=input.Providers;
+        // A visible history panel must finish materializing before an agent appends to it.
+        while (conversationLoading && chat?.Id == conversation.Id) await Task.Delay(20, ct);
         if (conversationRuns.ContainsKey(conversation.Id)) throw new InvalidOperationException("Conversation déjà en cours : cette échéance est ignorée.");
         var visible = chat?.Id == conversation.Id && selectedSubagent == null;
         var panel = visible ? messages : CreateMessagePanel();
@@ -34,17 +36,20 @@ public sealed partial class MainWindow
         {
             if (!visible)
             {
-                var history=await run.Db.Messages.AsNoTracking().Include(x=>x.Attachments).Where(x=>x.ChatId==conversation.Id).OrderBy(x=>x.Id).ToListAsync(ct);
-                RenderHistory(history,panel,run.Project);
+                var history=await ReadStoreAsync(store => store.Messages.AsNoTracking().Include(x=>x.Attachments).Where(x=>x.ChatId==conversation.Id).OrderBy(x=>x.Id).ToList(), ct);
+                for (var i = 0; i < history.Count; i++)
+                {
+                    await Task.Delay(1, ct);
+                    RenderHistory(history, panel, run.Project, i, 1);
+                }
             }
             if (project?.Id == owner.Id)
             {
                 var items = await db.Chats.Where(x => x.ProjectId == owner.Id).OrderByDescending(x => x.Id).ToListAsync(ct);
                 if (project?.Id == owner.Id)
                 {
-                    var selected = chat?.Id; var previousLoading = loading; loading = true;
-                    try { chats.ItemsSource = items; chats.SelectedItem = items.FirstOrDefault(x => x.Id == selected); }
-                    finally { loading = previousLoading; }
+                    allProjectChats = items;
+                    ApplyChatSearch(chat?.Id);
                 }
             }
         }
@@ -170,7 +175,7 @@ public sealed partial class MainWindow
             inherit.IsChecked=value.ResourcePathsJson.Length==0; folders.Text=string.Join('\n',ProviderModels.Parse(value.ResourcePathsJson));
             memory.IsChecked=value.RememberHistory; enabled.IsChecked=value.Enabled; mode.SelectedItem=value.ExecutionMode; orchestration.SelectedItem=value.OrchestrationMode; sandbox.IsChecked=value.SandboxEnabled; autoContinue.IsChecked=value.AutoContinue;
             skills.Children.Clear(); skillChecks.Clear();
-            foreach (var skill in Skills.Available())
+            foreach (var skill in Skills.Available(project?.GetSourceFolders(), project?.Id ?? 0))
             {
                 var check = new CheckBox { Content = state.Language=="en"?skill.EnglishName:skill.FrenchName, IsChecked = Skills.Enabled(value.EnabledSkills,skill.Id) };
                 skillChecks.Add((check,skill.Id)); skills.Children.Add(check);

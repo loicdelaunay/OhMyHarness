@@ -136,7 +136,7 @@ public sealed partial class MainWindow
         db.Messages.Add(compacted); await db.SaveChangesAsync(ct);
         var result = new List<Message> { compacted }; result.AddRange(groups.SelectMany(x => x));
         ShowContextUsage(run, ContextWindow.Estimate(ComposeWire(systemPrompt, result)) + ContextWindow.Estimate(definitions), estimated: true);
-        SetRunStatus(run, T("Contexte compacté automatiquement."));
+        SetRunStatus(run, T("Contexte compacté automatiquement."), StatusKind.Notice);
         return result;
     }
 }

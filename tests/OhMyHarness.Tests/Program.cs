@@ -11,6 +11,8 @@ async Task Throws<T>(Func<Task> action, string name) where T : Exception
 string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Serialize(value) + "\r\n\r\n";
 if(args.Contains("--browser-smoke")) { await ChromiumChecks.Run(Check); return; }
 if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
+await MemoryChecks.Run(Check);
+if(args.Contains("--memory-only")) return;
 var stream = ": heartbeat\r\n\r\n" + Event(new { choices = new[] { new { delta = new { content = "Bonjour " } } } })
     + Event(new { choices = new[] { new { delta = new { content = "世界" } } } })
     + Event(new { choices = Array.Empty<object>(), usage = new { prompt_tokens = 87, completion_tokens = 4 } }) + "data: [DONE]\r\n\r\n";
@@ -40,6 +42,15 @@ await Throws<ArgumentException>(() => Task.FromResult(MouseInput.NormalizeButton
 Check(MouseInput.NormalizeClickCount(1) == 1 && MouseInput.NormalizeClickCount(2) == 2, "Simple et double clic souris acceptés");
 await Throws<ArgumentOutOfRangeException>(() => Task.FromResult(MouseInput.NormalizeClickCount(3)), "Nombre de clics souris invalide refusé");
 Check(MouseInput.ToWindowsWheelDelta(240) == -240 && MouseInput.ToWindowsWheelDelta(-120) == 120, "Sens de défilement souris cohérent entre navigateur et Windows");
+var directSlide = MouseInput.SlidePath(10, 20, 210, 120, "direct", new Random(1));
+Check(directSlide.Count >= 8 && directSlide[^1].X == 210 && directSlide[^1].Y == 120 &&
+    directSlide.All(step => Math.Abs((step.Y - 20) - (step.X - 10) * .5) < .0001), "Glissement direct rectiligne jusqu’à la destination");
+var humanSlide = MouseInput.SlidePath(10, 20, 210, 120, "human", new Random(1));
+Check(humanSlide[^1].X == 210 && humanSlide[^1].Y == 120 &&
+    humanSlide.Any(step => Math.Abs((step.Y - 20) - (step.X - 10) * .5) > .1) &&
+    humanSlide.Select(step => step.DelayMs).Distinct().Count() > 1, "Glissement humain avec imperfections et délais variables");
+await Throws<ArgumentException>(() => Task.FromResult(MouseInput.SlidePath(0, 0, 10, 10, "unknown")), "Pattern de glissement invalide refusé");
+await Throws<ArgumentException>(() => Task.FromResult(MouseInput.SlidePath(0, 0, double.NaN, 10, "direct")), "Coordonnées non finies refusées");
 Check(PermissionModes.AutomaticDecision("deny") == false && PermissionModes.AutomaticDecision("allow") == true && PermissionModes.AutomaticDecision("ask") == null, "Politique globale des autorisations appliquée avant les dialogues");
 Check(PermissionModes.Normalize("inconnu") == PermissionModes.Ask, "Politique d’autorisation invalide ramenée au mode Demander");
 Check(HarnessDb.DatabasePath == Path.Combine(Path.GetDirectoryName(Environment.ProcessPath!)!, "database.sqlite"), "Base SQLite par défaut placée à côté du processus exécutable");
@@ -65,6 +76,11 @@ var contextSample = new JsonArray(new JsonObject { ["role"] = "user", ["content"
     new JsonObject { ["type"] = "text", ["text"] = new string('a', 400) },
     new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:image/png;base64," + new string('A', 20_000) } }) });
 Check(ContextWindow.Estimate(contextSample) is >= 100 and < 5000 && ContextWindow.ShouldCompact(950, 1000) && !ContextWindow.ShouldCompact(949, 1000), "Estimation du contexte et seuil de compaction à 95 %");
+var imageContextMessage = new Message { Content = "Image context estimate", Attachments = [new Attachment { Mime = "image/png", Data = new byte[1024 * 1024] }] };
+var encodedEstimate = ContextWindow.Estimate(ChatEngine.ToWire(imageContextMessage));
+Check(ContextDetails.From([imageContextMessage], 128000).Used == encodedEstimate, "Estimation du contexte image identique sans encodage base64");
+imageContextMessage.Attachments[0].Data = [];
+Check(ContextDetails.From([imageContextMessage], 128000).Used == encodedEstimate, "Métadonnées des images hors écran suffisantes pour le compteur de contexte");
 using (var client = new HttpClient(new FakeHandler(async request =>
 {
     Check(request.RequestUri!.AbsoluteUri == "https://example.com/v1/chat/completions", "Requête HTTP vers le bon endpoint");
@@ -176,7 +192,32 @@ try
     await access.ModifyAsync("sub/b.cs", "class B", "class BModified", default);
     Check((await access.ReadAsync("sub/b.cs", default)) == "class BModified {}", "Modification chirurgicale de fichier source autorisée");
     await Throws<InvalidOperationException>(() => access.ModifyAsync("sub/b.cs", "nonexistent", "foo", default), "Modification échoue si texte cible absent");
-    await Throws<InvalidOperationException>(() => access.WriteAsync("test.exe", "bin", default), "Écriture d'extension non autorisée bloquée");
+    await access.WriteAsync("scripts/data/card_data.gd", "@export var lore: String = \"\"\r\n", default);
+    await access.ModifyAsync("scripts/data/card_data.gd", "lore: String", "lore: StringName", default);
+    Check(await access.ReadAsync("scripts/data/card_data.gd", default) == "@export var lore: StringName = \"\"\r\n", "edit_source accepte Godot .gd et préserve CRLF");
+    await access.WriteAsync("LICENSE", "original", default);
+    await access.ModifyAsync("LICENSE", "original", "updated", default);
+    Check(await access.ReadAsync("LICENSE", default) == "updated", "edit_source accepte un fichier sans extension");
+    await access.WriteAsync("data.custom", "before", default);
+    await access.ModifyAsync("data.custom", "before", "after", default);
+    Check(await access.ReadAsync("data.custom", default) == "after", "edit_source accepte une extension arbitraire");
+    var utf16Path = Path.Combine(sources, "unicode.gd");
+    await File.WriteAllTextAsync(utf16Path, "été\r\n", new System.Text.UnicodeEncoding(false, true, true));
+    await access.ModifyAsync("unicode.gd", "été", "hiver", default);
+    var utf16Bytes = await File.ReadAllBytesAsync(utf16Path);
+    Check(utf16Bytes.AsSpan().StartsWith(new byte[] {255, 254}) && new System.Text.UnicodeEncoding(false, true, true).GetString(utf16Bytes, 2, utf16Bytes.Length - 2) == "hiver\r\n", "edit_source préserve BOM et encodage UTF-16");
+    await access.WriteAsync("unicode.gd", "print(\"été\")\r\n", default);
+    utf16Bytes = await File.ReadAllBytesAsync(utf16Path);
+    Check(utf16Bytes.AsSpan().StartsWith(new byte[] {255, 254}) && new System.Text.UnicodeEncoding(false, true, true).GetString(utf16Bytes, 2, utf16Bytes.Length - 2) == "print(\"été\")\r\n", "write_source préserve l'encodage d'un fichier texte existant");
+    var binaryPath = Path.Combine(sources, "binary.gd");
+    var binaryBytes = new byte[] { 0, 1, 2, 255, 10 };
+    await File.WriteAllBytesAsync(binaryPath, binaryBytes);
+    await Throws<InvalidOperationException>(() => access.ModifyAsync("binary.gd", "a", "b", default), "edit_source refuse un binaire même avec extension texte");
+    await Throws<InvalidOperationException>(() => access.WriteAsync("binary.gd", "bad", default), "write_source refuse d'écraser un binaire");
+    Check((await File.ReadAllBytesAsync(binaryPath)).SequenceEqual(binaryBytes), "edit_source laisse le binaire inchangé");
+    await Throws<ArgumentException>(() => access.ModifyAsync("LICENSE", "", "bad", default), "edit_source refuse une cible vide");
+    await Throws<UnauthorizedAccessException>(() => access.ModifyAsync(".env", "secret", "bad", default), "edit_source conserve l'exclusion des secrets");
+    await Throws<UnauthorizedAccessException>(() => access.ModifyAsync("../outside.cs", "outside", "bad", default), "edit_source conserve le périmètre des sources");
     await Throws<UnauthorizedAccessException>(() => access.ReadAsync("../outside.cs", default), "Traversée de répertoire bloquée");
     await Throws<UnauthorizedAccessException>(() => access.ReadAsync(".env", default), "Lecture .env bloquée");
 
@@ -473,13 +514,14 @@ try
     Directory.CreateDirectory(Path.Combine(featureRoot, "node_modules"));
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "one.cs"), "alpha\r\nbeta\r\n", new System.Text.UTF8Encoding(true));
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "nested", "two.cs"), "alpha\nalpha\n");
+    await File.WriteAllTextAsync(Path.Combine(featureRoot, "nested", "card.gd"), "alpha godot\n");
     await File.WriteAllTextAsync(Path.Combine(featureRoot, "node_modules", "hidden.cs"), "alpha");
     await File.WriteAllTextAsync(Path.Combine(featureRoot, ".env.local"), "alpha");
     var featureSource = new SourceAccess(featureRoot);
     var globResult = await featureSource.SearchAsync("**/*.cs", null, false, false, default);
     Check(globResult.Contains("one.cs") && globResult.Contains("nested/two.cs") && !globResult.Contains("hidden.cs"), "Glob récursif et exclusions");
     var grepResult = await featureSource.SearchAsync("**/*", "ALPHA", false, true, default);
-    Check(grepResult.Contains("one.cs:1:") && grepResult.Contains("two.cs:2:") && !grepResult.Contains(".env"), "Grep lignes, casse et secrets exclus");
+    Check(grepResult.Contains("one.cs:1:") && grepResult.Contains("two.cs:2:") && grepResult.Contains("card.gd:1:") && !grepResult.Contains(".env"), "Grep toutes extensions texte, lignes, casse et secrets exclus");
     Check((await featureSource.SearchAsync("*.cs", "^beta$", true, false, default)).Contains("one.cs:2:"), "Grep regex et glob non récursif");
     await Throws<ArgumentException>(() => featureSource.SearchAsync("../*", null, false, false, default), "Glob hors périmètre refusé");
     var beforePatch = await File.ReadAllBytesAsync(Path.Combine(featureRoot, "one.cs"));
@@ -488,6 +530,11 @@ try
     await featureSource.ApplyPatchAsync(plan, default);
     Check((await File.ReadAllBytesAsync(Path.Combine(featureRoot, "one.cs"))).Take(3).SequenceEqual(beforePatch.Take(3)) && (await File.ReadAllTextAsync(Path.Combine(featureRoot, "one.cs"))).Contains("gamma\r\n"), "Patch préserve BOM UTF-8 et CRLF");
     Check(await File.ReadAllTextAsync(Path.Combine(featureRoot, "new.md")) == "report\n", "Patch crée un fichier");
+    var godotPlan = await featureSource.PreparePatchAsync([new("nested/card.gd", "alpha", "beta")], default);
+    await featureSource.ApplyPatchAsync(godotPlan, default);
+    Check(await File.ReadAllTextAsync(Path.Combine(featureRoot, "nested", "card.gd")) == "beta godot\n", "Patch accepte Godot .gd");
+    await File.WriteAllBytesAsync(Path.Combine(featureRoot, "binary.custom"), [0, 1, 2]);
+    await Throws<InvalidOperationException>(() => featureSource.PreparePatchAsync([new("binary.custom", "a", "b")], default), "Patch refuse un binaire quelle que soit son extension");
     await Throws<InvalidOperationException>(() => featureSource.PreparePatchAsync([new("one.cs", "gamma", "bad"), new("nested/two.cs", "alpha", "ambiguous")], default), "Patch entier refusé si remplacement ambigu");
     Check((await File.ReadAllTextAsync(Path.Combine(featureRoot, "one.cs"))).Contains("gamma"), "Échec de validation ne modifie aucun fichier");
     await Throws<UnauthorizedAccessException>(() => featureSource.PreparePatchAsync([new("../outside.md", null, "bad")], default), "Patch hors sources refusé");
@@ -553,6 +600,64 @@ try
         var report = await runtime.ForcedAsync(default);
         Check(await session.Db.Subagents.CountAsync(x=>x.ChatId==runtimeChat.Id && x.Status=="completed")==2, "Sous-agents conservent leurs échanges et leur statut final");
         Check(childRequests == 4 && policyDenials == 2 && !File.Exists(Path.Combine(featureRoot, "forbidden.md")) && report.Contains("Exploration") && report.Contains("Validation"), "Forced lance deux sous-agents et bloque leurs écritures malgré un appel forgé");
+    }
+
+    var authoredRoot = Path.Combine(workspace, "authored-skills");
+    var authored = new CustomSkills(authoredRoot, [featureRoot], runtimeProject.Id);
+    var aliases = new SourceAccess([featureRoot]).Aliases;
+    var projectAlias = aliases.Keys.Single();
+    var activeSkills = new List<string>();
+    Task EnableAuthored(string id, CancellationToken _) { activeSkills.Add(id); return Task.CompletedTask; }
+    JsonObject Draft(string name, string scope, string? target = null) => new() {
+        ["name"] = name, ["scope"] = scope, ["project_root"] = target,
+        ["description"] = "Procédure réutilisable", ["instructions"] = "# Étapes\n1. Examiner le contexte.\n2. Vérifier le résultat."
+    };
+    var createdProject = await SkillAuthoring.CreateAsync(authored, [featureRoot], Draft("analyse-godot", "project", projectAlias),
+        (_, _, _) => Task.FromResult(true), EnableAuthored, default);
+    var projectId = $"project:{runtimeProject.Id}:{projectAlias}:analyse-godot";
+    Check(createdProject.Contains(projectId) && activeSkills.Contains(projectId)
+        && File.Exists(Path.Combine(featureRoot, ".omh-ai", "skills", "analyse-godot", "SKILL.md")),
+        "Skill daté créé et activé dans .omh-ai/skills du projet");
+    Check((await authored.ReadAsync(projectId, null, projectId, default)).Contains("created_utc:"),
+        "Skill projet disponible par son identifiant et chargé à la demande");
+    Check(!new CustomSkills(authoredRoot).Discover().Any(x => x.Id == projectId), "Skill projet isolé des autres projets");
+    await Throws<UnauthorizedAccessException>(() => SkillAuthoring.CreateAsync(authored, [featureRoot], Draft("refuse", "global"),
+        (_, _, _) => Task.FromResult(false), EnableAuthored, default), "Création refusée sans écriture");
+    Check(!Directory.Exists(Path.Combine(authoredRoot, "refuse")), "Refus sans dossier créé");
+    Check(!AgentPolicy.Allowed("plan", "create_skill") && AgentPolicy.Allowed("plan", "skill_locations"),
+        "Plan interdit la création de skills et autorise la liste des emplacements");
+    var removals = new List<string>();
+    for (var i = 0; i < 20; i++)
+        await SkillAuthoring.CreateAsync(authored, [featureRoot], Draft($"procedure-{i:00}", "global"),
+            (_, detail, _) => { if (detail.Contains("Supprimer le plus ancien")) removals.Add(detail); return Task.FromResult(true); },
+            EnableAuthored, default);
+    Check(authored.Discover().Count(x => x.Id.StartsWith("custom:")) == 20
+        && removals.Count == 1 && !Directory.Exists(Path.Combine(authoredRoot, "exemple-revue"))
+        && !Directory.Exists(Path.Combine(authoredRoot, "refuse")),
+        "Limite de 20 skills globaux et suppression du plus ancien après autorisation");
+    Check(Directory.Exists(Path.Combine(authoredRoot, "procedure-19"))
+        && authored.Discover().Any(x => x.Id == "custom:procedure-19"), "Le nouveau skill reste utilisable après rotation");
+    using (var authorSession = new ConversationSession(runtimeChat, runtimeProject, new Provider(),
+        new AppState { EnabledSkills = SkillAuthoring.SkillId }, "Build reusable skill", [], Path.Combine(workspace, "runtime.sqlite")))
+    {
+        var live = SkillAuthoring.SkillId;
+        var authorRuntime = new AgentRuntime(authorSession, authored,
+            (_, _, _) => throw new Exception("No model request expected."),
+            (_, _, _) => Task.FromResult(true), _ => Task.CompletedTask,
+            _ => Task.FromResult(live), enableSkill: (id, _) => { live += "," + id; return Task.CompletedTask; });
+        var definitions = new JsonArray(); authorRuntime.AddDefinitions(definitions);
+        Check(definitions.Any(x => x?["function"]?["name"]?.GetValue<string>() == "create_skill"),
+            "Auto-création expose son outil uniquement quand le skill est actif");
+        var locationList = await authorRuntime.CallAsync("skill_locations", new JsonObject(), default);
+        Check(locationList.Contains(".omh-ai") && locationList.Contains(projectAlias), "L’agent voit les emplacements globaux et du projet");
+        var result = await authorRuntime.CallAsync("create_skill", Draft("outil-runtime", "project", projectAlias), default);
+        var createdId = $"project:{runtimeProject.Id}:{projectAlias}:outil-runtime";
+        Check(result.Contains(createdId) && live.Contains(createdId)
+            && (await authorRuntime.CallAsync("load_skill", new JsonObject { ["name"] = createdId }, default)).Contains("# Étapes"),
+            "Le runtime crée, active et charge le nouveau skill de projet");
+        live = "";
+        await Throws<UnauthorizedAccessException>(() => authorRuntime.CallAsync("create_skill", Draft("bloque", "project", projectAlias), default),
+            "Désactivation en cours de conversation refuse la création");
     }
 
     var chatSpeedStats = SpeedStats.Compute(new[] { (300, 10.0), (600, 10.0) });

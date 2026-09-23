@@ -35,9 +35,12 @@ public sealed partial class SourceAccess
                     var display = _roots.Count > 1 && !File.Exists(root.FullPath) ? root.Alias + "/" + relative : relative;
                     if (!matcher.IsMatch(relative) && !matcher.IsMatch(display)) continue;
                     if (search is null) { result.AppendLine(display); hits++; continue; }
-                    if (!Extensions.Contains(Path.GetExtension(path)) || new FileInfo(path).Length > 128000) continue;
+                    if (new FileInfo(path).Length > 128000) continue;
+                    var bytes = File.ReadAllBytes(ResolveInRoot(root.FullPath, relative));
+                    if (!SourceText.TryDecode(bytes, out var text)) continue;
                     var lineNumber = 0;
-                    foreach (var line in File.ReadLines(ResolveInRoot(root.FullPath, relative)))
+                    using var reader = new StringReader(text.Content);
+                    while (reader.ReadLine() is { } line)
                     {
                         ct.ThrowIfCancellationRequested(); lineNumber++;
                         if (!search.IsMatch(line)) continue;

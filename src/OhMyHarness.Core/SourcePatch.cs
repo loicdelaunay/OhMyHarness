@@ -27,11 +27,12 @@ public sealed partial class SourceAccess
             ct.ThrowIfCancellationRequested();
             var path = Resolve(edit.Path);
             if (Directory.Exists(path)) throw new InvalidOperationException("Le chemin cible est un dossier.");
-            if (!Extensions.Contains(Path.GetExtension(path))) throw new InvalidOperationException("Format source non pris en charge.");
             if (!originals.ContainsKey(path))
             {
                 if (File.Exists(path) && new FileInfo(path).Length > 128000) throw new InvalidOperationException("Fichier >128 Ko.");
                 var bytes = File.Exists(path) ? await File.ReadAllBytesAsync(path, ct) : null;
+                if (bytes is not null && (!SourceText.TryDecode(bytes, out var decoded) || decoded.Encoding is not UTF8Encoding))
+                    throw new InvalidOperationException($"Patch refusé dans {edit.Path} : fichier binaire ou encodage non UTF-8.");
                 originals[path] = bytes;
                 contents[path] = bytes is null ? "" : utf8.GetString(bytes.AsSpan(bytes.AsSpan().StartsWith(new byte[] {239,187,191}) ? 3 : 0));
             }

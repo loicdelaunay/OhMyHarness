@@ -15,9 +15,9 @@ public sealed partial class MainWindow
     }
     async Task RefreshInboxAsync()
     {
-        var id=chat?.Id;await using var context=new HarnessDb();
-        var pending=id==null?new List<PendingInput>():await context.PendingInputs.Where(x=>x.ChatId==id).OrderBy(x=>x.Id).ToListAsync();
-        if(chat?.Id!=id)return;
+        var id=chat?.Id; var revision = conversationLoadRevision;
+        var pending=id==null?new List<PendingInput>():await ReadStoreAsync(context => context.PendingInputs.AsNoTracking().Where(x=>x.ChatId==id).OrderBy(x=>x.Id).ToList());
+        if(chat?.Id!=id || revision != conversationLoadRevision)return;
         inboxPanel.Children.Clear();
         if (pending.Count > 0) inboxPanel.Children.Add(new TextBlock { Text = WorkflowText("Messages en attente", "Queued messages") + $" · {pending.Count}", FontSize = 12, Foreground = FluentDesign.Secondary, Margin = new(12, 4, 12, 4) });
         foreach(var item in pending)
@@ -53,6 +53,7 @@ public sealed partial class MainWindow
     }
     async Task RunNextQueuedAsync(int chatId,StackPanel panel)
     {
+        while (conversationLoading && chat?.Id == chatId) await Task.Delay(20);
         if(conversationRuns.ContainsKey(chatId))return;
         await using var context=new HarnessDb();
         var item=await context.PendingInputs.Where(x=>x.ChatId==chatId).OrderByDescending(x=>x.Mode=="steering").ThenBy(x=>x.Id).FirstOrDefaultAsync();

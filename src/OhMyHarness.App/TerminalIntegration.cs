@@ -70,4 +70,20 @@ public sealed partial class MainWindow
             ui.Stop.IsEnabled = row.Status == "running";
         }
     }
+    void SelectTerminalTab(ConversationRun run, string? terminalId, bool legacyTerminal = false)
+    {
+        if (!IsVisible(run) || !browserVisible || toolTabs.SelectedIndex != 1 ||
+            !FeatureSettings.Read(state.FeaturesJson).AutoFocusTool) return;
+        RefreshTerminals();
+        if (legacyTerminal)
+        {
+            var directory = run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists);
+            terminalId = terminals.List(run.Chat.Id, run.Chat.SandboxEnabled)
+                .FirstOrDefault(item => item.Name == "Terminal" && item.Status != "running" &&
+                    directory != null && PlatformSupport.PathComparer.Equals(item.Directory, directory))?.Id;
+        }
+        if (terminalId != null && terminalViews.TryGetValue(terminalId, out var view) &&
+            view.ChatId == run.Chat.Id && terminalTabs.TabItems.Contains(view.Tab))
+            terminalTabs.SelectedItem = view.Tab;
+    }
 }

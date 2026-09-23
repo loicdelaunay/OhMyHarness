@@ -1,15 +1,27 @@
 # OhMyHarness
 
-Le mode **+ → Sandbox** et ses prérequis sont décrits dans [docs/sandbox.md](docs/sandbox.md).
-Le panneau de terminaux à onglets et les outils IA asynchrones sont décrits dans [docs/terminals.md](docs/terminals.md).
+**Marre des harnais IA complets qui demandent une longue configuration, plusieurs services et des outils à installer avant le premier chat ? Et si un EXE portable faisait l’essentiel du travail ?**
 
-Application de chat IA pour OpenAI, DeepSeek, OpenCode ou un serveur compatible avec l’API OpenAI Chat Completions v1. Le socle est **Uno Platform / .NET 10**, avec deux projets : **Core** (données, agents et outils) et **App** (interface commune Windows/macOS). Windows dispose de la cible WinUI native et de la cible Uno Desktop ; macOS utilise Uno Desktop.
+OhMyHarness réunit conversations, agents, sources et outils dans une application de bureau. Sous Windows, l’application est distribuée sous forme d’**EXE autonome** : placez-le dans un dossier accessible en écriture, lancez-le et configurez votre fournisseur. L’application crée sa base `database.sqlite` et ses ressources à côté de l’exécutable. Pour déplacer votre espace de travail, copiez ce dossier complet après avoir fermé l’application.
 
-Voir [Uno, tâches CRON et catalogue des modèles](docs/uno-tasks-models.md), ainsi que [le guide macOS et les validations restantes](docs/macos.md). Les interactions natives doivent encore être validées sur un Mac réel. L’ancienne interface Electron reste dans `desktop` pour compatibilité ; elle n’est plus le socle de publication.
+L’interface est construite avec **Uno Platform / .NET 10**. Elle cible Windows (Uno Desktop ou WinUI natif) et macOS (Uno Desktop). Le [parcours macOS](docs/macos.md) reste à valider sur un Mac réel.
+
+## Ce que vous pouvez faire
+
+- **Brancher vos modèles** : plusieurs connexions OpenAI compatibles v1, DeepSeek ou OpenCode, chacune avec sa clé, son URL et ses modèles sélectionnés. Vous pouvez aussi composer un modèle orchestrateur avec des sous-agents spécialisés.
+- **Travailler sur plusieurs conversations à la fois** : projets, dossiers sources partagés, générations simultanées, messages en attente ou injectés dans l’exécution, reprise et fork depuis un message.
+- **Donner des outils à l’agent** : navigateur intégré avec accès contrôlé au DOM et au JavaScript, terminaux parallèles, exploration et édition de fichiers, recherche de code, aperçu des changements Git, captures d’écran, souris, clavier et Python embarqué.
+- **Garder le contrôle** : skills activables, serveurs MCP, modes Plan/Exécution, demandes d’autorisation, sandbox facultative, questions interactives et suivi des tâches de l’agent. Les conventions `AGENTS.md` et les skills `SKILL.md` peuvent être chargés depuis le projet.
+- **Retrouver le contexte utile** : mémoire par conversation ou partagée, recherche RAG avec modèle local multilingue ou fournisseur d’embeddings, images et modèle vision de secours, compteur de tokens, débit et compactage du contexte.
+- **Adapter votre espace** : tâches planifiées par projet, thèmes clairs et sombres, français/anglais, nom et logo personnalisés, export Markdown et base SQLite avec migrations EF Core.
+
+Les **fournisseurs cloud** demandent une connexion réseau et, selon le service, une clé API ; le modèle de chat ne tourne pas dans l’EXE. Les intégrations facultatives gardent leurs prérequis : Git pour la vue Git, Docker/Podman pour la sandbox, OpenCode pour sa connexion dédiée, ou Chrome/Node.js pour Chrome MCP. Le navigateur intégré s’appuie sur le moteur Web du système (Edge WebView2 sous Windows, WebKit sur macOS). Le cœur de l’application ne nécessite pas de serveur OhMyHarness séparé.
+
+Le [guide des agents](docs/agent-modes.md), le [navigateur et le RAG](docs/browser-rag-agents.md), la [mémoire](docs/memory.md), les [skills personnalisés](docs/skill-authoring.md) et la [sandbox](docs/sandbox.md) détaillent ces fonctions et leurs limites.
 
 ## Démarrer
 
-Lancer `artifacts\official\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Chaque connexion possède sa card, sa clé, son URL et son catalogue. **Actualiser les modèles** détecte les modèles ; cocher ceux à afficher puis **Enregistrer**. Le sélecteur du chat regroupe les modèles cochés de toutes les connexions et change automatiquement de fournisseur. Plusieurs connexions du même type restent indépendantes. Pour les API sans route `/models`, le modèle reste saisissable manuellement dans l’éditeur et peut être coché dans la card.
+Lancer `artifacts\official\OhMyHarness.App.exe`, puis **Réglages → Fournisseurs**. Chaque connexion possède sa card, sa clé, son URL et son catalogue. **Tester la connexion** détecte les modèles, les coche tous et enregistre ce fournisseur automatiquement. **Actualiser les modèles** conserve les choix existants ; les modifications manuelles se valident avec **Enregistrer**. Le sélecteur du chat regroupe les modèles cochés de toutes les connexions et change automatiquement de fournisseur. Plusieurs connexions du même type restent indépendantes. Pour les API sans route `/models`, le modèle reste saisissable manuellement dans l’éditeur et peut être coché dans la card.
 
 **Tâches planifiées**, dans un projet, permet de créer un planning CRON avec picker, instruction, modèle, réflexion, ressources, skills et choix entre conversation neuve ou historique continu. Les tâches s’exécutent pendant que l’application est ouverte ; elles ne réveillent pas le PC.
 
@@ -67,7 +79,7 @@ Le bouton **Exporter**, à côté d’**Outils**, copie la conversation en Markd
 
 Le dossier contenant l’exécutable doit donc être accessible en écriture. Pour un usage portable, placer l’EXE dans un dossier utilisateur plutôt que dans `Program Files`.
 
-Les données gérées par OhMyHarness sont regroupées dans ce dossier : `database.sqlite` (et ses journaux SQLite), `skills/`, `MCP.json`, `WebView2/` pour Windows natif, `Browser/` pour Uno Desktop, `sandboxes/`, `temp/`, Python et les fichiers de travail `OpenCodeWorkspaces/`/`opencode-runner.mjs`. Aucun repli vers AppData n’est effectué si le dossier n’est pas accessible en écriture. Les anciens dossiers WinUI `WebView2` et `OpenCodeWorkspaces` d’AppData sont copiés au premier démarrage si leur destination portable n’existe pas, sans supprimer les originaux.
+Les données gérées par OhMyHarness sont regroupées dans ce dossier : `database.sqlite` (et ses journaux SQLite), `skills/`, `MCP.json`, `WebView2/` pour Windows natif, `Browser/` pour les anciens profils Chromium externes, `sandboxes/`, `temp/`, Python et les fichiers de travail `OpenCodeWorkspaces/`/`opencode-runner.mjs`. Aucun repli vers AppData n’est effectué si le dossier n’est pas accessible en écriture. Les anciens dossiers WinUI `WebView2` et `OpenCodeWorkspaces` d’AppData sont copiés au premier démarrage si leur destination portable n’existe pas, sans supprimer les originaux.
 
 Pour sauvegarder ou déplacer l’application, fermer toutes ses instances puis copier **le dossier complet**. Les dossiers sources associés restent des références à des projets externes. Les logiciels externes (serveur OpenCode, MCP, Docker/Podman et commandes exécutées) conservent leurs propres installations et stockages ; ce mode portable n’est pas une sandbox système. Le runtime .NET de l’EXE unique peut extraire ses composants dans le cache temporaire système. Les clés restent liées au compte système comme indiqué ci-dessous.
 
@@ -75,7 +87,7 @@ Les clés API sont protégées par **Windows DPAPI / CurrentUser** ou le **trous
 
 Le skill d’édition des sources permet de créer et modifier les fichiers du dossier associé ; sans ce skill, les outils sources restent en lecture seule. Les chemins hors du dossier nécessitent une autorisation ponctuelle. Les liens symboliques/jonctions, `.env*`, `secrets.json`, `.git`, `bin`, `obj`, `node_modules` et certains dossiers de build sont exclus des outils sources et de l’aperçu local. La lecture texte est limitée à 128 Ko, une ressource d’aperçu Web à 32 Mo. Ces restrictions ne constituent pas un sandbox pour les commandes terminal autorisées.
 
-Les profils navigateur (cache/cookies) sont isolés par conversation dans le dossier portable, hors de la base applicative. Windows natif utilise WebView2 intégré ; Uno Desktop pilote une fenêtre Chrome/Edge dédiée via CDP. Permissions caméra/micro/localisation et téléchargements sont désactivés.
+Chaque conversation possède sa propre vue du navigateur dans le panneau Outils. Windows natif utilise WebView2 avec un profil par conversation ; Uno Desktop utilise la WebView2 de Uno (Edge WebView2 sous Windows, WebKit sous macOS). Le profil Uno Desktop peut être partagé entre les vues. Chrome · MCP reste un mode externe facultatif. Le blocage des permissions caméra/micro/localisation et des téléchargements est appliqué sur la cible Windows native ; Uno Desktop ne fournit pas ces mêmes événements WebView2.
 
 ## Compiler et publier
 
@@ -83,16 +95,16 @@ Prérequis de développement : Windows 10 1809+ / Windows 11, SDK .NET 10, SDK W
 
 ```powershell
 dotnet build src/OhMyHarness.App -c Release
-dotnet run --project src/OhMyHarness.App -f net10.0-windows10.0.19041.0 -c Release
+dotnet run --project src/OhMyHarness.App -f net10.0-desktop -c Release
 dotnet run --project tests/OhMyHarness.Tests -c Release
 .\publish.ps1
 ```
 
-`run.bat` et `publish.bat` offrent les mêmes actions par double-clic. La publication x64 contient **un seul EXE**, avec .NET et Windows App SDK embarqués. Les composants sont extraits automatiquement au premier lancement. Le navigateur exige le **runtime Microsoft Edge WebView2**, généralement déjà installé sous Windows 11 ; il n’est pas embarqué dans l’EXE. L’application reste utilisable pour le chat si le navigateur ne peut pas s’initialiser.
+`run.bat` et `publish.bat` offrent les mêmes actions par double-clic. La publication x64 utilise Uno Desktop et contient **un seul EXE** avec .NET et les composants de l’application embarqués. Les composants sont extraits automatiquement au premier lancement. Le navigateur Web intégré utilise le runtime Edge WebView2 sous Windows ; Chrome ou Edge n’est requis que pour le mode externe Chrome · MCP. La cible WinUI native reste disponible avec `publish.ps1 -NativeWinUI`.
 
 La destination par défaut est `artifacts\official`. Utiliser `publish.ps1 -OutputDirectory <dossier>` pour la changer. Le stockage utilise le chemin réel du processus, car `IncludeAllContentForSelfExtract` redirige `AppContext.BaseDirectory` vers le cache d’extraction. Le test `tests/verify-portable.ps1` vérifie une vraie publication et le déplacement de son EXE.
 
-`publish.ps1 -Runtime win-arm64` permet de cibler ARM64 (non validé sur matériel ARM64). Ne pas supprimer `IncludeAllContentForSelfExtract` ni `EnableMsixTooling` du profil de publication.
+`publish.ps1 -Runtime win-arm64` permet de cibler ARM64 (non validé sur matériel ARM64). Ne pas supprimer `IncludeAllContentForSelfExtract` du profil de publication.
 
 Pour ajouter une migration :
 
@@ -115,7 +127,7 @@ dotnet ef migrations add NomMigration --project src/OhMyHarness.Core --output-di
 
 Les tests couvrent le streaming Unicode/CRLF, les appels d’outils fragmentés, l’usage fournisseur, les flux tronqués, l’annulation, les URL, la protection des sources, les migrations répétées, la persistance des images, les suppressions en cascade et le chiffrement des clés. Les erreurs API sont affichées sans journaliser de clé.
 
-Les appels réels OpenAI/DeepSeek nécessitent une clé utilisateur ; les validations automatisées utilisent un fournisseur simulé. Les réponses disposent d’un rendu Markdown. Il n’y a pas d’index de recherche sémantique ni de terminal interactif persistant. Les sites fortement dynamiques peuvent nécessiter une seconde lecture après chargement. Les tests couvrent aussi les templates personnalisés, les commandes PowerShell/annulation, les diffs Git et les protections des chemins de l’aperçu local.
+Les appels réels OpenAI/DeepSeek nécessitent une clé utilisateur ; les validations automatisées utilisent un fournisseur simulé. Les réponses disposent d’un rendu Markdown. La recherche sémantique RAG doit être activée et ses sources indexées ; les terminaux lancent des commandes non interactives. Les sites fortement dynamiques peuvent nécessiter une seconde lecture après chargement. Les tests couvrent aussi les templates personnalisés, les commandes PowerShell/annulation, les diffs Git et les protections des chemins de l’aperçu local.
 
 Références : [Chat Completions OpenAI](https://developers.openai.com/api/reference/resources/chat), [API DeepSeek](https://api-docs.deepseek.com/), [vision DeepSeek](https://api-docs.deepseek.com/guides/vision/), [publication WinUI 3 en fichier unique](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/unpackage-winui-app).
 

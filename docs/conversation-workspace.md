@@ -37,11 +37,17 @@ Placer ce fichier dans un dossier par défaut du projet, puis utiliser **Gérer 
 
 ## Reprise et fork
 
-Chaque message utilisateur ou réponse finale terminée propose **Créer un fork** et **Reprendre ici**. Un fork crée une nouvelle conversation jusqu’au message choisi, avec ses images, paramètres de conversation et ressources. Les réponses contenant des appels d’outils intermédiaires ne servent pas de point de départ.
+Au survol d’un message utilisateur ou d’une réponse finale terminée, l’icône **Actions du message** ouvre **Créer un fork** et **Reprendre ici**. Un fork crée une nouvelle conversation jusqu’au message choisi, avec ses images, paramètres de conversation et ressources. Les réponses contenant des appels d’outils intermédiaires ne servent pas de point de départ.
 
 Reprendre nécessite l’arrêt de la génération et une confirmation : l’historique complet est d’abord copié dans une conversation **Sauvegarde**, puis la conversation courante est ramenée au message choisi. Sa file d’attente et sa liaison OpenCode sont réinitialisées. Les messages anciennement compactés redeviennent utilisables dans le contexte restauré. Envoyer ensuite une consigne pour poursuivre. Cela ne restaure ni les fichiers du projet, ni l’état du navigateur ou des terminaux.
 
 ## Affichage
+
+La [mémoire persistante](memory.md) dispose d’un onglet de réglages : deux niveaux de skill (conversation et partagé), catégories Projet/Général/Utilisateur et recherche SQLite indexée.
+
+- Les conversations affichent un squelette pendant les lectures en arrière-plan, puis les 24 messages les plus récents. **Charger les messages précédents** ajoute une page en conservant la position de lecture. L’historique complet reste en base et utilisé par le modèle ; seules les images des pages affichées sont chargées pour l’interface.
+- Changer de conversation annule son chargement visuel précédent, sans arrêter ses agents. Les brouillons sont conservés. La saisie et la navigation restent disponibles ; l’envoi attend que la conversation sélectionnée soit prête.
+- Les réglages s’ouvrent immédiatement avec un indicateur de chargement. Git et Fichiers ont leur propre barre de progression ; un ancien résultat ne remplace pas celui de la nouvelle conversation.
 
 - La TODO repliée affiche `étape courante / total · nom de l’étape`. **×** la masque pour cette conversation ; **+ → Afficher la liste de tâches** la réouvre.
 - Informations, tâches et file d’attente utilisent des surfaces cohérentes. Les messages en attente conservent **Supprimer / Modifier / Steer**.

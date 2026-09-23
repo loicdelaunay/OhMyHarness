@@ -79,8 +79,8 @@ public sealed partial class HarnessService
         }
         if (Skills.Enabled(skills, "mouse_control"))
         {
-            Add("desktop_mouse", "Move, click or scroll the desktop after approval. Coordinates use the virtual desktop returned by desktop_screens. button: left/right; click_count: 1/2. Positive delta_y scrolls down.", ("action", "string"), ("x", "number"), ("y", "number"), ("button", "string"), ("click_count", "integer"), ("delta_y", "number"));
-            if (browserAccess && domAccess) Add("browser_mouse", "Move, click or scroll the browser using CSS viewport coordinates after approval. button left/right, click_count 1/2, positive delta_y scrolls down.", ("action", "string"), ("x", "number"), ("y", "number"), ("button", "string"), ("click_count", "integer"), ("delta_y", "number"), ("delta_x", "number"));
+            Add("desktop_mouse", "Move, click, scroll or slide/drag the desktop after approval. For slide, provide start x/y, destination x2/y2 and pattern direct or human (random small imperfections and delays). Coordinates use the virtual desktop returned by desktop_screens. button: left/right; click_count: 1/2. Positive delta_y scrolls down.", ("action", "string"), ("x", "number"), ("y", "number"), ("x2", "number"), ("y2", "number"), ("pattern", "string"), ("button", "string"), ("click_count", "integer"), ("delta_y", "number"));
+            if (browserAccess && domAccess) Add("browser_mouse", "Move, click, scroll or slide/drag the browser using CSS viewport coordinates after approval. For slide, provide x/y, x2/y2 and pattern direct or human. button left/right, click_count 1/2, positive delta_y scrolls down.", ("action", "string"), ("x", "number"), ("y", "number"), ("x2", "number"), ("y2", "number"), ("pattern", "string"), ("button", "string"), ("click_count", "integer"), ("delta_y", "number"), ("delta_x", "number"));
         }
         if (Skills.Enabled(skills, "screenshots"))
         {
@@ -205,6 +205,13 @@ public sealed partial class HarnessService
                 var point = application.RelativePoint(p["x"]!.GetValue<double>(), p["y"]!.GetValue<double>());
                 DesktopApplications.DemandPointTarget(application, point.X, point.Y);
                 p["x"] = point.X; p["y"] = point.Y;
+                if (S(p, "action") == "slide")
+                {
+                    var end = application.RelativePoint(p["x2"]?.GetValue<double>() ?? throw new ArgumentException("x2 required for slide"),
+                        p["y2"]?.GetValue<double>() ?? throw new ArgumentException("y2 required for slide"));
+                    DesktopApplications.DemandPointTarget(application, end.X, end.Y);
+                    p["x2"] = end.X; p["y2"] = end.Y;
+                }
             }
             else
             {
@@ -215,7 +222,16 @@ public sealed partial class HarnessService
         if (name is "desktop_keyboard" or "desktop_mouse")
         {
             using var dpi = application == null ? null : DesktopApplications.PhysicalCoordinates();
-            DesktopInput.Execute(name, p); return new("Input sent successfully.");
+            IReadOnlyList<MouseInput.SlideStep>? slideSteps = null;
+            if (name == "desktop_mouse" && S(p, "action") == "slide")
+            {
+                slideSteps = MouseInput.SlidePath(p["x"]!.GetValue<double>(), p["y"]!.GetValue<double>(),
+                    p["x2"]?.GetValue<double>() ?? throw new ArgumentException("x2 required for slide"),
+                    p["y2"]?.GetValue<double>() ?? throw new ArgumentException("y2 required for slide"), S(p, "pattern"));
+                if (application != null)
+                    foreach (var step in slideSteps) DesktopApplications.DemandPointTarget(application, step.X, step.Y);
+            }
+            await DesktopInput.ExecuteAsync(name, p, ct, slideSteps); return new("Input sent successfully.");
         }
         var response = await host(name, p, ct);
         if (response is JsonObject image && image["data"] != null)

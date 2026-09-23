@@ -19,22 +19,22 @@ bash ./publish-macos.sh x64   # Intel
 
 La publication autonome se trouve dans `artifacts/release/osx-arm64` ou `osx-x64`, avec le lanceur `OhMyHarness.App`. Elle ne nécessite ni installation .NET ni Electron. Le script ne produit pas de DMG signé et ne configure pas de notarisation Apple. Pour une distribution publique, signer et notariser sur Mac ; conserver les dépendances natives livrées avec la publication.
 
-Sur Windows, `publish.ps1` conserve la cible WinUI native. `publish.ps1 -UnoDesktop -OutputDirectory artifacts/release-uno` permet de publier la cible Uno Desktop. Le dossier `artifacts/official` reste destiné aux publications réalisées par l’utilisateur.
+Sur Windows, `publish.ps1` publie Uno Desktop par défaut. `publish.ps1 -NativeWinUI -OutputDirectory artifacts/release-winui` cible WinUI native ; valider son lancement sur la machine cible. Le dossier `artifacts/official` reste le chemin de publication par défaut.
 
 ## Adaptations
 
 | Fonction | Windows natif | Uno Desktop / macOS |
 | --- | --- | --- |
 | Interface, modèles, CRON, historique, agents, skills | Interface partagée | Interface partagée |
-| Navigateur | WebView2 intégré | Fenêtre Chrome/Edge dédiée par conversation, pilotée par CDP |
-| DOM, JavaScript, capture et clavier web | API WebView2 | API CDP |
+| Navigateur | WebView2 intégré | WebView2 de Uno dans l’onglet Web (WebKit sur macOS) |
+| DOM, JavaScript, capture et clavier web | API WebView2 | Scripts DOM ; capture de la vue depuis la fenêtre de l’application |
 | Aperçus locaux | Origine virtuelle approuvée | Serveur loopback limité au dossier approuvé |
 | Terminal | PowerShell | zsh sur Mac, PowerShell sur Windows |
 | Souris et clavier | API Windows | CoreGraphics sur Mac |
 | Capture bureau/application | API Windows | `screencapture`, cible par identifiant de fenêtre, curseur superposé |
 | Clés API | DPAPI CurrentUser | Trousseau macOS |
 
-Installer Chrome ou Edge pour le navigateur Uno Desktop, ou renseigner son chemin dans les réglages. Le processus possède un profil par conversation dans `Browser/` et son arrêt ne ferme pas les autres panneaux. Chrome MCP reste optionnel et nécessite Node.js. Git, OpenCode, Docker et les serveurs MCP sont nécessaires uniquement aux fonctions qui les utilisent.
+Le navigateur intégré Uno Desktop s’ouvre dans le panneau Outils et conserve une vue par conversation. Chrome/Edge et Node.js ne sont nécessaires que pour le mode externe Chrome · MCP. Sur macOS, les interactions JavaScript synthétiques peuvent être refusées par les sites qui exigent des événements natifs ; la capture du navigateur utilise l’autorisation système d’enregistrement de l’écran. Le parcours macOS reste à valider sur un Mac. Git, OpenCode, Docker et les serveurs MCP sont nécessaires uniquement aux fonctions qui les utilisent.
 
 Les données (`database.sqlite`, `skills/`, `MCP.json`, profils, Python et temporaires) restent dans le dossier portable de l’exécutable. Placer la publication dans un dossier accessible en écriture. Les clés sont liées au compte système : celles provenant de Windows DPAPI ou de l’ancienne interface Electron doivent être ressaisies dans Uno sur Mac. Le reste de l’historique est conservé par les migrations EF Core. Ne pas ouvrir une ancienne version sur la base migrée sans sauvegarde.
 

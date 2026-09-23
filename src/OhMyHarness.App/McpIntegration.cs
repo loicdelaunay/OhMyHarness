@@ -7,8 +7,8 @@ public sealed partial class MainWindow
 {
     async Task SyncMcpFile()
     {
-        try { await using var context = new HarnessDb(); await McpConfigFile.SyncAsync(context, (s, _) => Task.FromResult(KeyVault.Encrypt(s)), decrypt: (s, _) => Task.FromResult(KeyVault.Decrypt(s))); }
-        catch (Exception ex) { status.Text = "MCP.json : " + ex.Message; }
+        try { await Task.Run(async () => { await using var context = new HarnessDb(); await McpConfigFile.SyncAsync(context, (s, _) => Task.FromResult(KeyVault.Encrypt(s)), decrypt: (s, _) => Task.FromResult(KeyVault.Decrypt(s))); }); }
+        catch (Exception ex) { ShowStatus("MCP.json : " + ex.Message, StatusKind.Error); }
     }
     McpSession CreateMcpSession(int chatId) => new(async ct =>
     {

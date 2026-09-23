@@ -2,6 +2,7 @@
 **/obj/
 .vs/
 .idea/
+.junie/
 artifacts/
 *.db*
 *.user

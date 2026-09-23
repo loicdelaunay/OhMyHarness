@@ -3,8 +3,6 @@ namespace OhMyHarness.Core;
 public sealed partial class SourceAccess
 {
     static readonly SemaphoreSlim WriteGate = new(1, 1);
-    static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".cs", ".csproj", ".sln", ".slnx", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml", ".swift", ".m", ".mm", ".sh", ".zsh", ".plist", ".entitlements", ".xcconfig", ".ps1", ".bat" };
     static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", "bin", "obj", "node_modules", ".env", "secrets.json", "appsettings.Production.json", "dist", "build" };
 
@@ -284,13 +282,22 @@ public sealed partial class SourceAccess
     async Task<string> WriteCoreAsync(string relative, string content, CancellationToken ct)
     {
         var full = Resolve(relative);
-        var ext = Path.GetExtension(full);
-        if (string.IsNullOrEmpty(ext) || !Extensions.Contains(ext))
-            throw new InvalidOperationException("Format source non pris en charge.");
+        if (Directory.Exists(full)) throw new InvalidOperationException("Le chemin cible est un dossier.");
+        SourceText? existingText = null;
+        if (File.Exists(full))
+        {
+            var bytes = await File.ReadAllBytesAsync(full, ct);
+            if (!SourceText.TryDecode(bytes, out var decoded))
+                throw new InvalidOperationException($"Le fichier '{relative}' est binaire ou utilise un encodage non pris en charge. write_source remplace uniquement du texte UTF-8 ou Unicode avec BOM.");
+            existingText = decoded;
+        }
         var dir = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(full, content, ct);
+        if (existingText is { } text)
+            await File.WriteAllBytesAsync(full, text.Encode(content), ct);
+        else
+            await File.WriteAllTextAsync(full, content, ct);
         return $"Fichier '{relative}' écrit avec succès ({content.Length} caractères).";
     }
 
@@ -304,17 +311,18 @@ public sealed partial class SourceAccess
     async Task<string> ModifyCoreAsync(string relative, string oldText, string newText, CancellationToken ct)
     {
         var full = Resolve(relative);
-        var ext = Path.GetExtension(full);
-        if (string.IsNullOrEmpty(ext) || !Extensions.Contains(ext))
-            throw new InvalidOperationException("Format source non pris en charge.");
         if (!File.Exists(full))
             throw new FileNotFoundException($"Le fichier '{relative}' n'existe pas.");
-        var current = await File.ReadAllTextAsync(full, ct);
+        if (string.IsNullOrEmpty(oldText)) throw new ArgumentException("old_text ne peut pas être vide.", nameof(oldText));
+        var bytes = await File.ReadAllBytesAsync(full, ct);
+        if (!SourceText.TryDecode(bytes, out var text))
+            throw new InvalidOperationException($"Le fichier '{relative}' est binaire ou utilise un encodage non pris en charge. edit_source modifie uniquement du texte UTF-8 ou Unicode avec BOM.");
+        var current = text.Content;
         var index = current.IndexOf(oldText, StringComparison.Ordinal);
         if (index < 0)
             throw new InvalidOperationException($"Le texte cible à remplacer est introuvable dans '{relative}'.");
         var updated = current.Remove(index, oldText.Length).Insert(index, newText);
-        await File.WriteAllTextAsync(full, updated, ct);
+        await File.WriteAllBytesAsync(full, text.Encode(updated), ct);
         return $"Fichier '{relative}' modifié avec succès.";
     }
 }

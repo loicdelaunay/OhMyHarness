@@ -14,8 +14,8 @@ public sealed class SandboxWorkspace : IDisposable
     static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(PlatformSupport.PathComparer);
     static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".vs", ".idea", "bin", "obj", "node_modules", "dist", "build", "sandboxes", "secrets.json", "appsettings.Production.json" };
-    static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".cs", ".csproj", ".sln", ".slnx", ".xaml", ".json", ".md", ".txt", ".ts", ".tsx", ".js", ".jsx", ".cjs", ".mjs", ".css", ".html", ".py", ".dart", ".yaml", ".yml", ".xml", ".sql", ".rs", ".go", ".java", ".cpp", ".h", ".toml", ".swift", ".sh", ".ps1", ".bat", ".svg", ".png", ".jpg", ".webp", ".lock" };
+    static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    { ".png", ".jpg", ".webp" };
     readonly SemaphoreSlim gate;
     readonly string directory;
     readonly Dictionary<string, string> originals;
@@ -28,7 +28,7 @@ public sealed class SandboxWorkspace : IDisposable
 
     public const string InfoFr = "Copie privée des sources par conversation. Les commandes Linux s'exécutent dans Docker/Podman, sans réseau ni accès aux dossiers du PC. Image requise : node:22-bookworm (à télécharger au préalable). Limites : 1 CPU, 512 Mio, 128 processus, 30 s par défaut, jusqu’à 10 min par commande, 30 min par génération ; sources : 64 Mio. Les clés API et SQLite restent dans l'application. Le navigateur, le bureau, MCP et OpenCode sont désactivés dans ce mode. Les fichiers exclus (secrets connus, binaires, dépendances, .git) ne sont pas copiés. Vérifiez vos sources avant usage : un secret dans un fichier de code reste du code. Les modifications restent dans la copie jusqu'à votre validation dans « Examiner les modifications sandbox ». L'onglet outils manuel reste local. Ce mode nécessite un moteur de conteneurs Linux actif ; aucun repli local automatique.";
     public const string InfoEn = "Private source copy per conversation. Linux commands run in Docker/Podman with no network or access to PC folders. Required image: node:22-bookworm (download beforehand). Limits: 1 CPU, 512 MiB, 128 processes, 30 s default, up to 10 min per command, 30 min per generation; sources: 64 MiB. API keys and SQLite stay in the app. Browser, desktop, MCP and OpenCode are disabled in this mode. Known secrets, binaries, dependencies and .git are excluded. Review your sources: a secret embedded in code is still code. Changes stay in the copy until you approve them via Review sandbox changes. The manual tools panel remains local. Requires a running Linux container engine; never falls back to local execution.";
-    public static bool Allowed(string tool) => TerminalHub.Handles(tool) || tool is "list_sources" or "read_source" or "write_source" or "edit_source" or "glob_sources" or "grep_sources" or "apply_patch" or "patch_sources" or "run_terminal" or "git_changes" or "load_skill" or "read_skill_resource" or "delegate_tasks" or "todowrite" or "question";
+    public static bool Allowed(string tool) => MemoryTools.Handles(tool) || TerminalHub.Handles(tool) || tool is "list_sources" or "read_source" or "write_source" or "edit_source" or "glob_sources" or "grep_sources" or "apply_patch" or "patch_sources" or "run_terminal" or "git_changes" or "load_skill" or "read_skill_resource" or "skill_locations" or "delegate_tasks" or "todowrite" or "question";
     public static void Demand(bool enabled, string tool)
     { if (enabled && !Allowed(tool)) throw new UnauthorizedAccessException("Sandbox : outil extérieur interdit / External tool blocked: " + tool); }
     public static void Filter(JsonArray definitions, bool enabled)
@@ -102,8 +102,9 @@ public sealed class SandboxWorkspace : IDisposable
             throw new UnauthorizedAccessException("Sandbox : chemin non portable ou dangereux / Unsafe path: " + name);
         return name;
     }
-    static bool Included(string name) => !name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase)) &&
-        (Extensions.Contains(Path.GetExtension(name)) || Path.GetFileName(name) is "Dockerfile" or "Makefile" or ".gitignore") && !Path.GetFileName(name).StartsWith("database.sqlite", StringComparison.OrdinalIgnoreCase);
+    static bool Included(string name, byte[] bytes) => !name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase)) &&
+        !Path.GetFileName(name).StartsWith("database.sqlite", StringComparison.OrdinalIgnoreCase) &&
+        (ImageExtensions.Contains(Path.GetExtension(name)) || SourceText.TryDecode(bytes, out _));
     internal static async Task<Dictionary<string, byte[]>> ReadFilesAsync(string root, CancellationToken ct)
     {
         AssertNoLinks(root);
@@ -120,10 +121,12 @@ public sealed class SandboxWorkspace : IDisposable
                 if ((attributes & FileAttributes.ReparsePoint) != 0 || name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase))) continue;
                 ValidateName(name);
                 if ((attributes & FileAttributes.Directory) != 0) { pending.Push(path); continue; }
-                if (!Included(name)) continue;
                 var length = new FileInfo(path).Length;
-                if (length > 2 * 1024 * 1024 || (total += length) > MaxBytes || files.Count >= 10000) throw new IOException("Sandbox : limite de copie dépassée (2 Mio/fichier, 64 Mio au total, 10 000 fichiers).");
-                files.Add(name, await File.ReadAllBytesAsync(path, ct));
+                if (length > 2 * 1024 * 1024) continue;
+                var bytes = await File.ReadAllBytesAsync(path, ct);
+                if (!Included(name, bytes)) continue;
+                if ((total += length) > MaxBytes || files.Count >= 10000) throw new IOException("Sandbox : limite de copie dépassée (2 Mio/fichier, 64 Mio au total, 10 000 fichiers).");
+                files.Add(name, bytes);
             }
         CheckSize(files); return files;
     }
@@ -181,10 +184,11 @@ public sealed class SandboxWorkspace : IDisposable
             ValidateName(name);
             if (entry.EntryType is not (TarEntryType.RegularFile or TarEntryType.V7RegularFile)) throw new UnauthorizedAccessException("Sandbox : liens et fichiers spéciaux interdits dans l'archive.");
             if (entry.Length > 2 * 1024 * 1024 || (total += entry.Length) > MaxBytes) throw new IOException("Sandbox : archive trop volumineuse.");
-            if (!Included(name)) continue;
             using var data = new MemoryStream();
             if (entry.DataStream != null) await entry.DataStream.CopyToAsync(data, ct);
-            files.Add(name, data.ToArray());
+            var bytes = data.ToArray();
+            if (!Included(name, bytes)) continue;
+            files.Add(name, bytes);
         }
         await ReplaceWorkAsync(files, ct);
     }

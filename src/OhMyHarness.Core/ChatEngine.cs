@@ -128,14 +128,18 @@ public sealed class ChatEngine(HttpClient http)
         if (calls.Count > 0) message["tool_calls"] = new JsonArray(calls.Values.Select(x => (JsonNode)x).ToArray());
         return new(message, input, output, timer.Elapsed.TotalSeconds);
     }
-    public static JsonObject ToWire(Message message)
+    public static JsonObject ToWire(Message message) => ToWire(message, includeImageData: true);
+
+    // Context estimates charge a fixed cost for data images; encoding their bytes
+    // just to count tokens wastes memory and stalls UI refreshes.
+    internal static JsonObject ToWire(Message message, bool includeImageData)
     {
         if (message.WireJson.Length > 0) return JsonNode.Parse(message.WireJson)!.AsObject();
         if (AgentHandoff.IsLegacyReport(message)) return AgentHandoff.Input(message.Content[AgentHandoff.ReportPrefix.Length..]);
         if (message.Attachments.Count == 0) return new JsonObject { ["role"] = message.Role, ["content"] = message.Content };
         var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = message.Content } };
         foreach (var image in message.Attachments)
-            content.Add(new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{image.Mime};base64,{Convert.ToBase64String(image.Data)}" } });
+            content.Add(new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = $"data:{image.Mime};base64,{(includeImageData ? Convert.ToBase64String(image.Data) : "")}" } });
         return new JsonObject { ["role"] = message.Role, ["content"] = content };
     }
     public static JsonArray ToolDefinitions(bool sources, bool browser, bool writeSources = false)
@@ -167,10 +171,10 @@ public sealed class ChatEngine(HttpClient http)
         }
         if (writeSources)
         {
-            Add("write_source", "Crée un nouveau fichier ou remplace intégralement le contenu d'un fichier existant dans le projet.",
+            Add("write_source", "Crée un fichier texte ou remplace intégralement son contenu dans les sources autorisées, quelle que soit son extension.",
                 ("path", "Chemin relatif du fichier à créer ou écraser dans le projet.", true),
                 ("content", "Contenu texte complet à écrire dans le fichier.", true));
-            Add("edit_source", "Modifie un fichier existant dans le projet en remplaçant un texte précis par un nouveau texte.",
+            Add("edit_source", "Remplace la première occurrence d'un texte exact dans un fichier texte existant, quelle que soit son extension. Les fichiers binaires sont refusés.",
                 ("path", "Chemin relatif du fichier existant à modifier.", true),
                 ("old_text", "Texte exact existant à remplacer dans le fichier.", true),
                 ("new_text", "Nouveau texte de remplacement.", true));

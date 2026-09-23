@@ -201,6 +201,79 @@ namespace OhMyHarness.Core.Migrations
                     b.ToTable("McpServers");
                 });
 
+            modelBuilder.Entity("OhMyHarness.Core.MemoryEntry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OriginChatId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Partition")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tags")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChatId");
+
+                    b.HasIndex("OriginChatId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("Partition", "Category", "Key")
+                        .IsUnique();
+
+                    b.HasIndex("Scope", "ProjectId", "ChatId", "UpdatedUtc");
+
+                    b.ToTable("Memories");
+                });
+
             modelBuilder.Entity("OhMyHarness.Core.Message", b =>
                 {
                     b.Property<int>("Id")
@@ -614,6 +687,24 @@ namespace OhMyHarness.Core.Migrations
                         .HasForeignKey("ProviderId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("OhMyHarness.Core.MemoryEntry", b =>
+                {
+                    b.HasOne("OhMyHarness.Core.Chat", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("OhMyHarness.Core.Chat", null)
+                        .WithMany()
+                        .HasForeignKey("OriginChatId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OhMyHarness.Core.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade);
                 });
 
             modelBuilder.Entity("OhMyHarness.Core.Message", b =>

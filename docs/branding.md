@@ -19,6 +19,6 @@ Si un logo manque ou devient illisible, l’interface utilise le logo d’origin
 
 ## Fly dark et Fly light
 
-Les deux thèmes sont disponibles dans **Général → Thème**, en français comme en anglais. Ils utilisent le bleu Airbus **#00205B** et le blanc, complétés par des nuances dérivées pour les surfaces, textes secondaires et accents. Les boutons et liens suivent la palette choisie.
+Les deux thèmes sont disponibles dans **Général → Thème**, en français comme en anglais. **Fly dark** associe un fond presque noir à des surfaces bleu profond ; **Fly light** associe un fond blanc à des surfaces neutres. Le bleu Airbus **#00205B** marque les actions et les sélections dans les deux thèmes, sans accent bleu clair. Les textes sur les boutons bleus restent blancs pour conserver leur lisibilité.
 
 La couleur de référence est publiée dans le [Brand Centre officiel d’Airbus](https://www.brand.airbus.com/en/asset-library/airbus-logo). Il s’agit de thèmes inspirés de cette palette ; aucun logo Airbus n’est fourni avec l’application.

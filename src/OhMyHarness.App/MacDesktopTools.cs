@@ -18,8 +18,27 @@ public sealed partial class MainWindow
         {
             application=DesktopApplications.Resolve(windowId!);var point=application.RelativePoint(args["x"]!.GetValue<double>(),args["y"]!.GetValue<double>());
             DesktopApplications.DemandPointTarget(application,point.X,point.Y);args["x"]=point.X;args["y"]=point.Y;
+            if(tool=="desktop_mouse" && args["action"]?.GetValue<string>()=="slide")
+            {
+                var end=application.RelativePoint(args["x2"]?.GetValue<double>() ?? throw new ArgumentException("x2 required for slide"),
+                    args["y2"]?.GetValue<double>() ?? throw new ArgumentException("y2 required for slide"));
+                DesktopApplications.DemandPointTarget(application,end.X,end.Y);args["x2"]=end.X;args["y2"]=end.Y;
+            }
         }
-        ct.ThrowIfCancellationRequested();DesktopInput.Execute(tool,args);return "Action exécutée / Action completed";
+        IReadOnlyList<MouseInput.SlideStep>? slideSteps=null;
+        if(tool=="desktop_mouse" && args["action"]?.GetValue<string>()=="slide")
+        {
+            var screens=MacDesktop.Screens();
+            var start=(X:args["x"]!.GetValue<double>(),Y:args["y"]!.GetValue<double>());
+            var end=(X:args["x2"]?.GetValue<double>() ?? throw new ArgumentException("x2 required for slide"),Y:args["y2"]?.GetValue<double>() ?? throw new ArgumentException("y2 required for slide"));
+            foreach(var point in new[]{start,end})
+                if(!screens.Any(s=>point.X>=s.X && point.Y>=s.Y && point.X<s.X+s.Width && point.Y<s.Y+s.Height))
+                    throw new ArgumentOutOfRangeException("x2/y2", "Coordonnées hors des écrans macOS.");
+            slideSteps=MouseInput.SlidePath(start.X,start.Y,end.X,end.Y,args["pattern"]?.GetValue<string>());
+            if(application!=null)
+                foreach(var step in slideSteps)DesktopApplications.DemandPointTarget(application,step.X,step.Y);
+        }
+        ct.ThrowIfCancellationRequested();await DesktopInput.ExecuteAsync(tool,args,ct,slideSteps);return "Action exécutée / Action completed";
     }
     Task<string> MacScreens()
     {

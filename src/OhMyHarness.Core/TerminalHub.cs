@@ -175,7 +175,7 @@ public sealed class TerminalHub : IDisposable
         Add("stop_terminal", "Cancel the active command and its child processes, retaining the tab and output.", Id(), "terminal_id");
     }
     public async Task<string> CallAsync(ConversationSession run, string name, JsonObject args, Func<string> skills,
-        Func<string, string, string, CancellationToken, Task<bool>> approve, CancellationToken ct)
+        Func<string, string, string, CancellationToken, Task<bool>> approve, CancellationToken ct, Action<View>? terminalReady = null)
     {
         void Check() { AgentPolicy.Demand(run.Chat.ExecutionMode, name); SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name); if (!Skills.Enabled(skills(), "terminal")) throw new UnauthorizedAccessException("Skill Terminal désactivé."); }
         Check();
@@ -186,13 +186,17 @@ public sealed class TerminalHub : IDisposable
             case "run_terminal":
                 var directory = run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? throw new InvalidOperationException("Associez un dossier source.");
                 var legacy = List(chat, sandbox).FirstOrDefault(t => t.Name == "Terminal" && t.Status != "running" && PlatformSupport.PathComparer.Equals(t.Directory, directory)) ?? Create(chat, sandbox, "Terminal", directory);
-                var started = await CallAsync(run, "start_terminal", new JsonObject { ["terminal_id"] = legacy.Id, ["command"] = args["command"]?.GetValue<string>() ?? "", ["timeout_seconds"] = args["timeout_seconds"]?.DeepClone() }, skills, approve, ct);
+                terminalReady?.Invoke(legacy);
+                var started = await CallAsync(run, "start_terminal", new JsonObject { ["terminal_id"] = legacy.Id, ["command"] = args["command"]?.GetValue<string>() ?? "", ["timeout_seconds"] = args["timeout_seconds"]?.DeepClone() }, skills, approve, ct, terminalReady);
                 if (!started.StartsWith('{')) return started;
                 var current = Read(chat, sandbox, legacy.Id);
                 while (current.Status == "running") current = await WaitAsync(chat, sandbox, legacy.Id, current.JobId, 30000, ct);
                 return current.Output;
             case "list_terminals": return Serialize(List(chat, sandbox).Select(t => new { t.Id, t.Name, t.Shell, t.Directory, t.Status, t.JobId, t.Sandbox, t.TimeoutSeconds }));
-            case "create_terminal": return Serialize(Create(chat, sandbox, args["name"]?.GetValue<string>() ?? "", run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? throw new InvalidOperationException("Associez un dossier source.")));
+            case "create_terminal":
+                var created = Create(chat, sandbox, args["name"]?.GetValue<string>() ?? "", run.Project.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? throw new InvalidOperationException("Associez un dossier source."));
+                terminalReady?.Invoke(created);
+                return Serialize(created);
             case "delete_terminal": await DeleteAsync(chat, sandbox, id); return "Terminal fermé / Terminal closed.";
             case "stop_terminal": Stop(chat, sandbox, id); return Serialize(Read(chat, sandbox, id));
             case "read_terminal": return Serialize(Read(chat, sandbox, id, args["job_id"]?.GetValue<string>()));
@@ -205,9 +209,11 @@ public sealed class TerminalHub : IDisposable
                 if (!run.Project.GetSourceFolders().Any(root => PlatformSupport.PathComparer.Equals(Path.GetFullPath(root), terminal.Directory))) throw new UnauthorizedAccessException("Le dossier de ce terminal n'est plus associé au projet.");
                 if (!await approve((sandbox ? "sandbox-terminal|" : "terminal|") + terminal.Directory, run.Chat.Title + " · " + terminal.Name, terminal.Directory + "\nTimeout: " + timeoutSeconds + " s\n\n" + command, ct)) return "Accès refusé / Access denied.";
                 Check(); ct.ThrowIfCancellationRequested();
-                return Serialize(Start(chat, sandbox, id, command, (cmd, output, token) => sandbox
+                var startedView = Start(chat, sandbox, id, command, (cmd, output, token) => sandbox
                     ? SandboxContainer.ExecuteIsolatedAsync(run.Sandbox ?? throw new InvalidOperationException("Sandbox inactive."), run.SandboxEngine!, cmd, token, timeoutSeconds)
-                    : WorkspaceTools.ShellAsync(cmd, terminal.Directory, token, output, timeoutSeconds), ct, timeoutSeconds));
+                    : WorkspaceTools.ShellAsync(cmd, terminal.Directory, token, output, timeoutSeconds), ct, timeoutSeconds);
+                terminalReady?.Invoke(startedView);
+                return Serialize(startedView);
             default: throw new ArgumentException("Unknown terminal tool.");
         }
     }

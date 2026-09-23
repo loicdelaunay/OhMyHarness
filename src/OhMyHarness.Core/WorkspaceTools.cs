@@ -5,6 +5,41 @@ namespace OhMyHarness.Core;
 
 public static class MouseInput
 {
+    public readonly record struct SlideStep(double X, double Y, int DelayMs);
+
+    public static string NormalizeSlidePattern(string? pattern)
+    {
+        var normalized = string.IsNullOrWhiteSpace(pattern) ? "direct" : pattern.Trim().ToLowerInvariant();
+        return normalized is "direct" or "human" ? normalized : throw new ArgumentException("Slide pattern must be 'direct' or 'human'.");
+    }
+
+    public static IReadOnlyList<SlideStep> SlidePath(double x, double y, double x2, double y2, string? pattern, Random? random = null)
+    {
+        if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(x2) || !double.IsFinite(y2) ||
+            Math.Abs(x) > 100000 || Math.Abs(y) > 100000 || Math.Abs(x2) > 100000 || Math.Abs(y2) > 100000)
+            throw new ArgumentException("Invalid slide coordinates.");
+        var mode = NormalizeSlidePattern(pattern);
+        random ??= Random.Shared;
+        var distance = Math.Sqrt((x2 - x) * (x2 - x) + (y2 - y) * (y2 - y));
+        var count = Math.Clamp((int)Math.Ceiling(distance / (mode == "human" ? 18d : 24d)), 8, mode == "human" ? 40 : 30);
+        var steps = new List<SlideStep>(count);
+        var nx = distance > 0 ? -(y2 - y) / distance : 0;
+        var ny = distance > 0 ? (x2 - x) / distance : 0;
+        var bend = mode == "human" ? (random.NextDouble() * 2 - 1) * Math.Min(8, distance * .04) : 0;
+        for (var index = 1; index <= count; index++)
+        {
+            var t = (double)index / count;
+            var progress = mode == "human" ? t * t * (3 - 2 * t) : t;
+            var deviation = mode == "human" && index < count
+                ? bend * Math.Sin(Math.PI * t) + (random.NextDouble() * 2 - 1) * Math.Min(2.5, distance * .015) * Math.Sin(Math.PI * t)
+                : 0;
+            steps.Add(new(x + (x2 - x) * progress + nx * deviation,
+                y + (y2 - y) * progress + ny * deviation,
+                mode == "human" ? random.Next(12, 34) : 8));
+        }
+        return steps;
+    }
+
     public static string NormalizeButton(string? button)
     {
         var normalized = string.IsNullOrWhiteSpace(button) ? "left" : button.Trim().ToLowerInvariant();

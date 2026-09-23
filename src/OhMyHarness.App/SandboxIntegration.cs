@@ -10,23 +10,29 @@ public sealed partial class MainWindow
     void AddSandboxMenu(StackPanel content, Chat selectedChat)
     {
         bool english = state.Language == "en";
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var row = new Grid { ColumnSpacing = 6, MinHeight = 40 };
+        row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         var toggle = new CheckBox { Content = "Sandbox", IsChecked = selectedChat.SandboxEnabled };
         toggle.Click += async (_, _) => await Guard(async () => {
             selectedChat.SandboxEnabled = toggle.IsChecked == true;
             await db.SaveChangesAsync();
-            status.Text = english ? "Sandbox setting applies to the next message." : "Mode sandbox appliqué au prochain envoi.";
+            ShowStatus(english ? "Sandbox setting applies to the next message." : "Mode sandbox appliqué au prochain envoi.");
         });
-        var info = new Button { Content = "ⓘ", Padding = new Thickness(8, 4, 8, 4) };
+        var info = new Button { Padding = new Thickness(7, 4, 7, 4) };
+        FluentDesign.IconButton(info, "\uE946", english ? "How sandbox works" : "Fonctionnement de la sandbox", false);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(info, english ? "How sandbox works" : "Fonctionnement de la sandbox");
         var explanation = new TextBlock { Text = english ? SandboxWorkspace.InfoEn : SandboxWorkspace.InfoFr, TextWrapping = TextWrapping.Wrap, MaxWidth = 380 };
         info.Flyout = new Flyout { Content = explanation };
         ToolTipService.SetToolTip(info, english ? "How sandbox works" : "Comment fonctionne la sandbox");
-        row.Children.Add(toggle); row.Children.Add(info); content.Children.Add(row);
-        var review = new Button { Content = english ? "Review sandbox changes…" : "Examiner les modifications sandbox…", HorizontalAlignment = HorizontalAlignment.Stretch };
+        row.Children.Add(toggle); Grid.SetColumn(info, 1); row.Children.Add(info);
+        var review = new Button { Content = english ? "Changes…" : "Modifications…", MinHeight = 34 };
         review.IsEnabled = !conversationRuns.ContainsKey(selectedChat.Id);
+        ToolTipService.SetToolTip(review, english ? "Review sandbox changes before applying them" : "Examiner les modifications sandbox avant de les appliquer");
         review.Click += async (_, _) => await Guard(() => ReviewSandboxAsync(selectedChat));
-        content.Children.Add(review);
+        Grid.SetColumn(review, 2); row.Children.Add(review);
+        content.Children.Add(row);
     }
     async Task ReviewSandboxAsync(Chat selectedChat)
     {
@@ -44,6 +50,6 @@ public sealed partial class MainWindow
             CloseButtonText = english ? "Close" : "Fermer", DefaultButton = ContentDialogButton.Close };
         // Explicit review is independent of the global auto-approval/remembered-grant policy.
         if (await ShowDialogAsync(dialog) == ContentDialogResult.Primary)
-            status.Text = await sandbox.ApplyAsync(review, CancellationToken.None);
+            ShowStatus(await sandbox.ApplyAsync(review, CancellationToken.None));
     }
 }

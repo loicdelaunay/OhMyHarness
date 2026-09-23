@@ -11,11 +11,9 @@ public sealed partial class MainWindow
     {
         var config = FeatureSettings.Read(state.FeaturesJson);
         var browser = new StackPanel { Spacing=12 };
-#if WINDOWS
         var browserLabel=WorkflowText("WebView2 intégré","Embedded WebView2");
-#else
-        var browserLabel=WorkflowText("Chromium isolé par conversation","Isolated Chromium per conversation");
-        browser.Children.Add(Label(WorkflowText("Uno Desktop ouvre Chrome/Edge dans une fenêtre dédiée par conversation. Le DOM, JavaScript, clavier, souris et captures sont pilotés depuis l’application. Chrome/Edge est requis ; Node.js est uniquement nécessaire pour le mode MCP.","Uno Desktop uses a dedicated Chrome/Edge window per conversation with DOM, JavaScript, input and screenshots. Chrome/Edge is required; Node.js is only needed for MCP mode."),13));
+#if !WINDOWS
+        browser.Children.Add(Label(WorkflowText("Sur Uno Desktop, WebView2 reste dans l’onglet Web. Les interactions IA utilisent le DOM de cette page ; certains raccourcis ou sites qui exigent des événements clavier/souris natifs peuvent nécessiter Chrome · MCP.", "On Uno Desktop, WebView2 stays in the Web tab. AI interactions use the page DOM; some shortcuts or sites requiring native input events may need Chrome · MCP."),13));
 #endif
         var mode = new ComboBox { Header=WorkflowText("Navigateur", "Browser"), ItemsSource=new[] { browserLabel, "Chrome · MCP", WorkflowText("Désactivé", "Disabled") }, SelectedIndex=config.BrowserMode=="chrome"?1:config.BrowserMode=="disabled"?2:0 };
         var executable = new TextBox { Header=WorkflowText("Chemin de Chrome (facultatif)", "Chrome path (optional)"), Text=config.ChromePath };

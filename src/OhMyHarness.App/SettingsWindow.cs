@@ -34,13 +34,42 @@ public sealed partial class MainWindow
         finally { editingSettings = false; }
     }
 
-    async Task<bool> ShowSettingsWindowAsync(UIElement content, Func<bool> validate)
+    async Task EditSettingsAsync()
+    {
+        var window = new Window { Title = $"{DisplayApplicationName} · {T("Réglages")}" };
+        settingsWindow = window;
+        window.Closed += (_, _) => { if (ReferenceEquals(settingsWindow, window)) settingsWindow = null; };
+        window.Content = new Border
+        {
+            RequestedTheme = root.RequestedTheme,
+            Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush"),
+            Child = LoadingPlaceholder(WorkflowText("Chargement des réglages…", "Loading settings…"))
+        };
+        FluentDesign.WindowChrome(window);
+        ApplyBrandingIcon(window);
+        window.AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 1000, Height = 840 });
+        window.Activate();
+        try { await YieldSettingsAsync(window); await PopulateSettingsAsync(window); }
+        catch (OperationCanceledException) when (!ReferenceEquals(settingsWindow, window)) { }
+        finally
+        {
+            if (ReferenceEquals(settingsWindow, window)) window.Close();
+            ApplyTheme(OhMyHarness.Core.FeatureSettings.Read(state.FeaturesJson).Theme);
+        }
+    }
+
+    async Task YieldSettingsAsync(Window window)
+    {
+        await Task.Delay(1);
+        if (!ReferenceEquals(settingsWindow, window)) throw new OperationCanceledException();
+    }
+
+    async Task<bool> ShowSettingsWindowAsync(Window window, UIElement content, Func<bool> validate)
     {
         // Settings must never reserve approvalQueue or a ContentDialog slot:
         // agents still need to display permission requests in the main window.
         var completed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var window = new Window { Title = $"{DisplayApplicationName} · {T("Réglages")}" };
-        settingsWindow = window;
+        if (!ReferenceEquals(settingsWindow, window)) return false;
         var panel = new Grid
         {
             RequestedTheme = root.RequestedTheme, Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush"),

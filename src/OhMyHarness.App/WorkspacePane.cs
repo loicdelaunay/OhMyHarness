@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -19,7 +19,7 @@ namespace OhMyHarness.App;
 public sealed partial class MainWindow
 {
     Grid mainArea = null!;
-    readonly Pivot toolTabs = new();
+    readonly ToolTabHost toolTabs = new();
     readonly TextBlock gitSummary = new() { TextWrapping = TextWrapping.Wrap };
     readonly TreeView gitFiles = new() { SelectionMode = TreeViewSelectionMode.Single };
     readonly StackPanel gitDiff = new() { Spacing = 0 };
@@ -39,6 +39,8 @@ public sealed partial class MainWindow
     string? selectedFile;
     bool toolsMaximized;
     bool activatingTool;
+    readonly ProgressBar gitLoading = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed, Height = 3 };
+    readonly ProgressBar filesLoading = new() { IsIndeterminate = true, Visibility = Visibility.Collapsed, Height = 3 };
     int fileRevision;
     static TextBox OutputBox() => new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
         FontFamily = new FontFamily("Cascadia Code, Consolas"), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
@@ -52,7 +54,7 @@ public sealed partial class MainWindow
         var plus = new Button { Content = "+", FontSize = 24, Width = 38, Height = 38, Padding = new(0),
             HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new(10, 0, 0, 10) };
         idleOnly.Add(plus);
-        var menu = new Flyout(); plus.Flyout = menu;
+        var menu = new Flyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft }; plus.Flyout = menu;
         menu.Opening += (_, _) => BuildComposerMenu(menu);
         overlay.Children.Add(plus);
         send.Content = "↑"; send.Width = 38; send.Height = 38; send.Padding = new(0); send.FontSize = 22;
@@ -67,69 +69,132 @@ public sealed partial class MainWindow
     void BuildComposerMenu(Flyout menu)
     {
         // A content flyout keeps controls interactive until light-dismiss (outside click or Escape).
-        var content = new StackPanel { Spacing = 6, Width = 320, MaxWidth = Math.Max(180, root.ActualWidth - 60) };
-        menu.Content = new ScrollViewer { Content = content, MaxHeight = Math.Clamp(root.ActualHeight * .65, 180, 600), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var content = new StackPanel { Spacing = 7, Width = Math.Min(360, Math.Max(180, root.ActualWidth - 32)) };
+        menu.Content = new ScrollViewer { Content = content, MaxHeight = Math.Clamp(root.ActualHeight * .7, 180, 620), HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        TextBlock Heading(string label) => new()
+        {
+            Text = label, FontSize = 11, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = FluentDesign.Secondary, Margin = new Thickness(2, 7, 0, 1)
+        };
         StackPanel Section(string title)
         {
-            var section = new StackPanel { Spacing = 4 };
+            var section = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0, 4, 6) };
             var expander = new Expander { Header = title, Content = section, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
-            section.Tag = expander; content.Children.Add(expander);
+            section.Tag = expander;
+            content.Children.Add(expander);
             return section;
         }
-        Button Item(string label, Func<Task> action)
+        Button Item(string label, string glyph, Func<Task> action)
         {
-            var item = new Button { Content = T(label), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+            var item = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left, MinHeight = 36 };
+            FluentDesign.IconButton(item, glyph, label);
             item.Click += async (_, _) => await Guard(action);
             return item;
         }
-        content.Children.Add(Item("Joindre des images", AttachImages));
-        content.Children.Add(Item("Ajouter un dossier source", AttachFolder));
-        content.Children.Add(Item(WorkflowText("Ajouter des fichiers sources", "Add source files"), AttachFilesAsync));
-        content.Children.Add(Item(WorkflowText("Hériter des dossiers du projet", "Use project default folders"), async () => { if (chat == null) return; chat.ResourcePathsJson = ""; await db.SaveChangesAsync(); await SelectChat(); }));
-        content.Children.Add(Item(WorkflowText("Afficher la liste de tâches", "Show task list"), async () => { if (chat == null) return; chat.TodoDismissed = false; await db.SaveChangesAsync(); await RefreshPinnedTasksAsync(); }));
+        Button ResourceTile(string label, string glyph, Func<Task> action)
+        {
+            var tile = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center, MinHeight = 66, Padding = new Thickness(4) };
+            var body = new StackPanel { Spacing = 4, HorizontalAlignment = HorizontalAlignment.Center };
+            body.Children.Add(FluentDesign.Icon(glyph, 18));
+            body.Children.Add(new TextBlock { Text = label, FontSize = 12, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 106, HorizontalAlignment = HorizontalAlignment.Center });
+            tile.Content = body;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(tile, label);
+            tile.Click += async (_, _) => await Guard(action);
+            return tile;
+        }
+        Grid ChoiceRow(string label, FrameworkElement control)
+        {
+            var row = new Grid { ColumnSpacing = 8, MinHeight = 40 };
+            row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center,
+                Foreground = FluentDesign.Primary });
+            control.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(control, 1); row.Children.Add(control);
+            return row;
+        }
+
+        var menuHeader = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var menuTitle = Heading(WorkflowText("AJOUTER AU MESSAGE", "ADD TO MESSAGE"));
+        menuTitle.Width = content.Width - 40;
+        menuTitle.VerticalAlignment = VerticalAlignment.Center;
+        menuHeader.Children.Add(menuTitle);
+        var settingsShortcut = new Button { Width = 32, Height = 32, Padding = new(0) };
+        FluentDesign.IconButton(settingsShortcut, "\uE713", T("Réglages"), false);
+        settingsShortcut.Click += async (_, _) => await Guard(Settings);
+        menuHeader.Children.Add(settingsShortcut);
+        content.Children.Add(menuHeader);
+        var resources = new Grid { ColumnSpacing = 6 };
+        for (int i = 0; i < 3; i++) resources.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+        var images = ResourceTile(WorkflowText("Images", "Images"), "\uE91B", AttachImages);
+        var folder = ResourceTile(WorkflowText("Dossier source", "Source folder"), "\uE8B7", AttachFolder);
+        var files = ResourceTile(WorkflowText("Fichiers sources", "Source files"), "\uE8A5", AttachFilesAsync);
+        resources.Children.Add(images); Grid.SetColumn(folder, 1); resources.Children.Add(folder); Grid.SetColumn(files, 2); resources.Children.Add(files);
+        content.Children.Add(resources);
+        content.Children.Add(Item(WorkflowText("Utiliser les dossiers du projet", "Use project folders"), "\uE8B7", async () =>
+        { if (chat == null) return; chat.ResourcePathsJson = ""; await db.SaveChangesAsync(); await SelectChat(); }));
+
         if (chat is { } selectedChat)
         {
-            AddSandboxMenu(content, selectedChat);
-            var modeMenu = Section("Mode · " + (selectedChat.ExecutionMode == "plan" ? "Plan" : T("Exécution")));
+            content.Children.Add(Heading(WorkflowText("MODE DE TRAVAIL", "WORK MODE")));
+            var modes = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
             foreach (var value in new[] { "plan", "execute" })
             {
                 var choice = new RadioButton { GroupName = "composer-mode", Content = value == "plan" ? "Plan" : T("Exécution"), IsChecked = selectedChat.ExecutionMode == value };
                 choice.Click += async (_, _) => await Guard(async () => {
                     selectedChat.ExecutionMode = value; await db.SaveChangesAsync();
-                    ((Expander)modeMenu.Tag).Header = "Mode · " + choice.Content;
-                    status.Text = T("Mode appliqué au prochain envoi : ") + choice.Content;
+                    ShowStatus(T("Mode appliqué au prochain envoi : ") + choice.Content);
                 });
-                modeMenu.Children.Add(choice);
+                modes.Children.Add(choice);
             }
+            content.Children.Add(ChoiceRow(WorkflowText("Mode", "Mode"), modes));
 
             var orchestration=provider?.IsComposite==true?"forced":selectedChat.OrchestrationMode;
-            var agentsMenu = Section(T("Orchestration sous-agents") + " · " + orchestration);
+            var agentsPicker = new ComboBox { MinWidth = 150, IsEnabled = provider?.IsComposite != true };
+            if (provider?.IsComposite == true)
+                ToolTipService.SetToolTip(agentsPicker, WorkflowText("Imposé par le modèle composé sélectionné", "Required by the selected composite model"));
             foreach (var value in new[] { "disabled", "auto", "forced" })
             {
-                var choice = new RadioButton { GroupName = "composer-orchestration", Content = value == "disabled" ? "Disable" : value == "auto" ? "Auto" : "Forced", IsChecked = orchestration == value, IsEnabled=provider?.IsComposite!=true };
-                choice.Click += async (_, _) => await Guard(async () => {
-                    selectedChat.OrchestrationMode = value; await db.SaveChangesAsync();
-                    ((Expander)agentsMenu.Tag).Header = T("Orchestration sous-agents") + " · " + choice.Content;
-                    status.Text = T("Mode appliqué au prochain envoi : ") + choice.Content;
-                });
-                agentsMenu.Children.Add(choice);
+                var choice = new ComboBoxItem { Tag = value, Content = value switch
+                {
+                    "disabled" => WorkflowText("Désactivés", "Disabled"),
+                    "forced" => WorkflowText("Forcés", "Forced"),
+                    _ => "Auto"
+                } };
+                agentsPicker.Items.Add(choice);
+                if (orchestration == value) agentsPicker.SelectedItem = choice;
             }
-
+            agentsPicker.SelectionChanged += async (_, _) => await Guard(async () =>
+            {
+                if (agentsPicker.SelectedItem is not ComboBoxItem { Tag: string value }) return;
+                selectedChat.OrchestrationMode = value; await db.SaveChangesAsync();
+                ShowStatus(T("Mode appliqué au prochain envoi : ") + agentsPicker.SelectionBoxItem);
+            });
+            content.Children.Add(ChoiceRow(WorkflowText("Sous-agents", "Subagents"), agentsPicker));
+            AddSandboxMenu(content, selectedChat);
         }
-        content.Children.Add(new Border { Height = 1, Margin = new(0, 6, 0, 6), Background = new SolidColorBrush(Microsoft.UI.Colors.DimGray) });
-        var skillMenu = Section("Skills");
-        foreach (var skill in Skills.Available())
+        content.Children.Add(Item(WorkflowText("Afficher la liste de tâches", "Show task list"), "\uE8FD", async () =>
+        { if (chat == null) return; chat.TodoDismissed = false; await db.SaveChangesAsync(); await RefreshPinnedTasksAsync(); }));
+        content.Children.Add(new Border { Height = 1, Margin = new(0, 4, 0, 0), Background = FluentDesign.Stroke });
+        content.Children.Add(Heading(WorkflowText("OUTILS ET CONTENU", "TOOLS AND CONTENT")));
+        var availableSkills = Skills.Available(project?.GetSourceFolders(), project?.Id ?? 0).ToArray();
+        var skillMenu = Section("Skills · " + WorkflowText($"{availableSkills.Count(x => Skills.Enabled(state.EnabledSkills, x.Id))} actifs", $"{availableSkills.Count(x => Skills.Enabled(state.EnabledSkills, x.Id))} enabled"));
+        foreach (var skill in availableSkills)
         {
-            var toggle = new CheckBox { Content = state.Language == "en" ? skill.EnglishName : skill.FrenchName, IsChecked = Skills.Enabled(state.EnabledSkills, skill.Id) };
+            var toggle = new CheckBox { Content = new TextBlock { Text = state.Language == "en" ? skill.EnglishName : skill.FrenchName, TextWrapping = TextWrapping.Wrap }, IsChecked = Skills.Enabled(state.EnabledSkills, skill.Id) };
             toggle.Click += async (_, _) => await Guard(async () =>
             {
                 var enabled = state.EnabledSkills.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
                 if (toggle.IsChecked == true) enabled.Add(skill.Id); else enabled.Remove(skill.Id);
                 state.EnabledSkills = string.Join(',', enabled); await db.SaveChangesAsync();
+                if (skillMenu.Tag is Expander expander)
+                    expander.Header = "Skills · " + WorkflowText($"{availableSkills.Count(x => Skills.Enabled(state.EnabledSkills, x.Id))} actifs", $"{availableSkills.Count(x => Skills.Enabled(state.EnabledSkills, x.Id))} enabled");
             });
             skillMenu.Children.Add(toggle);
         }
-        skillMenu.Children.Add(new Border { Height = 1, Margin = new(0, 6, 0, 6), Background = new SolidColorBrush(Microsoft.UI.Colors.DimGray) });
+        skillMenu.Children.Add(new Border { Height = 1, Margin = new(0, 4, 0, 4), Background = FluentDesign.Stroke });
         var browserToggle = new CheckBox { Content = T("Accès IA au navigateur"), IsChecked = browserAccess.IsOn };
         browserToggle.Click += (_, _) => browserAccess.IsOn = browserToggle.IsChecked == true;
         skillMenu.Children.Add(browserToggle);
@@ -137,20 +202,13 @@ public sealed partial class MainWindow
         domToggle.Click += (_, _) => browserDomAccess.IsOn = domToggle.IsChecked == true;
         skillMenu.Children.Add(domToggle);
 
-        var mcpMenu = Section("MCP");
-        foreach (var server in db.McpServers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name))
-        {
-            var toggle = new CheckBox { Content = server.Name, IsChecked = server.Enabled };
-            toggle.Click += async (_, _) => await Guard(async () => { server.Enabled = toggle.IsChecked == true; await db.SaveChangesAsync(); await McpConfigFile.PublishAsync(db); });
-            mcpMenu.Children.Add(toggle);
-        }
-        mcpMenu.Children.Add(Item("Configurer MCP…", Settings));
-
-        var templates = Section("Templates");
-        foreach (var template in db.Templates.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name))
+        var availableTemplates = db.Templates.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name).ToArray();
+        var templates = Section($"Templates · {availableTemplates.Length}");
+        if (availableTemplates.Length == 0) templates.Children.Add(new TextBlock { Text = WorkflowText("Aucun template", "No template"), Foreground = FluentDesign.Secondary });
+        foreach (var template in availableTemplates)
         {
             var captured = template;
-            templates.Children.Add(Item(template.Name, async () =>
+            templates.Children.Add(Item(template.Name, "\uE8A5", async () =>
             {
                 if (!string.IsNullOrWhiteSpace(composer.Text))
                 {
@@ -160,9 +218,20 @@ public sealed partial class MainWindow
                 composer.Text = captured.Content; composer.Select(composer.Text.Length, 0);
             }));
         }
-        templates.Children.Add(Item("Modifier les templates…", Settings));
+        templates.Children.Add(Item(WorkflowText("Modifier les templates…", "Edit templates…"), "\uE713", Settings));
 
-        content.Children.Add(Item("Réglages", Settings));
+        var servers = db.McpServers.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name).ToArray();
+        var mcpMenu = Section(servers.Length == 0 ? WorkflowText("MCP · aucun serveur", "MCP · no servers") : $"MCP · {servers.Count(x => x.Enabled)}/{servers.Length}");
+        if (servers.Length == 0) mcpMenu.Children.Add(new TextBlock { Text = WorkflowText("Aucun serveur configuré", "No server configured"), Foreground = FluentDesign.Secondary });
+        foreach (var server in servers)
+        {
+            var toggle = new CheckBox { Content = server.Name, IsChecked = server.Enabled };
+            toggle.Click += async (_, _) => await Guard(async () => { server.Enabled = toggle.IsChecked == true; await db.SaveChangesAsync(); await McpConfigFile.PublishAsync(db);
+                if (mcpMenu.Tag is Expander expander) expander.Header = $"MCP · {servers.Count(x => x.Enabled)}/{servers.Length}"; });
+            mcpMenu.Children.Add(toggle);
+        }
+        mcpMenu.Children.Add(Item(WorkflowText("Configurer MCP…", "Configure MCP…"), "\uE713", Settings));
+
     }
 
     void BuildToolsPane()
@@ -183,9 +252,9 @@ public sealed partial class MainWindow
         address.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await Guard(async () => { await NavigateAsync(address.Text, CancellationToken.None); }); } };
         Grid.SetRow(nav, 0); web.Children.Add(nav); Grid.SetRow(browserHost, 1); web.Children.Add(browserHost);
         idleOnly.Add(address); idleOnly.Add(go);
-        toolTabs.Items.Add(new PivotItem { Header = "Web", Content = web });
+        toolTabs.AddTab("Web", web);
 
-        toolTabs.Items.Add(new PivotItem { Header = "Terminal", Content = BuildTerminals() });
+        toolTabs.AddTab("Terminal", BuildTerminals());
 
         var git = new Grid { RowSpacing = 8 }; git.RowDefinitions.Add(new() { Height = GridLength.Auto }); git.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         git.Children.Add(Action("Actualiser les changements", async () => { await RefreshGitAsync(CancellationToken.None); }));
@@ -193,6 +262,7 @@ public sealed partial class MainWindow
         var gitHeader = new StackPanel { Spacing = 6 }; var refreshGit = git.Children[0]; git.Children.Clear();
         gitHeader.Children.Add(refreshGit); gitHeader.Children.Add(gitSummary); git.Children.Add(gitHeader);
         gitHeader.Children.Add(GitPreviewSelector());
+        gitHeader.Children.Add(gitLoading);
         Grid.SetRow(gitFiles, 1); git.Children.Add(gitFiles);
         var diffScroll = new ScrollViewer { Content = gitDiff, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
         Grid.SetRow(diffScroll, 2); git.Children.Add(diffScroll);
@@ -205,7 +275,7 @@ public sealed partial class MainWindow
             RenderGitPreview(file, GitWorkspace.ParseDiff(text));
             diffScroll.ChangeView(0, 0, null);
         });
-        toolTabs.Items.Add(new PivotItem { Header = "Git", Content = git });
+        toolTabs.AddTab("Git", git);
 
         foreach (var height in new[] { GridLength.Auto, GridLength.Auto, new GridLength(1, GridUnitType.Star), new GridLength(1, GridUnitType.Star) }) filePanel.RowDefinitions.Add(new() { Height = height });
         filePanel.RowSpacing = 8;
@@ -227,7 +297,9 @@ public sealed partial class MainWindow
                 else if (folders.Count > 1) await LoadFilesAsync(null);
             }
         }), Action("Actualiser", () => LoadFilesAsync(fileDirectory)), Action("Ouvrir dans Web", async () => { if (selectedFile != null) await OpenLocalPreviewAsync(selectedFile, CancellationToken.None); })));
-        Grid.SetRow(fileLocation, 1); filePanel.Children.Add(fileLocation);
+        var fileHeader = new StackPanel { Spacing = 4 };
+        fileHeader.Children.Add(fileLocation); fileHeader.Children.Add(filesLoading);
+        Grid.SetRow(fileHeader, 1); filePanel.Children.Add(fileHeader);
         Grid.SetRow(fileList, 2); filePanel.Children.Add(fileList); Grid.SetRow(fileContent, 3); filePanel.Children.Add(fileContent);
         fileList.ItemClick += async (_, e) => await Guard(async () =>
         {
@@ -242,37 +314,37 @@ public sealed partial class MainWindow
                 if (targetRoot != null)
                 {
                     var revision = ++fileRevision;
-                    try { var content = await new SourceAccess(targetRoot).ReadAsync(Path.GetRelativePath(targetRoot, file.Path), CancellationToken.None); if (revision == fileRevision) fileContent.Text = content; }
+                    filesLoading.Visibility = Visibility.Visible;
+                    fileContent.Text = T("Chargement…");
+                    try { var content = await Task.Run(() => new SourceAccess(targetRoot).ReadAsync(Path.GetRelativePath(targetRoot, file.Path), CancellationToken.None)); if (revision == fileRevision) fileContent.Text = content; }
                     catch (Exception ex) { if (revision == fileRevision) fileContent.Text = T("Aperçu texte indisponible. Utilisez Ouvrir dans Web.") + "\n" + ex.Message; }
+                    finally { if (revision == fileRevision) filesLoading.Visibility = Visibility.Collapsed; }
                 }
             }
         });
-        toolTabs.Items.Add(new PivotItem { Header = T("Fichiers"), Content = filePanel });
+        toolTabs.AddTab(T("Fichiers"), filePanel);
         toolTabs.SelectionChanged += async (_, _) => { SyncBrowserPresentation(); if (browserVisible) await Guard(ActivateToolAsync); };
         Grid.SetRow(toolTabs, 1); container.Children.Add(toolTabs);
         browserPanel.Child = container; Grid.SetColumn(browserPanel, 1); workspace.Children.Add(browserPanel);
     }
     void RefreshToolLanguage()
     {
-        if (toolTabs.Items.Count == 4) ((PivotItem)toolTabs.Items[3]).Header = T("Fichiers");
+        if (toolTabs.Count == 4) toolTabs.SetTitle(3, T("Fichiers"));
     }
     async Task ActivateToolAsync()
     {
         if (activatingTool) return;
-        activatingTool = true;
-        try
+        // The flag suppresses programmatic tab events only. In-flight loads use
+        // their own revision so a new conversation need not wait for an old tool.
+        switch (toolTabs.SelectedIndex)
         {
-            switch (toolTabs.SelectedIndex)
-            {
-                case 0: if (!conversationBrowsers.TryGetValue(chat?.Id ?? 0, out var shown) || !shown.Ready) ShowBrowserNotice(); break;
-                case 1:
-                    RefreshTerminals();
-                    break;
-                case 2: await RefreshGitAsync(CancellationToken.None); break;
-                case 3: await LoadFilesAsync(fileDirectory); break;
-            }
+            case 0: if (!conversationBrowsers.TryGetValue(chat?.Id ?? 0, out var shown) || !shown.Ready) ShowBrowserNotice(); break;
+            case 1:
+                RefreshTerminals();
+                break;
+            case 2: await RefreshGitAsync(CancellationToken.None); break;
+            case 3: await LoadFilesAsync(fileDirectory); break;
         }
-        finally { activatingTool = false; }
     }
     async Task ShowToolAsync(int index)
     {
@@ -288,6 +360,7 @@ public sealed partial class MainWindow
     void ResetWorkspaceTools()
     {
         lastGitPreview = null;
+        gitLoading.Visibility = filesLoading.Visibility = Visibility.Collapsed;
         fileRevision++;
         fileDirectory = null; selectedFile = null; fileLocation.Text = "";
         fileList.ItemsSource = null; fileContent.Text = ""; gitRevision++; gitDiffRevision++; gitFiles.RootNodes.Clear(); gitDiff.Children.Clear(); gitSummary.Text = "";
@@ -308,6 +381,14 @@ public sealed partial class MainWindow
     }
     async Task LoadFilesAsync(string? directory)
     {
+        var requestRevision = ++fileRevision;
+        filesLoading.Visibility = Visibility.Visible;
+        try { await LoadFilesCoreAsync(directory, requestRevision); }
+        catch { if (requestRevision != fileRevision) return; fileLocation.Text = WorkflowText("Chargement impossible. Actualisez pour réessayer.", "Loading failed. Refresh to retry."); throw; }
+        finally { if (requestRevision == fileRevision) filesLoading.Visibility = Visibility.Collapsed; }
+    }
+    async Task LoadFilesCoreAsync(string? directory, int requestRevision)
+    {
         var folders = project?.GetSourceFolders() ?? [];
         if (folders.Count == 0) { fileLocation.Text = T("Associez un dossier source via le bouton +."); fileList.ItemsSource = null; return; }
 
@@ -319,9 +400,8 @@ public sealed partial class MainWindow
             }
             else
             {
-                var revision = ++fileRevision;
                 var rootEntries = folders.Select(f => new FileEntry(f, true)).ToList();
-                if (revision != fileRevision) return;
+                if (requestRevision != fileRevision) return;
                 fileDirectory = null;
                 fileLocation.Text = T("Dossiers sources du projet");
                 fileList.ItemsSource = rootEntries;
@@ -338,14 +418,18 @@ public sealed partial class MainWindow
             directory = matchingRoot;
         }
 
-        var rootFolder = LocalPreview.ValidatePath(matchingRoot);
-        var path = new SourceAccess(rootFolder).Resolve(Path.GetRelativePath(rootFolder, directory));
-        var revision2 = ++fileRevision;
-        var entries = await Task.Run(() => Directory.EnumerateFileSystemEntries(path).Take(1000).Where(p =>
+        fileLocation.Text = T("Chargement…");
+        var (path, entries) = await Task.Run(() =>
         {
-            try { new SourceAccess(rootFolder).Resolve(Path.GetRelativePath(rootFolder, p)); return true; } catch (UnauthorizedAccessException) { return false; }
-        }).Select(p => new FileEntry(p, Directory.Exists(p))).OrderByDescending(p => p.Directory).ThenBy(p => p.Path).ToList());
-        if (revision2 != fileRevision) return;
+            var rootFolder = LocalPreview.ValidatePath(matchingRoot);
+            var resolved = new SourceAccess(rootFolder).Resolve(Path.GetRelativePath(rootFolder, directory));
+            var found = Directory.EnumerateFileSystemEntries(resolved).Take(1000).Where(p =>
+            {
+                try { new SourceAccess(rootFolder).Resolve(Path.GetRelativePath(rootFolder, p)); return true; } catch (UnauthorizedAccessException) { return false; }
+            }).Select(p => new FileEntry(p, Directory.Exists(p))).OrderByDescending(p => p.Directory).ThenBy(p => p.Path).ToList();
+            return (resolved, found);
+        });
+        if (requestRevision != fileRevision) return;
         fileDirectory = path; fileLocation.Text = path; fileList.ItemsSource = entries; selectedFile = null; fileContent.Text = "";
     }
     async Task<string> RefreshGitAsync(CancellationToken ct, Project? targetProject = null)
@@ -354,20 +438,26 @@ public sealed partial class MainWindow
         gitFiles.RootNodes.Clear(); gitDiff.Children.Clear();
         var folders = (targetProject ?? project)?.GetSourceFolders() ?? [];
         gitSummary.Text = T("Chargement…");
-        var repos = folders.Where(WorkspaceTools.HasGitRepository).ToList();
-        var files = await GitWorkspace.ListWithStatsAsync(repos, ct);
-        if (revision != gitRevision) return "";
-        gitSummary.Text = repos.Count == 0 ? T("Aucun dépôt Git : .git absent du dossier du projet.")
-            : files.Count == 0 ? (state.Language == "en" ? "No modified files." : "Aucun fichier modifié.")
-            : (state.Language == "en" ? $"{files.Count} modified file(s) · Changes since HEAD" : $"{files.Count} fichier(s) modifié(s) · Depuis le dernier commit");
-        BuildGitTree(files);
-        if (targetProject != null)
+        gitLoading.Visibility = Visibility.Visible;
+        try
         {
-            var results = new List<string>();
-            foreach (var repo in repos) results.Add(await WorkspaceTools.GitChangesAsync(repo, ct));
-            return string.Join("\n", results);
+            var repos = await Task.Run(() => folders.Where(WorkspaceTools.HasGitRepository).ToList(), ct);
+            var files = await GitWorkspace.ListWithStatsAsync(repos, ct);
+            if (revision != gitRevision) return "";
+            gitSummary.Text = repos.Count == 0 ? T("Aucun dépôt Git : .git absent du dossier du projet.")
+                : files.Count == 0 ? (state.Language == "en" ? "No modified files." : "Aucun fichier modifié.")
+                : (state.Language == "en" ? $"{files.Count} modified file(s) · Changes since HEAD" : $"{files.Count} fichier(s) modifié(s) · Depuis le dernier commit");
+            BuildGitTree(files);
+            if (targetProject != null)
+            {
+                var results = new List<string>();
+                foreach (var repo in repos) results.Add(await WorkspaceTools.GitChangesAsync(repo, ct));
+                return string.Join("\n", results);
+            }
+            return gitSummary.Text;
         }
-        return gitSummary.Text;
+        catch { if (revision != gitRevision) return ""; gitSummary.Text = WorkflowText("Chargement impossible. Actualisez pour réessayer.", "Loading failed. Refresh to retry."); throw; }
+        finally { if (revision == gitRevision) gitLoading.Visibility = Visibility.Collapsed; }
     }
     static string PermissionScope(string kind, string target) => kind + "|" + target.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).ToLowerInvariant();
     async Task<bool> RequestAccessAsync(string scope, string action, string details, string scopeDescription, CancellationToken ct)
@@ -435,7 +525,7 @@ public sealed partial class MainWindow
                 path = new SourceAccess(messageProject.GetSourceFolders()).Resolve(path);
             await OpenLocalPreviewAsync(path, CancellationToken.None, messageProject);
         }
-        catch (Exception ex) { status.Text = ex.Message; }
+        catch (Exception ex) { ShowStatus(ex.Message, StatusKind.Error); }
     }
     async Task<string> OpenLocalPreviewAsync(string requested, CancellationToken ct, Project? targetProject = null)
     {
@@ -489,7 +579,7 @@ public sealed partial class MainWindow
         var source = browserReady ? browser.CoreWebView2.Source : "about:blank";
         bool IsPreview(Uri uri) => uri.Host == previewHost;
 #else
-        var source = CurrentBrowser.Chrome.Source;
+        var source = CurrentBrowser.Address;
         bool IsPreview(Uri uri) => uri.Scheme == "http" && uri.Authority == previewHost;
 #endif
         if (previewFolder != null && Uri.TryCreate(source, UriKind.Absolute, out var preview) && IsPreview(preview))
@@ -656,6 +746,15 @@ public sealed partial class MainWindow
         [DllImport("user32.dll")] static extern bool DrawIconEx(IntPtr dc, int x, int y, IntPtr icon, int width, int height, int step, IntPtr brush, int flags);
         [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] internal static extern bool SetForegroundWindow(IntPtr window);
+        [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
+        [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window, ref Point point);
+        internal static (int X, int Y, int Width, int Height) ClientArea(IntPtr window)
+        {
+            if (!GetClientRect(window, out var rect)) throw new IOException("Cannot locate the application client area.");
+            var point = new Point();
+            if (!ClientToScreen(window, ref point)) throw new IOException("Cannot locate the application on screen.");
+            return (point.X, point.Y, rect.Right - rect.Left, rect.Bottom - rect.Top);
+        }
         [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
         [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
         [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
@@ -709,6 +808,8 @@ public sealed partial class MainWindow
             MouseEventInput(right ? RightDown : LeftDown),
             MouseEventInput(right ? RightUp : LeftUp)
         ]);
+        internal static void MouseButton(bool right, bool down) => Send([MouseEventInput(
+            right ? (down ? RightDown : RightUp) : (down ? LeftDown : LeftUp))]);
         internal static void Scroll(int delta) => Send([MouseEventInput(Wheel, delta)]);
         internal static void SendText(string text)
         {
@@ -886,19 +987,26 @@ public sealed partial class MainWindow
         };
         return Task.FromResult(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
-    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, int clickCount, CancellationToken ct, string? windowId = null)
+    async Task<string> ControlDesktopMouseAsync(string action, double x, double y, double deltaY, string button, int clickCount, CancellationToken ct, string? windowId = null, double? x2 = null, double? y2 = null, string? pattern = null)
     {
-        if(OperatingSystem.IsMacOS())return await MacInput("desktop_mouse",new JsonObject { ["action"]=action,["x"]=x,["y"]=y,["delta_y"]=deltaY,["button"]=button,["click_count"]=clickCount },windowId,ct);
+        if(OperatingSystem.IsMacOS())return await MacInput("desktop_mouse",new JsonObject { ["action"]=action,["x"]=x,["y"]=y,["x2"]=x2,["y2"]=y2,["pattern"]=pattern,["delta_y"]=deltaY,["button"]=button,["click_count"]=clickCount },windowId,ct);
         action = action.Trim().ToLowerInvariant(); button = MouseInput.NormalizeButton(button);
-        if (action is not ("move" or "click" or "scroll")) throw new ArgumentException(T("Action souris invalide : move, click ou scroll."));
+        if (action is not ("move" or "click" or "scroll" or "slide")) throw new ArgumentException(T("Action souris invalide : move, click, scroll ou slide."));
+        if (action == "slide" && (!x2.HasValue || !y2.HasValue)) throw new ArgumentException("slide requires x2 and y2.");
+        if (!double.IsFinite(x) || !double.IsFinite(y) || Math.Abs(x) > 100000 || Math.Abs(y) > 100000 ||
+            (action == "slide" && (!double.IsFinite(x2!.Value) || !double.IsFinite(y2!.Value) || Math.Abs(x2.Value) > 100000 || Math.Abs(y2.Value) > 100000)))
+            throw new ArgumentException("Invalid mouse coordinates.");
+        if (action == "slide") pattern = MouseInput.NormalizeSlidePattern(pattern);
         clickCount = MouseInput.NormalizeClickCount(clickCount);
         var application = windowId == null ? null : DesktopApplications.Resolve(windowId);
         var point = application?.RelativePoint(x, y) ?? (X: x, Y: y);
+        var destination = action == "slide" ? application?.RelativePoint(x2!.Value, y2!.Value) ?? (X: x2!.Value, Y: y2!.Value) : point;
         var minX = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualX); var minY = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualY);
         var width = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualWidth); var height = DesktopInterop.GetSystemMetrics(DesktopInterop.VirtualHeight);
         var px = (int)Math.Floor(point.X); var py = (int)Math.Floor(point.Y);
         if (px < minX || py < minY || px >= minX + width || py >= minY + height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors du bureau Windows."));
-        var details = T("Action souris demandée : ") + action + $"\nX={px}, Y={py}" + (action == "scroll" ? $"\nΔY={deltaY:0}" : "") + (action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "");
+        if (action == "slide" && (destination.X < minX || destination.Y < minY || destination.X >= minX + width || destination.Y >= minY + height)) throw new ArgumentOutOfRangeException(nameof(x2), T("Coordonnées de destination hors du bureau Windows."));
+        var details = T("Action souris demandée : ") + action + $"\nX={px}, Y={py}" + (action == "scroll" ? $"\nΔY={deltaY:0}" : "") + (action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "") + (action == "slide" ? $"\nX2={destination.X:0}, Y2={destination.Y:0}\nPattern={pattern}\nBouton={button}" : "");
         if (application != null) details += "\n" + application.Application + " · " + application.Title + "\nwindow_id=" + windowId;
         var targetWindow = application == null ? DesktopInterop.GetForegroundWindow() : (nint)application.NativeId;
         if (!await RequestAccessAsync("desktop|mouse", T("Contrôler la souris Windows"), details, T("Souris sur le bureau Windows"), ct)) return T("Accès refusé par l’utilisateur.");
@@ -910,6 +1018,18 @@ public sealed partial class MainWindow
             point = application.RelativePoint(x, y);
             DesktopApplications.DemandPointTarget(application, point.X, point.Y);
             px = (int)Math.Floor(point.X); py = (int)Math.Floor(point.Y);
+            if (action == "slide")
+            {
+                destination = application.RelativePoint(x2!.Value, y2!.Value);
+                DesktopApplications.DemandPointTarget(application, destination.X, destination.Y);
+            }
+        }
+        IReadOnlyList<MouseInput.SlideStep>? slideSteps = null;
+        if (action == "slide")
+        {
+            slideSteps = MouseInput.SlidePath(point.X, point.Y, destination.X, destination.Y, pattern);
+            if (application != null)
+                foreach (var step in slideSteps) DesktopApplications.DemandPointTarget(application, step.X, step.Y);
         }
         if (!DesktopInterop.SetCursorPos(px, py)) throw new InvalidOperationException(T("Impossible de déplacer le pointeur."));
         if (action is "click" or "scroll") await Task.Delay(60, ct);
@@ -923,7 +1043,22 @@ public sealed partial class MainWindow
             }
         }
         else if (action == "scroll") DesktopInterop.Scroll(MouseInput.ToWindowsWheelDelta(deltaY));
-        return JsonSerializer.Serialize(new { ok = true, action, x = px, y = py, button, click_count = clickCount, deltaY, desktop = new { x = minX, y = minY, width, height } });
+        else if (action == "slide")
+        {
+            DesktopInterop.MouseButton(button == "right", true);
+            try
+            {
+                foreach (var step in slideSteps!)
+                {
+                    await Task.Delay(step.DelayMs, ct);
+                    var sx = Math.Clamp((int)Math.Round(step.X), minX, minX + width - 1);
+                    var sy = Math.Clamp((int)Math.Round(step.Y), minY, minY + height - 1);
+                    if (!DesktopInterop.SetCursorPos(sx, sy)) throw new InvalidOperationException(T("Impossible de déplacer le pointeur."));
+                }
+            }
+            finally { DesktopInterop.MouseButton(button == "right", false); }
+        }
+        return JsonSerializer.Serialize(new { ok = true, action, x = px, y = py, x2 = action == "slide" ? destination.X : (double?)null, y2 = action == "slide" ? destination.Y : (double?)null, pattern = action == "slide" ? pattern : null, button, click_count = clickCount, deltaY, desktop = new { x = minX, y = minY, width, height } });
     }
     async Task<string> ControlDesktopKeyboardAsync(string action, string text, string keys, CancellationToken ct)
     {
@@ -1099,21 +1234,44 @@ public sealed partial class MainWindow
         var scale = JsonNumber(value?["scale"], 1);
         return new(Math.Max(1, width), Math.Max(1, height), Math.Max(.1, scale));
     }
-    async Task<string> ControlBrowserMouseAsync(string action, double x, double y, double deltaX, double deltaY, string button, int clickCount, CancellationToken ct)
+    async Task<string> ControlBrowserMouseAsync(string action, double x, double y, double deltaX, double deltaY, string button, int clickCount, CancellationToken ct, double? x2 = null, double? y2 = null, string? pattern = null)
     {
         await EnsureBrowser();
         action = action.Trim().ToLowerInvariant(); button = MouseInput.NormalizeButton(button);
-        if (action is not ("move" or "click" or "scroll")) throw new ArgumentException(T("Action souris invalide : move, click ou scroll."));
+        if (action is not ("move" or "click" or "scroll" or "slide")) throw new ArgumentException(T("Action souris invalide : move, click, scroll ou slide."));
+        if (action == "slide" && (!x2.HasValue || !y2.HasValue)) throw new ArgumentException("slide requires x2 and y2.");
+        if (action == "slide") pattern = MouseInput.NormalizeSlidePattern(pattern);
         clickCount = MouseInput.NormalizeClickCount(clickCount);
         var viewport = await GetBrowserViewportAsync(ct);
-        if (x < 0 || y < 0 || x >= viewport.Width || y >= viewport.Height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors de la zone du navigateur."));
+        if (!double.IsFinite(x) || !double.IsFinite(y) || x < 0 || y < 0 || x >= viewport.Width || y >= viewport.Height) throw new ArgumentOutOfRangeException(nameof(x), T("Coordonnées hors de la zone du navigateur."));
+        if (action == "slide" && (!double.IsFinite(x2!.Value) || !double.IsFinite(y2!.Value) || x2 < 0 || y2 < 0 || x2 >= viewport.Width || y2 >= viewport.Height)) throw new ArgumentOutOfRangeException(nameof(x2), T("Destination hors de la zone du navigateur."));
         var permission = BrowserPermissionTarget();
-        var details = T("Action souris demandée : ") + action + $"\nX={x:0}, Y={y:0}" + (action == "scroll" ? $"\nΔX={deltaX:0}, ΔY={deltaY:0}" : action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : "");
+        var details = T("Action souris demandée : ") + action + $"\nX={x:0}, Y={y:0}" + (action == "scroll" ? $"\nΔX={deltaX:0}, ΔY={deltaY:0}" : action == "click" ? "\n" + T("Bouton : ") + button + $"\nClics : {clickCount}" : action == "slide" ? $"\nX2={x2:0}, Y2={y2:0}\nPattern={pattern}\nBouton={button}" : "");
         if (!await RequestAccessAsync(permission.Key + "|mouse", T("Contrôler la souris dans le navigateur"), details, T("Souris du navigateur · ") + permission.Description, ct)) return T("Accès refusé par l’utilisateur.");
         browserPointerX = x; browserPointerY = y;
         async Task Dispatch(object payload) => await BrowserDevToolsAsync("Input.dispatchMouseEvent", JsonSerializer.Serialize(payload));
         if (action == "move") await Dispatch(new { type = "mouseMoved", x, y });
         else if (action == "scroll") await Dispatch(new { type = "mouseWheel", x, y, deltaX, deltaY });
+        else if (action == "slide")
+        {
+            var steps = MouseInput.SlidePath(x, y, x2!.Value, y2!.Value, pattern);
+            var currentX = x; var currentY = y;
+            await Dispatch(new { type = "mouseMoved", x, y, button = "none", buttons = 0 });
+            await Dispatch(new { type = "mousePressed", x, y, button, buttons = button == "right" ? 2 : 1, clickCount = 1 });
+            try
+            {
+                foreach (var step in steps)
+                {
+                    await Task.Delay(step.DelayMs, ct);
+                    var sx = Math.Clamp(step.X, 0, Math.BitDecrement(viewport.Width));
+                    var sy = Math.Clamp(step.Y, 0, Math.BitDecrement(viewport.Height));
+                    await Dispatch(new { type = "mouseMoved", x = sx, y = sy, button, buttons = button == "right" ? 2 : 1 });
+                    currentX = sx; currentY = sy;
+                    browserPointerX = sx; browserPointerY = sy;
+                }
+            }
+            finally { await Dispatch(new { type = "mouseReleased", x = currentX, y = currentY, button, buttons = 0, clickCount = 1, drag = true }); }
+        }
         else
         {
             await Dispatch(new { type = "mouseMoved", x, y });
@@ -1125,7 +1283,7 @@ public sealed partial class MainWindow
                 if (index < clickCount) await Task.Delay(80, ct);
             }
         }
-        return JsonSerializer.Serialize(new { ok = true, action, x, y, deltaX, deltaY, button, click_count = clickCount,
+        return JsonSerializer.Serialize(new { ok = true, action, x, y, x2 = action == "slide" ? x2 : null, y2 = action == "slide" ? y2 : null, pattern = action == "slide" ? pattern : null, deltaX, deltaY, button, click_count = clickCount,
             viewport = new { width = viewport.Width, height = viewport.Height, device_scale_factor = viewport.DeviceScaleFactor } });
     }
     async Task<string> ControlBrowserKeyboardAsync(string action, string text, string keys, CancellationToken ct)
@@ -1233,19 +1391,7 @@ public sealed partial class MainWindow
         await reader.LoadAsync((uint)normalized.Size);
         var bytes = new byte[(int)normalized.Size]; reader.ReadBytes(bytes);
 #else
-        var capture=JsonNode.Parse(await BrowserDevToolsAsync("Page.captureScreenshot", "{\"format\":\"png\"}"))!;
-        var raw=Convert.FromBase64String(capture["data"]!.GetValue<string>());
-        using var bitmap=SkiaSharp.SKBitmap.Decode(raw) ?? throw new IOException("Capture invalide.");
-        using var resized=bitmap.Resize(new SkiaSharp.SKImageInfo(bw,bh),new SkiaSharp.SKSamplingOptions(SkiaSharp.SKFilterMode.Linear));
-        if(browserPointerX.HasValue && browserPointerY.HasValue)
-        {
-            using var canvas=new SkiaSharp.SKCanvas(resized);
-            using var paint=new SkiaSharp.SKPaint { Color=SkiaSharp.SKColors.White, IsAntialias=true };
-            using var cursor=new SkiaSharp.SKPath(); var px=(float)browserPointerX.Value;var py=(float)browserPointerY.Value;
-            cursor.MoveTo(px,py);cursor.LineTo(px,py+18);cursor.LineTo(px+5,py+13);cursor.LineTo(px+12,py+13);cursor.Close();canvas.DrawPath(cursor,paint);
-        }
-        using var image=SkiaSharp.SKImage.FromBitmap(resized);using var encoded=image.Encode(SkiaSharp.SKEncodedImageFormat.Png,100);
-        var bytes=encoded.ToArray();
+        var bytes = await CaptureEmbeddedBrowserDesktopAsync(bw, bh, ct);
 #endif
         pendingToolScreenshot = bytes;
         pendingToolScreenshotMime = "image/png";
@@ -1315,9 +1461,9 @@ public sealed partial class MainWindow
             Add("browser_dom", "Requests approval, then interacts with one DOM target. Use an ID returned by inspect_dom or a CSS selector. Actions: click, focus, type, select, scroll_into_view.", new() { ["action"] = StringProperty(), ["target"] = StringProperty(), ["text"] = StringProperty("Text or select value for type/select") }, "action", "target");
         }
         if (Skills.Enabled(state.EnabledSkills, "mouse_control") && browserAccess.IsOn && browserDomAccess.IsOn)
-            Add("browser_mouse", "Requests approval, then controls the mouse inside the integrated browser viewport. Actions: move, click, scroll. Prefer inspect_dom coordinates when an element is available. A browser_screenshot is normalized to the same CSS pixel coordinate system, so its image coordinates can be used directly. Positive delta_y scrolls down and negative scrolls up. Click button can be left or right; click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_x"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
+            Add("browser_mouse", "Requests approval, then controls the mouse inside the integrated browser viewport. Actions: move, click, scroll, slide. For slide, provide destination x2/y2 and pattern direct (straight path) or human (small random imperfections and delays). Prefer inspect_dom coordinates when an element is available. Browser screenshot coordinates use the same CSS pixels. Positive delta_y scrolls down. button can be left or right; click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["x2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination X for slide" }, ["y2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination Y for slide" }, ["pattern"] = StringProperty("Slide pattern: direct (default) or human"), ["delta_x"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
         if (Skills.Enabled(state.EnabledSkills, "mouse_control"))
-            Add("desktop_mouse", "Requests approval, restores the window that was active before the approval dialog, then moves, left/right-clicks or scrolls the desktop mouse. Coordinates use the full virtual desktop, including negative coordinates on monitors left or above the primary display. For a scaled desktop_screenshot, map image coordinates through captured_region and image dimensions. Positive delta_y scrolls down and negative scrolls up. click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
+            Add("desktop_mouse", "Requests approval, restores the active window, then moves, clicks, scrolls or slides/drags the desktop mouse. For slide, x/y are the start, x2/y2 the destination, and pattern is direct (straight) or human (small random imperfections and delays). Coordinates use the full virtual desktop, including negative coordinates. For a scaled desktop_screenshot, map through captured_region and image dimensions. Positive delta_y scrolls down. click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["x2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination X for slide" }, ["y2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination Y for slide" }, ["pattern"] = StringProperty("Slide pattern: direct (default) or human"), ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control") && browserAccess.IsOn)
             Add("browser_keyboard", "Requests approval, then types into the currently focused control or presses one key with optional CTRL, ALT, SHIFT or WIN modifiers in the integrated browser page. Actions: type (provide text), press (provide keys such as CTRL+A, ENTER or SHIFT+TAB). Focus the intended page control first.", new() { ["action"] = StringProperty("type or press"), ["text"] = StringProperty("Text for the type action"), ["keys"] = StringProperty("Key or shortcut for the press action") }, "action");
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))

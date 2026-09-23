@@ -72,6 +72,11 @@ public sealed partial class MainWindow
     void OpenSubagent(string id)
     {
         if(!subagentViews.TryGetValue(id,out var child))return;
+        if (conversationLoading)
+        {
+            conversationLoad?.Cancel(); conversationLoad = null;
+            ++conversationLoadRevision; conversationLoading = false; conversationReady = false;
+        }
         selectedSubagent=id;childPanel=CreateMessagePanel();scroll.Content=childPanel;followChatTail=true;
         pinnedTasks.Visibility=Visibility.Collapsed;
         RenderSubagent(child);RefreshGenerationControls();
@@ -94,9 +99,9 @@ public sealed partial class MainWindow
     }
     async Task LoadSubagents(int chatId)
     {
-        await using var context=new HarnessDb();
-        var children=await context.Subagents.AsNoTracking().Where(x=>x.ChatId==chatId).OrderBy(x=>x.CreatedUtc).ToListAsync();
-        if(chat?.Id!=chatId)return;
+        var revision = conversationLoadRevision;
+        var children=await ReadStoreAsync(context => context.Subagents.AsNoTracking().Where(x=>x.ChatId==chatId).OrderBy(x=>x.CreatedUtc).ToList());
+        if(chat?.Id!=chatId || revision != conversationLoadRevision)return;
         foreach(var child in children)
         {
             if(child.Status=="running" && !conversationRuns.ContainsKey(chatId))child.Status="interrupted";
@@ -123,6 +128,7 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, child.Name + ", " + ChildActivity(child));
                 button.Click+=async(_,e)=>{if(chat?.Id!=row.Id){var previousLoading=loading;loading=true;chats.SelectedItem=row;loading=previousLoading;await SelectChat();}OpenSubagent(child.Id);};panel.Children.Add(button);
             }
+            if (panel.Parent is Border group) group.Visibility = panel.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         }
     }
 }

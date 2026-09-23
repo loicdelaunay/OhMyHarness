@@ -12,7 +12,7 @@ public sealed record ContextDetails(int Used, int Limit, bool Estimated, int? In
         var active = all.Where(x => x.State == "complete").ToList();
         int Tokens(string role) => active.Where(x => x.Role == role).Sum(x => ContextWindow.EstimateText(x.Content));
         var images = active.Sum(x => x.Attachments.Count) * 1000;
-        var estimate = active.Sum(x => ContextWindow.Estimate(ChatEngine.ToWire(x)));
+        var estimate = active.Sum(x => ContextWindow.Estimate(ChatEngine.ToWire(x, includeImageData: false)));
         var latest = active.LastOrDefault(x => x.InputTokens.HasValue);
         if (active.LastOrDefault(x => x.Role == "compaction") is { } summary && (latest == null || summary.Id > latest.Id)) latest = null;
         return new(latest?.InputTokens is int input ? input + (latest.OutputTokens ?? 0) : estimate,

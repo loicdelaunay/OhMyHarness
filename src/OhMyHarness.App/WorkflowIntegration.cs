@@ -13,9 +13,9 @@ public sealed partial class MainWindow
     async Task RefreshPinnedTasksAsync()
     {
         var id = chat?.Id;
-        await using var store = new HarnessDb();
-        var json = id == null ? null : await store.Messages.Where(x => x.ChatId == id && x.Role == "tasks").Select(x => x.Content).FirstOrDefaultAsync();
-        if (chat?.Id == id) ShowPinnedTasks(json);
+        var revision = conversationLoadRevision;
+        var json = id == null ? null : await ReadStoreAsync(store => store.Messages.Where(x => x.ChatId == id && x.Role == "tasks").Select(x => x.Content).FirstOrDefault());
+        if (chat?.Id == id && revision == conversationLoadRevision) ShowPinnedTasks(json);
     }
     void ShowPinnedTasks(string? json)
     {
@@ -88,7 +88,7 @@ public sealed partial class MainWindow
             buttons.Children.Add(send); buttons.Children.Add(cancel); panel.Children.Add(error); panel.Children.Add(buttons);
             var card = new Border { Child = panel, Padding = new(18), CornerRadius = new(12), BorderThickness = new(1), BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.DodgerBlue) };
             run.Messages.Children.Add(card); ScrollRunToBottom(run);
-            SetRunStatus(run, WorkflowText("Réponse attendue dans la conversation", "Waiting for your answer in the conversation"));
+            SetRunStatus(run, WorkflowText("Réponse attendue dans la conversation", "Waiting for your answer in the conversation"), StatusKind.Notice);
             try
             {
                 var answer = await completion.Task.WaitAsync(ct);

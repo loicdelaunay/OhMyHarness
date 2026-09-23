@@ -46,6 +46,49 @@ public static class DesktopInput
         else throw new PlatformNotSupportedException();
     }
 
+    public static async Task ExecuteAsync(string tool, JsonObject args, CancellationToken ct, IReadOnlyList<MouseInput.SlideStep>? slidePath = null)
+    {
+        if (tool != "desktop_mouse" || args["action"]?.GetValue<string>() != "slide")
+        {
+            ct.ThrowIfCancellationRequested();
+            Execute(tool, args);
+            return;
+        }
+        var x = args["x"]?.GetValue<double>() ?? throw new ArgumentException("x required");
+        var y = args["y"]?.GetValue<double>() ?? throw new ArgumentException("y required");
+        var x2 = args["x2"]?.GetValue<double>() ?? throw new ArgumentException("x2 required for slide");
+        var y2 = args["y2"]?.GetValue<double>() ?? throw new ArgumentException("y2 required for slide");
+        var right = MouseInput.NormalizeButton(args["button"]?.GetValue<string>()) == "right";
+        var steps = slidePath ?? MouseInput.SlidePath(x, y, x2, y2, args["pattern"]?.GetValue<string>());
+        if (OperatingSystem.IsMacOS())
+        {
+            var screens = MacDesktop.Screens();
+            if (steps.Any(step => !screens.Any(screen => step.X >= screen.X && step.Y >= screen.Y &&
+                step.X < screen.X + screen.Width && step.Y < screen.Y + screen.Height)))
+                throw new ArgumentOutOfRangeException(nameof(x2), "Slide path leaves the available macOS displays.");
+        }
+        ct.ThrowIfCancellationRequested();
+        if (OperatingSystem.IsMacOS()) Mac.MouseDown(x, y, right);
+        else if (OperatingSystem.IsWindows()) Win.MouseDown((int)x, (int)y, right);
+        else throw new PlatformNotSupportedException();
+        var currentX = x; var currentY = y;
+        try
+        {
+            foreach (var step in steps)
+            {
+                await Task.Delay(step.DelayMs, ct);
+                if (OperatingSystem.IsMacOS()) Mac.MouseDragged(step.X, step.Y, right);
+                else Win.MouseDragged((int)Math.Round(step.X), (int)Math.Round(step.Y));
+                currentX = step.X; currentY = step.Y;
+            }
+        }
+        finally
+        {
+            if (OperatingSystem.IsMacOS()) Mac.MouseUp(currentX, currentY, right);
+            else Win.MouseUp(right);
+        }
+    }
+
     static class Mac
     {
         const string CG = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
@@ -178,6 +221,16 @@ public static class DesktopInput
                 Post(CGEventCreateMouseEvent(0, right ? 4u : 2u, point, right ? 1u : 0u), e => CGEventSetIntegerValueField(e, 1, i));
             }
         }
+        public static void MouseDown(double x, double y, bool right)
+        {
+            Access();
+            Post(CGEventCreateMouseEvent(0, 5, new Point(x, y), 0));
+            Post(CGEventCreateMouseEvent(0, right ? 3u : 1u, new Point(x, y), right ? 1u : 0u));
+        }
+        public static void MouseDragged(double x, double y, bool right) =>
+            Post(CGEventCreateMouseEvent(0, right ? 7u : 6u, new Point(x, y), right ? 1u : 0u));
+        public static void MouseUp(double x, double y, bool right) =>
+            Post(CGEventCreateMouseEvent(0, right ? 4u : 2u, new Point(x, y), right ? 1u : 0u));
     }
     static class Win
     {
@@ -219,5 +272,16 @@ public static class DesktopInput
                 new Input { Data = new Union { Mouse = new MouseData { Flags = right ? 8u : 2u } } },
                 new Input { Data = new Union { Mouse = new MouseData { Flags = right ? 16u : 4u } } });
         }
+        public static void MouseDown(int x, int y, bool right)
+        {
+            if (!SetCursorPos(x, y)) throw new Win32Exception();
+            Send(new Input { Data = new Union { Mouse = new MouseData { Flags = right ? 8u : 2u } } });
+        }
+        public static void MouseDragged(int x, int y)
+        {
+            if (!SetCursorPos(x, y)) throw new Win32Exception();
+        }
+        public static void MouseUp(bool right) =>
+            Send(new Input { Data = new Union { Mouse = new MouseData { Flags = right ? 16u : 4u } } });
     }
 }

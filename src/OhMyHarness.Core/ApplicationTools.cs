@@ -23,7 +23,7 @@ public static class ApplicationTools
             var props = function!["parameters"]!["properties"]!.AsObject();
             props["window_id"] = new JsonObject { ["type"] = "string", ["description"] = "Optional exact id from desktop_applications (enable Gestion d’application). Never guess an ID." };
             function["description"] = function["description"]!.GetValue<string>() + (name == "desktop_mouse"
-                ? " With window_id, x/y are relative to the OUTER window top-left including title bar. Coordinates are re-resolved after approval; a covered/hidden/closed target fails. Scale image coordinates to window dimensions first."
+                ? " With window_id, x/y and slide destination x2/y2 are relative to the OUTER window top-left including title bar. Coordinates are re-resolved after approval; a covered/hidden/closed target fails. Scale image coordinates to window dimensions first."
                 : " With window_id capture ONLY that window; do not combine with screen or x/y/width/height. Protected or minimized windows may fail or return blank. No fallback to a desktop capture. Result includes window dimensions for relative mouse coordinates.");
         }
     }

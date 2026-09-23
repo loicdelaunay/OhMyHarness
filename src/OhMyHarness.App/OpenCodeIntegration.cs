@@ -193,8 +193,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         MarkRunSubmitted(run);
         await RefreshInboxAsync();
         if (history.Count == 0) run.Messages.Children.Clear();
-        AddMessage("user", prompt, user.Attachments, run.Messages);
-        AddHistoryActions(user, run.Messages);
+        AddHistoryActions(user, AddMessage("user", prompt, user.Attachments, run.Messages));
         ScrollRunToBottom(run);
         Message? active = null; AssistantMessageUi? assistantUi = null;
         try
@@ -278,15 +277,16 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
                                 (completion.OutputTokens ?? ContextWindow.EstimateText(active.Content + reasoning));
             if (ContextWindow.ShouldCompact(contextTokens, provider.ContextLimit))
                 await CompactOpenCodeSessionAsync(run, provider, password, directory, link, ct);
-            else SetRunStatus(run, T("Réponse OpenCode terminée · historique enregistré."));
-            AddHistoryActions(active, run.Messages);
+            else SetRunStatus(run, T("Réponse OpenCode terminée · historique enregistré."), StatusKind.Notice);
+            AddHistoryActions(active, assistantUi.Container);
             active = null;
         }
         catch (Exception ex)
         {
             run.Tracker = null;
             run.Failed=true;
-            SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message);
+            SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message,
+                ex is OperationCanceledException ? StatusKind.Notice : StatusKind.Error);
             if (active != null && assistantUi != null) assistantUi.UpdateContent(active.Content + T("\n[Réponse interrompue]"));
         }
     }
@@ -322,7 +322,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         db.ExternalChatSessions.Remove(link);
         await db.SaveChangesAsync(ct);
         ShowContextUsage(run, ContextWindow.EstimateText(summary), estimated: true);
-        SetRunStatus(run, T("Contexte compacté automatiquement."));
+        SetRunStatus(run, T("Contexte compacté automatiquement."), StatusKind.Notice);
     }
 
     async Task<string> AuthorizeOpenCodePermissionAsync(Provider target, string directory, OpenCodePermission permission, CancellationToken ct)

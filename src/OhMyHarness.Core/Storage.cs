@@ -166,11 +166,18 @@ public sealed class HarnessDb : DbContext
     public DbSet<PermissionGrant> PermissionGrants => Set<PermissionGrant>();
     public DbSet<ExternalChatSession> ExternalChatSessions => Set<ExternalChatSession>();
     public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<MemoryEntry> Memories => Set<MemoryEntry>();
     protected override void OnConfiguring(DbContextOptionsBuilder options) =>
         options.UseSqlite(new SqliteConnectionStringBuilder { DataSource = path }.ToString())
                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<MemoryEntry>().HasIndex(x => new { x.Partition, x.Category, x.Key }).IsUnique();
+        model.Entity<MemoryEntry>().HasIndex(x => new { x.Scope, x.ProjectId, x.ChatId, x.UpdatedUtc });
+        model.Entity<MemoryEntry>().Property(x => x.Version).IsConcurrencyToken();
+        model.Entity<MemoryEntry>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<MemoryEntry>().HasOne<Chat>().WithMany().HasForeignKey(x => x.ChatId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<MemoryEntry>().HasOne<Chat>().WithMany().HasForeignKey(x => x.OriginChatId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ScheduledTask>().HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ScheduledTask>().HasIndex(x => new { x.Enabled, x.NextRunUtc });
         model.Entity<PendingInput>().HasOne<Chat>().WithMany().HasForeignKey(x=>x.ChatId).OnDelete(DeleteBehavior.Cascade);

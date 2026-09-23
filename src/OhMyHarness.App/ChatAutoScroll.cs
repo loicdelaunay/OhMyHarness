@@ -83,10 +83,11 @@ public sealed partial class MainWindow
             if (Math.Abs(delta)>1) chatScrollMayResume=delta>0;
         };
 #endif
-        scroll.ViewChanged += (_, _) =>
+        scroll.ViewChanged += async (_, _) =>
         {
             if (chatScrollMayResume && (draggingChatScroll || manipulatingChatScroll || Environment.TickCount64 < chatScrollInputUntil)
                 && scroll.ScrollableHeight - scroll.VerticalOffset <= 8) SetChatFollow(true);
+            await LoadHistoryAtTopAsync();
         };
         scroll.LayoutUpdated += (_, _) =>
         {

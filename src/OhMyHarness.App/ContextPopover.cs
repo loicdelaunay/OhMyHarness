@@ -38,7 +38,7 @@ public sealed partial class MainWindow
                 WorkflowText("Images (approximation) : ", "Images (approximation): ") + $"{value.Images:N0}\n\n" +
                 WorkflowText("Le détail exclut les instructions système et les définitions d’outils ; il peut différer du total. Compactage automatique à 95 %. Le compactage utilise le modèle et peut consommer des tokens.", "The breakdown excludes system instructions and tool definitions; it may differ from the total. Auto-compaction at 95%. Compaction uses the model and may consume tokens.") +
                 (ActiveRun == null ? "" : "\n\n" + WorkflowText("Compactage disponible après la réponse.", "Compaction available after the response."));
-            compact.IsEnabled = chat != null && provider != null && ActiveRun == null && VisibleHistory().Any(x => x.State == "complete" && x.Role != "compaction");
+            compact.IsEnabled = conversationReady && !conversationLoading && chat != null && provider != null && ActiveRun == null && VisibleHistory().Any(x => x.State == "complete" && x.Role != "compaction");
         }
         AttachHoverPopover(anchor, body, flyout, Update);
         compact.Click += async (_, _) => { flyout.Hide(); await Guard(CompactCurrentChat); };
@@ -46,7 +46,7 @@ public sealed partial class MainWindow
 
     async Task CompactCurrentChat()
     {
-        if (chat == null || project == null || provider == null || ActiveRun != null) return;
+        if (!conversationReady || conversationLoading || chat == null || project == null || provider == null || ActiveRun != null) return;
         using var run = new ConversationRun(chat, project, provider, state, "", [],db.Providers.Local) { Messages = messages };
         conversationRuns.Add(run.Chat.Id, run); RefreshGenerationControls();
         var ct = run.Cancellation.Token;
@@ -74,9 +74,10 @@ public sealed partial class MainWindow
                 var summary = run.Db.Messages.Local.Last(x => x.Role == "compaction" && x.State == "complete");
                 AddMessage("compaction", summary.Content, [], run.Messages);
             }
-            SetRunStatus(run, changed ? WorkflowText("Contexte compacté.", "Context compacted.") : WorkflowText("Aucune réduction utile : historique conservé.", "No useful reduction: history preserved."));
+            SetRunStatus(run, changed ? WorkflowText("Contexte compacté.", "Context compacted.") : WorkflowText("Aucune réduction utile : historique conservé.", "No useful reduction: history preserved."), StatusKind.Notice);
         }
-        catch (Exception ex) { run.Failed=true;SetRunStatus(run, ex is OperationCanceledException ? WorkflowText("Compactage arrêté.", "Compaction stopped.") : ex.Message); }
+        catch (Exception ex) { run.Failed=true;SetRunStatus(run, ex is OperationCanceledException ? WorkflowText("Compactage arrêté.", "Compaction stopped.") : ex.Message,
+            ex is OperationCanceledException ? StatusKind.Notice : StatusKind.Error); }
         finally
         {
             try { conversationHistory[run.Chat.Id] = await run.Db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == run.Chat.Id).OrderBy(x => x.Id).ToListAsync(); }

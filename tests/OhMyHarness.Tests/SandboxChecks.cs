@@ -19,6 +19,9 @@ static class SandboxChecks
         {
             var project = Path.Combine(root, "project"); Directory.CreateDirectory(project);
             await File.WriteAllTextAsync(Path.Combine(project, "app.js"), "before\n");
+            await File.WriteAllTextAsync(Path.Combine(project, "card.gd"), "godot\n");
+            await File.WriteAllTextAsync(Path.Combine(project, "LICENSE"), "license\n");
+            await File.WriteAllBytesAsync(Path.Combine(project, "binary.custom"), [0, 1, 2, 255]);
             await File.WriteAllTextAsync(Path.Combine(project, "delete.txt"), "remove me\n");
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "secret");
             await File.WriteAllTextAsync(Path.Combine(project, "database.sqlite"), "sqlite secret");
@@ -30,6 +33,7 @@ static class SandboxChecks
             {
                 work = sandbox.WorkRoots[0];
                 check(await File.ReadAllTextAsync(Path.Combine(work, "app.js")) == "before\n", "Sandbox copie les sources");
+                check(File.Exists(Path.Combine(work, "card.gd")) && File.Exists(Path.Combine(work, "LICENSE")) && !File.Exists(Path.Combine(work, "binary.custom")), "Sandbox copie tous les formats texte et exclut les binaires non pris en charge");
                 check(!File.Exists(Path.Combine(work, ".env")) && !File.Exists(Path.Combine(work, "database.sqlite")) && !Directory.Exists(Path.Combine(work, ".git")), "Sandbox exclut secrets, SQLite et métadonnées Git");
                 await Reject(async () => { using var busy = await SandboxWorkspace.OpenAsync(database, 42, [project], default); }, "Sandbox verrouillée par conversation");
                 using (var independent = await SandboxWorkspace.OpenAsync(database, 43, [project], default))

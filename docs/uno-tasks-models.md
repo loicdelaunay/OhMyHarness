@@ -24,13 +24,13 @@ Le planning est stocké en UTC avec le fuseau d’origine. Un verrou local évit
 
 ## Catalogue des modèles
 
-Chaque card fournisseur propose **Actualiser les modèles**, une liste et des cases à cocher. Le catalogue détecté et les choix sont enregistrés uniquement après **Enregistrer** dans les réglages. Une actualisation conserve les sélections encore proposées par le serveur ; elle ne coche pas automatiquement les nouveaux modèles. Les connexions ayant le même nom conservent des catalogues indépendants.
+Chaque card fournisseur propose **Actualiser les modèles**, une liste et des cases à cocher. Dans l’éditeur, **Tester la connexion** détecte les modèles, les coche tous et enregistre immédiatement ce fournisseur. Une actualisation simple conserve les sélections encore proposées par le serveur ; elle ne coche pas automatiquement les nouveaux modèles et ses changements se valident avec **Enregistrer**. Les connexions ayant le même nom conservent des catalogues indépendants.
 
 Le sélecteur du chat regroupe les modèles cochés avec le nom et l’identifiant de la connexion. Changer de modèle sélectionne aussi son fournisseur. Décocher tous les modèles masque cette connexion dans le sélecteur. L’éditeur du fournisseur conserve un identifiant saisissable pour les API sans route `/models` : ce modèle peut être ajouté au catalogue visible.
 
 ## Différences de plateforme
 
-La cible Windows native conserve WebView2 intégré. Uno Desktop utilise une **fenêtre Chrome/Edge dédiée par conversation**, avec son propre profil persistant. Le navigateur démarre seulement à la demande et son arrêt n’interrompt pas les autres panneaux. Navigation, DOM, JavaScript, clics, clavier, captures et aperçus locaux utilisent le même jeu d’outils. Installer Chrome/Edge ou renseigner son chemin ; ce mode ne requiert pas Node.js. L’option Chrome MCP reste disponible et requiert Node.js.
+La cible Windows native conserve WebView2 intégré. Uno Desktop affiche également la WebView2 de Uno **dans l’onglet Web** du panneau Outils, avec une vue par conversation. Le navigateur démarre à la demande et son arrêt n’interrompt pas les autres panneaux. Navigation, lecture et modification du DOM, JavaScript, clics, clavier, captures et aperçus locaux restent disponibles ; les interactions synthétiques d’Uno Desktop peuvent être limitées sur les sites qui exigent des événements natifs. La capture Windows Uno recadre la vue Web depuis la fenêtre de l’application. Sous Windows, le runtime Edge WebView2 est requis ; sous macOS, Uno utilise WebKit. L’option externe Chrome · MCP nécessite Chrome/Edge et Node.js.
 
 Sur macOS, les clés nouvelles sont conservées dans le trousseau système ; SQLite ne contient que leur référence. Les clés Windows DPAPI et celles de l’ancienne interface Electron doivent être ressaisies lors d’un changement de plateforme/hôte. Les skills souris/clavier utilisent CoreGraphics ; les captures d’application utilisent leur identifiant de fenêtre et incluent un curseur. macOS doit autoriser l’Accessibilité et l’Enregistrement de l’écran. Une autorisation dans l’application ne remplace pas ces permissions système.
 
@@ -44,7 +44,7 @@ dotnet build src/OhMyHarness.App -f net10.0-windows10.0.19041.0 -c Release
 dotnet build src/OhMyHarness.App -f net10.0-desktop -c Release
 # Publication de travail, hors official :
 .\publish.ps1 -OutputDirectory artifacts\release
-.\publish.ps1 -UnoDesktop -OutputDirectory artifacts\release-uno
+.\publish.ps1 -NativeWinUI -OutputDirectory artifacts\release-winui
 ```
 
 Sur Mac : `./publish-macos.sh arm64` ou `./publish-macos.sh x64`. Le script publie Uno Desktop autonome, sans Electron. Une signature/notarisation Apple reste nécessaire pour une distribution signée.

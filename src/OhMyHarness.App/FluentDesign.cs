@@ -18,16 +18,42 @@ internal static class FluentDesign
         "TextFillColorPrimaryBrush" => Color(theme.Text),
         "TextFillColorSecondaryBrush" => Color(theme.Muted),
         "CardStrokeColorDefaultBrush" => ColorHelper.FromArgb(theme.Dark ? (byte)24 : (byte)32, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0),
+        "ConversationHoverFillBrush" => Blend(Color(theme.Surface), Color(theme.Dark ? theme.Text : theme.Accent), theme.Dark ? .09 : .08),
+        "ConversationHoverStrokeBrush" => WithOpacity(Color(theme.Dark ? theme.Text : theme.Accent), theme.Dark ? (byte)80 : (byte)120),
+        "UserMessageFillBrush" => Blend(Color(theme.Surface), Color(theme.Accent), theme.Dark ? .20 : .10),
+        "UserMessageStrokeBrush" => Blend(Color(theme.Surface), Color(theme.Accent), theme.Dark ? .45 : .30),
+        "AssistantMessageFillBrush" => Blend(Color(theme.Surface), Color(theme.Text), theme.Dark ? .055 : .025),
+        "AssistantMessageStrokeBrush" => Blend(Color(theme.Surface), Color(theme.Text), theme.Dark ? .17 : .14),
+        "ToolMessageFillBrush" => Blend(Color(theme.Surface), Color(theme.Dark ? "#A78BFA" : "#7452AD"), theme.Dark ? .14 : .075),
+        "ToolMessageStrokeBrush" => Blend(Color(theme.Surface), Color(theme.Dark ? "#A78BFA" : "#7452AD"), theme.Dark ? .35 : .23),
+        "ToolMessageTitleBrush" => Color(theme.Dark ? "#D2BFFF" : "#603F91"),
+        "ToolMessageErrorStrokeBrush" => Color(theme.Dark ? "#E58C88" : "#B5413C"),
         "SolidBackgroundFillColorBaseBrush" => Color(theme.Background),
         "SystemAccentColor" => Color(theme.Accent),
         "AccentFillColorDefaultBrush" or "AccentTextFillColorPrimaryBrush" or "AccentTextFillColorSecondaryBrush" or "AccentTextFillColorTertiaryBrush" => Color(theme.Accent),
         "AccentFillColorSecondaryBrush" => WithOpacity(Color(theme.Accent), 230),
         "AccentFillColorTertiaryBrush" => WithOpacity(Color(theme.Accent), 204),
-        "TextOnAccentFillColorPrimaryBrush" => Color(theme.Dark ? theme.Background : "#FFFFFF"),
-        "TextOnAccentFillColorSecondaryBrush" => WithOpacity(Color(theme.Dark ? theme.Background : "#FFFFFF"), 200),
+        "TextOnAccentFillColorPrimaryBrush" => AccentForeground(),
+        "TextOnAccentFillColorSecondaryBrush" => WithOpacity(AccentForeground(), 200),
         _ => Color(theme.Surface)
     };
+    static Windows.UI.Color AccentForeground()
+    {
+        var accent = Color(theme.Accent);
+        static double Channel(byte value)
+        {
+            double normalized = value / 255d;
+            return normalized <= .04045 ? normalized / 12.92 : Math.Pow((normalized + .055) / 1.055, 2.4);
+        }
+        double luminance = .2126 * Channel(accent.R) + .7152 * Channel(accent.G) + .0722 * Channel(accent.B);
+        return Color(luminance > .179 && theme.Dark ? theme.Background : "#FFFFFF");
+    }
     static Windows.UI.Color WithOpacity(Windows.UI.Color color, byte alpha) => ColorHelper.FromArgb(alpha, color.R, color.G, color.B);
+    static Windows.UI.Color Blend(Windows.UI.Color background, Windows.UI.Color foreground, double amount) =>
+        ColorHelper.FromArgb(255,
+            (byte)Math.Round(background.R * (1 - amount) + foreground.R * amount),
+            (byte)Math.Round(background.G * (1 - amount) + foreground.G * amount),
+            (byte)Math.Round(background.B * (1 - amount) + foreground.B * amount));
     public static Brush Resource(string key)
     {
         if (!resources.TryGetValue(key, out var brush)) resources[key] = brush = new(ResourceColor(key));
@@ -62,6 +88,18 @@ internal static class FluentDesign
     public static Brush Stroke => Resource("CardStrokeColorDefaultBrush");
     public static Brush Primary => Resource("TextFillColorPrimaryBrush");
     public static Brush Secondary => Resource("TextFillColorSecondaryBrush");
+
+    public static Border MessageSurface(UIElement? content, string role, bool error = false)
+    {
+        var prefix = role switch { "user" => "User", "tool" => "Tool", _ => "Assistant" };
+        return new Border
+        {
+            Child = content, Background = Resource(prefix + "MessageFillBrush"),
+            BorderBrush = Resource(error ? "ToolMessageErrorStrokeBrush" : prefix + "MessageStrokeBrush"),
+            BorderThickness = new(1), CornerRadius = new(12), Padding = new(16),
+            Margin = new(0), HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+    }
 
     public static Border Surface(UIElement child, double padding = 20) => new()
     {

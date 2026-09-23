@@ -54,13 +54,17 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "question.answer": return AnswerQuestion(p);
             case "snapshot":
                 var mcpConfigError = await SyncMcpFile(ct);
+                var snapshotProjects = await db.Projects.AsNoTracking().ToListAsync(ct);
+                var snapshotSkills = Skills.Available().Concat(snapshotProjects.SelectMany(item =>
+                    new CustomSkills(CustomSkills.DefaultRoot, item.GetSourceFolders(), item.Id).Definitions()
+                        .Where(skill => skill.Id.StartsWith("project:", StringComparison.Ordinal)))).ToList();
                 return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database, mcpConfigError, appearanceThemes = AppearanceThemes.All,
-                    projects = await db.Projects.AsNoTracking().Select(x => new { x.Id, x.Name, x.SourceFolder, x.PermissionProfileJson }).ToListAsync(ct),
+                    projects = snapshotProjects.Select(x => new { x.Id, x.Name, x.SourceFolder, x.PermissionProfileJson }),
                     chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled, x.ResourcePathsJson, x.TodoDismissed }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
                     mcpServers = (await db.McpServers.AsNoTracking().ToListAsync(ct)).Select(McpView),
                     state = await db.States.SingleAsync(ct), templates = await db.Templates.ToListAsync(ct),
-                    permissions = await db.PermissionGrants.ToListAsync(ct), skills = Skills.Available().Select(skill => OperatingSystem.IsMacOS() ? skill with
+                    permissions = await db.PermissionGrants.ToListAsync(ct), skills = snapshotSkills.Select(skill => OperatingSystem.IsMacOS() ? skill with
                     { FrenchDescription = skill.FrenchDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh"), EnglishDescription = skill.EnglishDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh") } : skill), running = runs.Keys,
                     questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }), browserAccess, domAccess, skillsDirectory = CustomSkills.DefaultRoot };
             case "subagents": return await db.Subagents.AsNoTracking().Where(x=>x.ChatId==I(p,"chatId")).OrderBy(x=>x.CreatedUtc).ToListAsync(ct);

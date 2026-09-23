@@ -4,10 +4,15 @@ namespace OhMyHarness.Core;
 
 public sealed record CustomSkill(string Id, string Name, string Description, string Directory);
 
-public sealed class CustomSkills(string root)
+public sealed class CustomSkills(string root, IEnumerable<string>? projectRoots = null, int projectId = 0)
 {
     public string Root { get; } = Path.GetFullPath(root);
+    readonly IReadOnlyDictionary<string, string> projectLocations = new SourceAccess(projectRoots ?? []).Aliases
+        .Where(x => Directory.Exists(x.Value)).ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+    readonly int projectKey = projectId;
+    public int ProjectId => projectKey;
     public static string DefaultRoot => PortableStorage.Skills;
+    public const int MaximumPerLocation = 20;
     public const string Template = """
         ---
         name: exemple-revue
@@ -29,7 +34,7 @@ public sealed class CustomSkills(string root)
         if (Path.Exists(Root) && (File.GetAttributes(Root) & FileAttributes.ReparsePoint) != 0) throw new UnauthorizedAccessException("Le dossier skills ne peut pas être un lien.");
         Directory.CreateDirectory(Root);
         var template = Path.Combine(Root, "exemple-revue");
-        if (Directory.Exists(template)) return;
+        if (Directory.Exists(template) || Directory.EnumerateFileSystemEntries(Root).Any()) return;
         Directory.CreateDirectory(Path.Combine(template, "resources"));
         File.WriteAllText(Path.Combine(template, "SKILL.md"), Template);
         File.WriteAllText(Path.Combine(template, "resources", "checklist.md"), "# Checklist\n- Respect des conventions du projet\n- Erreurs et cas limites\n- Vérifications effectuées\n- Limites restantes\n");
@@ -37,10 +42,19 @@ public sealed class CustomSkills(string root)
     public IReadOnlyList<CustomSkill> Discover()
     {
         EnsureTemplate();
-        var result = new List<CustomSkill>(); var access = new SourceAccess(Root);
-        foreach (var folder in Directory.EnumerateDirectories(Root).Order().Take(101))
+        var result = new List<CustomSkill>();
+        DiscoverAt(Root, "custom:", result);
+        foreach (var (alias, folder) in projectLocations)
+            DiscoverAt(Path.Combine(folder, ".omh-ai", "skills"), $"project:{projectKey}:{alias}:", result);
+        return result;
+    }
+    static void DiscoverAt(string root, string prefix, List<CustomSkill> result)
+    {
+        if (!Directory.Exists(root)) return;
+        SandboxWorkspace.AssertNoLinks(root);
+        var access = new SourceAccess(root);
+        foreach (var folder in Directory.EnumerateDirectories(root).Order().Take(101))
         {
-            if (result.Count >= 100) throw new IOException("100 skills personnalisés maximum.");
             var file = Path.Combine(folder, "SKILL.md");
             if (!File.Exists(file)) continue;
             access.Resolve(file);
@@ -53,13 +67,15 @@ public sealed class CustomSkills(string root)
             var name = Value("name"); var description = Value("description");
             if (!Regex.IsMatch(name, "^[a-z0-9]+(-[a-z0-9]+)*$") || name.Length > 64 || name != Path.GetFileName(folder) || description.Length is < 1 or > 1024)
                 throw new IOException($"Skill invalide : {file}. name doit correspondre au dossier ; description sur une ligne requise.");
-            result.Add(new("custom:" + name, name, description, folder));
+            result.Add(new(prefix + name, name, description, folder));
         }
-        return result;
     }
-    public IEnumerable<SkillDefinition> Definitions() => Discover().Select(s => new SkillDefinition(s.Id, s.Name, s.Name, s.Description, s.Description, ""));
-    public string Catalog(string enabled) => string.Join('\n', Discover().Where(x => Skills.Enabled(enabled, x.Id)).Select(x => $"- {x.Name}: {x.Description} (load_skill name={x.Name}; OpenCode native read: {Path.Combine(x.Directory, "SKILL.md")})"));
-    CustomSkill Find(string name, string enabled) => Discover().FirstOrDefault(x => x.Name == name && Skills.Enabled(enabled, x.Id)) ?? throw new UnauthorizedAccessException("Skill absent ou désactivé.");
+    public IEnumerable<SkillDefinition> Definitions() => Discover().Select(s => new SkillDefinition(s.Id,
+        (s.Id.StartsWith("project:", StringComparison.Ordinal) ? "Projet · " : "Global · ") + s.Name,
+        (s.Id.StartsWith("project:", StringComparison.Ordinal) ? "Project · " : "Global · ") + s.Name,
+        s.Description + "\n" + s.Directory, s.Description + "\n" + s.Directory, ""));
+    public string Catalog(string enabled) => string.Join('\n', Discover().Where(x => Skills.Enabled(enabled, x.Id)).Select(x => $"- {x.Id}: {x.Description} (load_skill name={x.Id}; OpenCode native read: {Path.Combine(x.Directory, "SKILL.md")})"));
+    CustomSkill Find(string name, string enabled) => Discover().FirstOrDefault(x => (x.Id == name || x.Name == name) && Skills.Enabled(enabled, x.Id)) ?? throw new UnauthorizedAccessException("Skill absent ou désactivé.");
     public async Task<string> ReadAsync(string name, string? resource, string enabled, CancellationToken ct)
     {
         var skill = Find(name, enabled);

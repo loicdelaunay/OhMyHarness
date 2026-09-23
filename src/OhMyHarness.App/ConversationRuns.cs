@@ -20,6 +20,8 @@ public sealed partial class MainWindow
         public int? InputEstimate { get; set; }
         public (double Tokens, bool Estimated)? Context { get; set; }
         public string Status { get; set; } = "";
+        public StatusKind StatusMode { get; set; } = StatusKind.Activity;
+        public DateTimeOffset? StatusExpiresAt { get; set; }
         public bool Submitted { get; set; }
         public bool Failed { get; set; }
         public bool IsScheduled { get; init; }
@@ -27,7 +29,7 @@ public sealed partial class MainWindow
 
     readonly Dictionary<int, ConversationRun> conversationRuns = [];
     readonly Dictionary<int, (string Text, List<Attachment> Images)> conversationDrafts = [];
-    readonly Dictionary<int, string> conversationStatuses = [];
+    readonly Dictionary<int, StatusEntry> conversationStatuses = [];
     readonly Dictionary<int, List<Message>> conversationHistory = [];
     readonly SemaphoreSlim toolQueue = new(1, 1);
     ConversationRun? ActiveRun => chat != null ? conversationRuns.GetValueOrDefault(chat.Id) : null;
@@ -56,39 +58,58 @@ public sealed partial class MainWindow
     void RefreshGenerationControls()
     {
         // Keep navigation, settings and drafts usable; only sending to this running chat is blocked.
-        send.IsEnabled = selectedSubagent == null && chat != null;
+        send.IsEnabled = selectedSubagent == null && chat != null && conversationReady && !conversationLoading;
         stop.IsEnabled = ActiveRun != null;
         composer.IsEnabled = selectedSubagent == null;
         RefreshConversationProgress();
     }
 
+    static TElement? FindConversationElement<TElement>(DependencyObject parent, string tag) where TElement : FrameworkElement
+    {
+        if (parent is TElement found && Equals(found.Tag, tag)) return found;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            if (FindConversationElement<TElement>(VisualTreeHelper.GetChild(parent, i), tag) is { } child) return child;
+        return default;
+    }
+
+    void RefreshConversationCard(ListViewItem container)
+    {
+        if (FindConversationElement<Border>(container, "conversation-card") is not { } card) return;
+        var hover = ReferenceEquals(hoveredConversationContainer, container);
+        card.Background = hover ? FluentDesign.Resource("ConversationHoverFillBrush") : FluentDesign.Card;
+        card.BorderBrush = hover ? FluentDesign.Resource("ConversationHoverStrokeBrush") : FluentDesign.Stroke;
+    }
+
     void RefreshConversationProgress()
     {
         RefreshSubagentSidebar();
-        static TElement? Find<TElement>(DependencyObject parent) where TElement : DependencyObject
-        {
-            if (parent is TElement found) return found;
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-                if (Find<TElement>(VisualTreeHelper.GetChild(parent, i)) is { } child) return child;
-            return default;
-        }
         foreach (var item in chats.Items.OfType<Chat>())
         {
             if (chats.ContainerFromItem(item) is not ListViewItem container) continue;
-            if (Find<ProgressBar>(container) is { } bar)
+            RefreshConversationCard(container);
+            if (FindConversationElement<Border>(container, "conversation-selection") is { } selection)
+                selection.Visibility = (chats.SelectedItem as Chat)?.Id == item.Id ? Visibility.Visible : Visibility.Collapsed;
+            if (FindConversationElement<ProgressBar>(container, "conversation-progress") is { } bar)
             {
                 bar.Visibility = conversationRuns.ContainsKey(item.Id) ? Visibility.Visible : Visibility.Collapsed;
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(bar, T("Le modèle réfléchit…") + " " + item.Title);
             }
-            if (Find<TextBlock>(container) is { } label) label.Text = item.Title;
+            if (FindConversationElement<TextBlock>(container, "conversation-title") is { } label)
+            {
+                label.Text = item.Title;
+                ToolTipService.SetToolTip(label, item.Title);
+            }
         }
     }
 
-    void SetRunStatus(ConversationRun run, string text)
+    void SetRunStatus(ConversationRun run, string text, StatusKind kind = StatusKind.Activity)
     {
         run.Status = text;
-        conversationStatuses[run.Chat.Id] = text;
-        if (IsVisible(run)) status.Text = text;
+        run.StatusMode = kind;
+        run.StatusExpiresAt = StatusExpiry(text, kind);
+        conversationStatuses[run.Chat.Id] = new(text, kind, run.StatusExpiresAt);
+        if (IsVisible(run) && !(kind == StatusKind.Activity && IsTransientOverlayVisible))
+            ShowStatus(text, kind, run.Chat.Id, run.StatusExpiresAt);
     }
 
     void ShowContextUsage(ConversationRun run, double tokens, bool estimated = false)
@@ -105,7 +126,7 @@ public sealed partial class MainWindow
 
     void RestoreRunMetrics(ConversationRun run)
     {
-        status.Text = run.Status;
+        ShowStatus(run.Status, run.StatusMode, run.Chat.Id, run.StatusExpiresAt);
         if (run.Update != null) UpdateMetrics(run.Update, run.InputEstimate, run.Provider.ContextLimit);
         if (run.Context is { } context) ShowContextUsage(context.Tokens, context.Estimated, run.Provider.ContextLimit);
         RefreshSpeedTooltip(run.Tracker);
@@ -132,8 +153,8 @@ public sealed partial class MainWindow
 
     async Task SendAsync()
     {
-        if (chat == null || provider == null || project == null) return;
-        if(!ProviderModels.Visible(provider).Contains(provider.Model)) { status.Text=WorkflowText("Cochez un modèle dans les réglages des fournisseurs.","Select a model in provider settings."); return; }
+        if (!conversationReady || conversationLoading || chat == null || provider == null || project == null) return;
+        if(!ProviderModels.Visible(provider).Contains(provider.Model)) { ShowStatus(WorkflowText("Cochez un modèle dans les réglages des fournisseurs.","Select a model in provider settings."), StatusKind.Error); return; }
         if (string.IsNullOrWhiteSpace(composer.Text) && pendingImages.Count == 0) return;
         if(ActiveRun is { } active)
         {
@@ -172,7 +193,8 @@ public sealed partial class MainWindow
         {
             run.Failed = true;
             SetRunStatus(run, ex is OperationCanceledException
-                ? T("Génération arrêtée. Réponse partielle conservée.") : T("Erreur : ") + ex.Message);
+                ? T("Génération arrêtée. Réponse partielle conservée.") : T("Erreur : ") + ex.Message,
+                ex is OperationCanceledException ? StatusKind.Notice : StatusKind.Error);
             if (!run.Submitted && run.PendingInputId==0)
             {
                 if (IsVisible(run)) SaveConversationDraft();
@@ -185,7 +207,9 @@ public sealed partial class MainWindow
         finally
         {
             try { await run.Db.SaveChangesAsync(); }
-            catch (Exception ex) { run.Failed = true; success = false; SetRunStatus(run, T("Erreur : ") + ex.Message); }
+            catch (Exception ex) { run.Failed = true; success = false; SetRunStatus(run, T("Erreur : ") + ex.Message, StatusKind.Error); }
+            if (success && run.StatusMode == StatusKind.Activity)
+                SetRunStatus(run, T("Réponse terminée · historique enregistré."), StatusKind.Notice);
             if (run.Submitted) conversationHistory[run.Chat.Id] = run.Db.Messages.Local.ToList();
             if (run.Sandbox != null) await terminals.StopChatAsync(run.Chat.Id, true);
             conversationRuns.Remove(run.Chat.Id);

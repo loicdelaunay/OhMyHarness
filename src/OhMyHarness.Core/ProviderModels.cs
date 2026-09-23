@@ -19,7 +19,8 @@ public static class ProviderModels
     public static void Refresh(Provider provider, IEnumerable<string> detected)
     {
         var models = Normalize(detected);
-        var selected = Visible(provider).Where(models.Contains).ToList();
+        var available = models.ToHashSet(StringComparer.Ordinal);
+        var selected = Visible(provider).Where(available.Contains).ToList();
         provider.DetectedModelsJson = JsonSerializer.Serialize(models);
         provider.SelectedModelsJson = JsonSerializer.Serialize(selected);
     }

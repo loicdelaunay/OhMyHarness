@@ -14,9 +14,16 @@ public sealed partial class MainWindow
     {
         var config = FeatureSettings.Read(state.FeaturesJson);
         TextZoom.Set(config.FontZoomPercent);
-        FluentDesign.SetTheme(config.Theme);
+        ApplyTheme(config.Theme);
         ApplyBranding();
-        root.RequestedTheme = AppearanceThemes.Get(config.Theme).Dark ? ElementTheme.Dark : ElementTheme.Light;
+        composerInfoExpanded = config.ComposerInfoExpanded;
+        UpdateInfoPanel();
+    }
+    void ApplyTheme(string themeId)
+    {
+        var theme = AppearanceThemes.Get(themeId);
+        FluentDesign.SetTheme(theme.Id);
+        root.RequestedTheme = theme.Dark ? ElementTheme.Dark : ElementTheme.Light;
         root.Background = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush");
         shell.PaneBackground = FluentDesign.Resource("SolidBackgroundFillColorBaseBrush");
         FluentDesign.WindowChrome(this);
@@ -24,8 +31,6 @@ public sealed partial class MainWindow
         { settingsRoot.RequestedTheme = root.RequestedTheme; FluentDesign.WindowChrome(settingsWindow); }
         if (tasksWindow?.Content is FrameworkElement tasksRoot)
         { tasksRoot.RequestedTheme = root.RequestedTheme; FluentDesign.WindowChrome(tasksWindow); }
-        composerInfoExpanded = config.ComposerInfoExpanded;
-        UpdateInfoPanel();
     }
     void UpdateInfoPanel()
     {
