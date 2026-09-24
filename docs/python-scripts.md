@@ -1,68 +1,65 @@
-# Skill Script Python
+# Python Script skill
 
-Activer **Script Python** dans **Réglages → Skills**, ou depuis le menu **+**.
-Il fonctionne aussi sans dossier source associé.
+Enable **Python Script** under **Settings → Skills** or in the **+** menu.
+It also works without an attached source folder.
 
-- `python_info` : version, chemin de l’interpréteur embarqué, état d’extraction et scripts de la conversation.
-- `write_python_script` : crée ou remplace un script `.py` après autorisation.
-- `run_python_script` : exécute un script enregistré avec des arguments littéraux et renvoie `exit_code`, `stdout`, `stderr`, `timed_out`.
-
-```json
-{"path":"rapport.py","code":"from pathlib import Path\nPath('rapport.txt').write_text('Bonjour !', encoding='utf-8')\nprint('Rapport créé')"}
-```
-
-Puis, avec `run_python_script` :
+- `python_info`: version, embedded interpreter path, extraction status and conversation scripts.
+- `write_python_script`: create or replace a `.py` script after approval.
+- `run_python_script`: execute a saved script with literal arguments and return `exit_code`, `stdout`, `stderr`, `timed_out`.
 
 ```json
-{"path":"rapport.py","args":[],"timeout_seconds":30}
+{"path":"report.py","code":"from pathlib import Path\nPath('report.txt').write_text('Hello!', encoding='utf-8')\nprint('Report created')"}
 ```
 
-Le répertoire de travail est le premier dossier source du projet, sinon celui des
-scripts de la conversation. `working_directory` peut sélectionner un autre dossier
-parmi les sources associées. Les imports entre scripts sont pris en charge. Le mode
-isolé de Python ignore `PYTHONHOME`, `PYTHONPATH` et les packages utilisateur du PC ;
-il ne constitue **pas une sandbox de sécurité**. Les scripts ont les droits de
-l’utilisateur et peuvent accéder au système après autorisation.
+Then, using `run_python_script`:
 
-Les demandes respectent Refuser tout / Demander / Acceptation automatique et les
-autorisations mémorisées. En Plan, seule la consultation `python_info` est permise.
-Ces outils locaux sont retirés en mode sandbox de conteneurs, sans repli local.
-L’exécution n’accepte pas de saisie interactive. Délai par défaut : **30 s**, maximum
-**600 s**. Annuler la conversation arrête l’exécution ; les sorties sont limitées
-à 100 000 caractères chacune. Ne pas détacher de processus en arrière-plan.
+```json
+{"path":"report.py","args":[],"timeout_seconds":30}
+```
 
-## Publication portable
+The working directory is the project's first source folder, or the conversation's
+scripts folder if no sources are attached. `working_directory` can select another
+attached source folder. Imports between scripts are supported. Python isolated
+mode ignores `PYTHONHOME`, `PYTHONPATH` and the PC's user packages; it is **not a
+security sandbox**. Scripts run with the user's rights and can access the system
+after approval.
 
-**CPython 3.13.15**, distribution [python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901),
-est intégré comme ressource compressée dans le programme. Le téléchargement se fait
-sur la machine de compilation, avec SHA-256 épinglé dans
-`build/PythonRuntime.targets`. Aucun téléchargement ni Python installé ne sont
-nécessaires sur la machine qui exécute l’application.
+Requests respect Deny all / Ask / Automatic approval and saved grants. In Plan,
+only the `python_info` query is allowed. These local tools are removed in container
+sandbox mode, with no local fallback. Execution does not accept interactive input.
+Default timeout: **30 seconds**, maximum **600 seconds**. Cancelling the conversation
+stops execution; each output stream is limited to 100,000 characters. Do not detach
+background processes.
 
-Les builds et publications WinUI/Service importent ce target automatiquement,
-y compris un `dotnet publish` direct. Architectures : Windows x64/ARM64, macOS
-Intel/Apple Silicon. Le premier build requiert Internet ; les suivants peuvent
-réutiliser l’archive vérifiée dans `artifacts/python-cache`.
+## Portable publishing
 
-Au premier lancement autorisé d’un script, le runtime est extrait dans le profil
-portable, à côté de l’EXE Windows (ou du profil fourni par l’hôte Electron) :
+**CPython 3.13.15**, from [python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901),
+is embedded as a compressed program resource. Downloading happens on the build
+machine, with SHA-256 pinned in `build/PythonRuntime.targets`. No download or
+installed Python is required on the machine running the application.
+
+WinUI/Service builds and publishes import this target automatically, including a
+direct `dotnet publish`. Architectures: Windows x64/ARM64, macOS Intel/Apple Silicon.
+The first build requires Internet; later builds can reuse the verified archive in
+`artifacts/python-cache`.
+
+On the first approved script launch, the runtime is extracted into the portable
+profile beside the Windows EXE (or the profile supplied by the Electron host):
 
 ```text
 OhMyHarness.App.exe
 database.sqlite
 skills/
 runtimes/python/3.13.15-20260901-win-x64/python/...
-scripts/python/chat-41/rapport.py
+scripts/python/chat-41/report.py
 temp/python/chat-41/...
 ```
 
-La bibliothèque standard, ses extensions natives et les licences de la distribution
-sont conservées. Les bibliothèques métier telles que NumPy/Pandas ne sont pas
-préinstallées. L’archive Windows x64 ajoute environ 47 Mo à la publication ; le
-runtime extrait occupe davantage de place. Les anciennes versions extraites ne
-sont pas supprimées automatiquement lors d’une mise à jour.
+The standard library, native extensions and distribution licenses are retained.
+Specialized libraries such as NumPy/Pandas are not preinstalled. The Windows x64
+archive adds about 47 MB to the publication; the extracted runtime occupies more
+space. Updates do not automatically delete older extracted versions.
 
-Validation portable : publier `tests/PythonRuntime.Probe` en EXE unique puis
-l’exécuter depuis un autre répertoire. Ce test utilise le véritable interpréteur
-embarqué et vérifie les autorisations, la portée des scripts, les imports, Unicode,
-SQLite/SSL, les erreurs et le délai maximal.
+Portable validation: publish `tests/PythonRuntime.Probe` as a single EXE, then run
+it from another directory. This test uses the actual embedded interpreter and
+checks permissions, script scope, imports, Unicode, SQLite/SSL, errors and timeout.

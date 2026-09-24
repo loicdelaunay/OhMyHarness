@@ -9,8 +9,8 @@
     <ApplicationTitle>OhMyHarness</ApplicationTitle>
     <ApplicationId>com.ohmyharness.app</ApplicationId>
     <DefaultLanguage>en-US</DefaultLanguage>
-    <ApplicationDisplayVersion>1.6.1</ApplicationDisplayVersion>
-    <ApplicationVersion>9</ApplicationVersion>
+    <ApplicationDisplayVersion>1.8.0</ApplicationDisplayVersion>
+    <ApplicationVersion>12</ApplicationVersion>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
     <PublishTrimmed>false</PublishTrimmed>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
@@ -35,6 +35,7 @@
     <ProjectReference Include="../OhMyHarness.Core/OhMyHarness.Core.csproj" GlobalPropertiesToRemove="TargetFrameworks" />
   </ItemGroup>
   <Import Project="../../build/PythonRuntime.targets" />
+  <ItemGroup><AssemblyMetadata Include="OhMyHarness.SingleFile" Value="$(PublishSingleFile)" /></ItemGroup>
   <Target Name="ExcludePublishedDebugSymbols" BeforeTargets="_ComputeFilesToBundle" Condition="'$(PublishSingleFile)' == 'true'">
     <ItemGroup>
       <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />

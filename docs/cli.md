@@ -61,6 +61,8 @@ Type `/` in the composer to see command suggestions. The list filters as you typ
 | /sandbox | Enable Docker/Podman isolation, review a diff and apply approved changes |
 | /details | Expand/collapse reasoning and tool output |
 | /settings | Language, appearance, thinking, permissions, AI naming, vision bridge and logs |
+| /font | Independent font and size, bundled retro fonts, terminal profile export/install |
+| /update | GitHub update check, automatic startup-check preference and installation |
 
 Existing OpenCode and composed providers configured in the desktop app are usable. Source exploration, glob/grep, patches, asynchronous terminals, memory, RAG, Python and custom skills use the same engine. Sending another message during a response queues it.
 
@@ -78,14 +80,22 @@ Diagnostic JSONL logs live in <code>logs</code> in the portable data directory. 
 | Ctrl+N / Ctrl+O / Ctrl+B | New conversation / chat search / models |
 | Enter | Send or queue |
 | Ctrl+J or Alt+Enter | Newline (Ctrl+Enter where the terminal supports it) |
-| Left/Right, Home/End, Backspace/Delete | Edit the composer |
+| Arrows, Home/End, Backspace/Delete | Move and edit; Home/End stay within the current line |
+| Ctrl+A | Select the entire draft or dialog input |
+| Shift+arrows / Ctrl+Shift+Left/Right | Extend selection by character / word |
+| Ctrl+Left/Right, Ctrl+Home/End | Move by word / to the beginning or end of the draft |
+| Ctrl+Shift+Home/End | Select to the beginning or end of the draft |
+| Ctrl+Backspace (explicit modifier) / Ctrl+Delete | Delete the previous / following word (Ctrl+W also deletes the previous word) |
+| Ctrl+C / Ctrl+X / Ctrl+V | Copy / cut selected text / paste text without sending (Windows and macOS) |
+| Ctrl+Z / Ctrl+Y | Undo / redo; Ctrl+Shift+Z also redoes where supported |
+| Ctrl+C without selection | Stop the current run |
 | PgUp/PgDn or mouse wheel | Scroll history or dialog details |
 | End with an empty composer | Follow the latest output |
 | Escape | Cancel a dialog or stop the selected chat |
 | Ctrl+Q | Quit; active runs require confirmation |
 | Ctrl+L | Redraw |
 
-Pasting uses the terminal's bracketed-paste protocol. Agent questions appear as choices or free-text dialogs; multiple selections are supported. Other conversations continue while a question or permission is open. Permission choices are Deny, Allow once and Always allow this scope.
+Selection is highlighted; typing or pasting replaces it. Masked credential fields support selection and paste but cannot be copied or cut. Shortcuts reserved by the terminal host must be released in its own settings before the CLI can receive them. Pasting also supports the terminal's bracketed-paste protocol. Agent questions appear as choices or free-text dialogs; multiple selections are supported. Other conversations continue while a question or permission is open. Permission choices are Deny, Allow once and Always allow this scope.
 
 ## Automation
 
@@ -120,11 +130,23 @@ omh --theme crt-amber
 omh --render-demo --theme neon-synthwave
 ```
 
-Each retro theme includes a font preset: Consolas, Lucida Console or Cascadia Mono. A terminal application cannot universally change its host's font. `/font` exports a dedicated Windows Terminal profile, and on Windows offers an explicit **Install Windows Terminal profile** action. Open the new **OhMyHarness · …** profile in a new tab (restart Windows Terminal if it has not discovered the profile yet) to apply the font and experimental CRT scanlines/glow. The active session is not restarted. Missing fonts use the terminal's fallback.
+`/font` selects a font **independently of the theme**, plus a size from 8 to 36 pt. Choose the bundled **VT323**, **Share Tech Mono** or **Space Mono**, a system font, or enter another installed font name. The original OFL licenses travel with the embedded fonts. A terminal application cannot universally change its host's font: saving the choice alone does not change the active tab.
+
+Choose **Save and install font + profile** on Windows to install the bundled font for the current user and create a dedicated Windows Terminal profile. Open **OhMyHarness · …** in a new tab (restart Windows Terminal if needed) to apply the font and experimental CRT scanlines/glow. **Export** writes the profile and font/license beside the portable database; macOS users can install the exported TTF with their font manager. Missing system/custom fonts use the host terminal's fallback. Fonts installed for Windows are machine-local, under the user's Windows Fonts directory and HKCU font registration; exported copies remain portable.
 
 The portable JSON is kept under `terminal-profiles` beside the database. Installation adds only an OhMyHarness fragment under `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\OhMyHarness`; it does not rewrite `settings.json` or change your default terminal profile. Delete the exported fragment there to uninstall it. Regenerate after moving the portable application: launch paths are absolute. This optional terminal integration is machine-local; other application data remains portable.
 
 macOS and other terminals still display the theme's ANSI colors and borders; select fonts in that terminal's preferences. CRT glow is host-dependent, not simulated with flashing text. See [Windows Terminal appearance](https://learn.microsoft.com/en-us/windows/terminal/customize-settings/profile-appearance) and [profile fragments](https://learn.microsoft.com/en-us/windows/terminal/json-fragment-extensions).
+
+## GitHub updates
+
+The interactive CLI checks for compatible updates at startup by default. `/update` lets you disable that check, check manually, or download and restart into a newer release. Non-interactive automation never checks or installs updates. The GUI has its own equivalent setting in **Settings → General**.
+
+Installation is user-triggered after the automatic check. The app waits for agents and drafts to be finished, verifies the official release asset's SHA-256, and replaces only its executable after shutdown; terminals/tools close with the app. SQLite, skills, MCP configuration and other user resources are preserved. A hidden Windows PowerShell helper performs the replacement without administrator rights. If another instance stays open, it cancels instead of stopping it. Save GUI settings before choosing to restart.
+
+Automatic installation requires a published Windows standalone executable in a writable folder. Staging, the previous EXE (`previous.exe`), and installation result/error files live in `.updates` beside that EXE. They can be removed after a successful update once the old version is no longer needed. The backup covers the executable, not database migrations. Other platforms and development builds use manual downloads.
+
+Release maintainers: GUI tags must use `vX.Y.Z` or `gui-vX.Y.Z`; CLI tags use `cli-vX.Y.Z`. Assets must be named `OhMyHarness-…-win-x64.zip` (GUI), `OhMyHarness-CLI-…-win-x64.zip` (CLI), or the corresponding `win-arm64`/`.exe` variant. ZIPs must contain exactly one `OhMyHarness.App.exe` or `omh.exe`, respectively. Other archive contents are not installed. Drafts, previews, older versions, mismatched architectures and assets without a GitHub SHA-256 digest are excluded. Publish each channel's executable separately; the updater does not rely on GitHub's global “latest” release.
 
 ## Publish and validate
 
@@ -151,3 +173,9 @@ dotnet run --project tests/OhMyHarness.Tests -c Release
 ~~~
 
 The last command prints a deterministic ANSI example of the real renderer with clearly labelled fictional content. It makes no provider request and opens no database.
+
+## Response style
+
+Open `/settings` and choose **Response style**. DEFAULT adds no style instruction; SHORT asks for the minimum answer, PRAGMATIC for fairly short actionable answers, DETAILED for useful depth, and FUN for appropriate light humor. This preference is shared with GUI Settings → General and saved in SQLite. It applies to the next send, including OpenCode sessions, without changing an active generation or tool permissions.
+
+Ordinary Backspace removes one character/grapheme, whether the terminal sends BS or DEL. If your host does not transmit a distinct Ctrl+Backspace sequence, use Ctrl+W to delete the previous word.

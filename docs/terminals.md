@@ -1,31 +1,31 @@
-# Terminaux multiples
+# Multiple terminals
 
-Le panneau **Terminal** contient désormais plusieurs onglets, propres à chaque conversation. **+** ouvre un terminal local et **×** le ferme en arrêtant sa commande. Chaque onglet conserve son nom, son état, son brouillon et la sortie de sa dernière commande pendant la session de l'application. Changer de conversation ou ouvrir les paramètres n'arrête pas les commandes.
+The **Terminal** panel contains multiple tabs scoped to each conversation. **+** opens a local terminal and **×** closes it, stopping its command. Each tab retains its name, state, draft and last command output during the application session. Switching conversations or opening Settings does not stop commands.
 
-Les sorties locales sont actualisées pendant l'exécution. Les terminaux sandbox de l'agent apparaissent dans le même panneau avec la mention **Sandbox** ; leur sortie est disponible après le retour du conteneur. Ils peuvent être arrêtés ou fermés depuis le panneau. Leur lancement reste réservé à l'agent sandbox afin de conserver son espace isolé.
+Local output updates during execution. Agent sandbox terminals appear in the same panel with a **Sandbox** label; output becomes available when the container returns. They can be stopped or closed from the panel. Only the sandbox agent can launch them, to preserve its isolated workspace.
 
-## Outils du skill Terminal
+## Terminal skill tools
 
-| Outil | Fonction |
+| Tool | Purpose |
 |---|---|
-| `list_terminals` | Lister les terminaux de la conversation et du mode courant, leur shell, leur état et leur dernière sortie. |
-| `create_terminal` | Créer un onglet nommé dans le dossier source du projet. |
-| `start_terminal` | Demander l'autorisation, lancer une commande et retourner immédiatement son `jobId`. |
-| `read_terminal` | Lire la sortie disponible sans attendre. |
-| `wait_terminal` | Attendre de façon asynchrone au plus `timeout_ms`, puis retourner l'état et la sortie ; 10 s par défaut, 30 s maximum. |
-| `stop_terminal` | Arrêter la commande sans fermer l'onglet. |
-| `delete_terminal` | Arrêter la commande et supprimer l'onglet. |
+| `list_terminals` | List terminals in the conversation and current mode, their shell, state and latest output. |
+| `create_terminal` | Create a named tab in the project source folder. |
+| `start_terminal` | Request permission, launch a command and immediately return its `jobId`. |
+| `read_terminal` | Read available output without waiting. |
+| `wait_terminal` | Wait asynchronously up to `timeout_ms`, then return state and output; 10 seconds by default, 30 seconds maximum. |
+| `stop_terminal` | Stop the command without closing the tab. |
+| `delete_terminal` | Stop the command and remove the tab. |
 
-Les outils utilisent `terminal_id`. Pour lire ou attendre une commande précise, fournissez également `job_id`, avec la valeur `jobId` renvoyée au lancement. Les dix dernières commandes restent consultables par identifiant. `run_terminal` est conservé pour compatibilité : il utilise également un onglet, mais attend sa commande.
+Tools use `terminal_id`. To read or wait for a particular command, also provide `job_id` using the `jobId` returned at launch. The last ten commands remain accessible by identifier. `run_terminal` remains for compatibility: it also uses a tab but waits for its command.
 
-L'agent peut démarrer une commande dans A, en démarrer une autre dans B, puis consulter ou attendre leurs résultats. Une attente n'occupe pas le verrou global des outils. Les attentes d'au moins une seconde ne déclenchent pas la protection contre les appels identiques ; les interrogations immédiates répétées restent contrôlées.
+The agent can start a command in A, start another in B, then inspect or wait for their results. Waiting does not hold the global tool lock. Waits of at least one second do not trigger identical-call protection; repeated immediate polls remain checked.
 
-## Limites et portée
+## Limits and scope
 
-- Les commandes sont **non interactives**, avec un nouveau processus PowerShell sous Windows ou zsh sous macOS. Elles ne constituent pas un shell persistant : variables, `cd` et sessions interactives ne sont pas conservés entre commandes. Regroupez les opérations liées dans une même commande.
-- Une commande active par onglet, 12 onglets par conversation, 64 au total et 16 commandes simultanées. Chaque commande conserve la limite actuelle de 60 secondes et une sortie plafonnée à environ 100 000 caractères.
-- `completed` indique que le processus s'est terminé ; son code de sortie figure dans le résultat. `failed`, `cancelled` et `timed_out` signalent les autres issues.
-- Les permissions restent demandées au lancement, selon le réglage global. Le mode Plan peut lister, lire et attendre ; il ne peut pas lancer de commande.
-- Un agent ne peut pas manipuler un terminal d'une autre conversation ni utiliser un terminal local depuis une sandbox. Les terminaux pointant vers un dossier détaché ne peuvent plus être lancés.
-- En sandbox, les commandes parallèles utilisent des copies distinctes. Seuls leurs fichiers modifiés sont réintégrés dans la copie de la conversation, après vérification des contenus d'origine. Un conflit est signalé et la copie de récupération conservée. L'application au projet réel nécessite toujours la revue sandbox. Les commandes sandbox sont arrêtées à la fin de la génération avant la libération de l'espace isolé.
-- Fermer l'application ou supprimer une conversation arrête ses commandes. Les onglets ne sont pas restaurés après redémarrage.
+- Commands are **non-interactive**, with a new PowerShell process on Windows or zsh on macOS. They are not a persistent shell: variables, `cd` and interactive sessions do not survive between commands. Group related operations in one command.
+- One active command per tab, 12 tabs per conversation, 64 overall and 16 simultaneous commands. The original implementation limited each command to 60 seconds with output capped at about 100,000 characters; configurable command deadlines are described in [the guide](guide.md).
+- `completed` means the process exited; its exit code appears in the result. `failed`, `cancelled` and `timed_out` indicate other outcomes.
+- Permissions are requested at launch according to the global setting. Plan mode may list, read and wait; it cannot launch commands.
+- An agent cannot manipulate another conversation's terminal or use a local terminal from a sandbox. Terminals pointing at a detached folder can no longer launch commands.
+- In the sandbox, parallel commands use separate copies. Only modified files are merged back into the conversation copy after checking original contents. Conflicts are reported and the recovery copy is retained. Applying to the real project still requires sandbox review. Sandbox commands stop at generation completion before the isolated workspace is released.
+- Closing the application or deleting a conversation stops its commands. Tabs are not restored after restarting.

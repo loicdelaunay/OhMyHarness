@@ -8,8 +8,8 @@ public sealed partial class TerminalUi
     {
         var settings = FeatureSettings.Read(snapshot.State.FeaturesJson);
         var choices = new List<Choice> { new("shared", L("Suivre le thème de l’application", "Follow desktop theme")) };
-        choices.AddRange(CliThemes.All.Select(t => new Choice(t.Id, t.Name, t.Font + " · CRT")));
-        choices.AddRange(AppearanceThemes.All.Select(t => new Choice(t.Id, L(t.French, t.English), "Cascadia Mono")));
+        choices.AddRange(CliThemes.All.Select(t => new Choice(t.Id, t.Name, "CRT")));
+        choices.AddRange(AppearanceThemes.All.Select(t => new Choice(t.Id, L(t.French, t.English))));
         string? selected = requested.Length > 0 ? requested : await Prompt(L("Thème du CLI", "CLI theme"),
             L("↑/↓ : aperçu immédiat. Entrée : enregistrer. Échap : revenir au thème précédent. /font pour la police et l’effet cathodique Windows Terminal.",
               "↑/↓: live preview. Enter: save. Esc: restore previous theme. /font for Windows Terminal fonts and CRT effects."), choices,
@@ -24,14 +24,31 @@ public sealed partial class TerminalUi
     async Task ConfigureTerminalFont(WorkspaceSnapshot snapshot)
     {
         var config = FeatureSettings.Read(snapshot.State.FeaturesJson);
-        var theme = CliThemes.Resolve(options.Theme ?? config.CliTheme, config.Theme);
+        var fontChoices = CliFonts.All.Select(f => new Choice(f.Face, f.Face, f.Description + (f.File != null ? " · embarquée / bundled" : " · système / system"))).ToList();
+        fontChoices.Insert(0, new("default", L("Police par défaut du thème", "Theme default font")));
+        fontChoices.Add(new("custom", L("Autre police installée…", "Other installed font…")));
+        var face = await Prompt(L("Police CLI indépendante du thème", "CLI font independent of theme"),
+            L("La police s’applique via un profil dans un nouvel onglet du terminal. Choisir une police ne change pas le thème.", "Fonts apply through a profile in a new terminal tab. Choosing a font does not change the theme."), fontChoices,
+            selectedValue: config.CliFont.Length == 0 ? "default" : config.CliFont);
+        if (face == null) return;
+        if (face == "custom") face = await Prompt(L("Nom exact de la police installée", "Exact installed font name"), initial: config.CliFont);
+        if (face == null) return;
+        string? size = await Prompt(L("Taille de police (8–36)", "Font size (8–36)"), initial: config.CliFontSize.ToString());
+        if (size == null) return;
+        if (!int.TryParse(size, out int points) || points is < 8 or > 36) throw new ArgumentException("Taille de police invalide / Invalid font size.");
+        config.CliFont = face == "default" ? "" : face.Trim(); config.CliFontSize = points; _ = config.Json();
+        var theme = CliFonts.Apply(CliThemes.Resolve(options.Theme ?? config.CliTheme, config.Theme), config);
         string details = L($"Police : {theme.Font}, {theme.FontSize} pt. CRT : {(theme.Crt ? "oui" : "non")}.\nLa police est contrôlée par le terminal hôte. Le profil dédié applique police, curseur, couleurs et effet CRT dans un nouvel onglet Windows Terminal.\nLes terminaux macOS et autres conservent leur police : choisissez-la dans leurs préférences. Aucun téléchargement de police.",
             $"Font: {theme.Font}, {theme.FontSize} pt. CRT: {theme.Crt}.\nThe host terminal controls fonts. The dedicated profile applies font, cursor, colors and CRT in a new Windows Terminal tab.\nmacOS and other terminals retain their font: choose it in their preferences. No font downloads.");
-        var choices = new List<Choice> { new("export", L("Exporter le profil portable", "Export portable profile"), "terminal-profiles/*.json") };
-        if (OperatingSystem.IsWindows()) choices.Insert(0, new("install", L("Installer le profil Windows Terminal", "Install Windows Terminal profile"), L("Ajoute un profil OhMyHarness pour cet utilisateur", "Adds an OhMyHarness profile for this user")));
+        var choices = new List<Choice> { new("export", L("Enregistrer et exporter le profil + police", "Save and export profile + font"), "terminal-profiles/*.json · fonts/"), new("save", L("Enregistrer le choix", "Save selection")) };
+        if (OperatingSystem.IsWindows()) choices.Insert(0, new("install", L("Enregistrer et installer police + profil", "Save and install font + profile"), L("Pour cet utilisateur, puis ouvrir un nouvel onglet", "For this user; then open a new tab")));
         choices.Add(new("close", L("Fermer", "Close")));
         var action = await Prompt(L("Police et effet cathodique", "Font and CRT effect"), details, choices);
-        if (action is not ("install" or "export")) return;
+        if (action is not ("install" or "export" or "save")) return;
+        await SaveFeatures(c => { c.CliFont = config.CliFont; c.CliFontSize = config.CliFontSize; }); await Refresh();
+        if (action == "save") return;
+        await CliFonts.ExportAsync(theme.Font, PortableStorage.Root, lifetime.Token);
+        if (action == "install") await CliFonts.InstallForUserAsync(theme.Font, PortableStorage.Root, lifetime.Token);
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Executable path unavailable.");
         var assembly = Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase) ? typeof(TerminalUi).Assembly.Location : null;
         var directory = CurrentProject?.GetSourceFolders().FirstOrDefault(Directory.Exists) ?? Environment.CurrentDirectory;

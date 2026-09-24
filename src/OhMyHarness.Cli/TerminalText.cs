@@ -71,33 +71,3 @@ public static class TerminalText
         return rows;
     }
 }
-
-public sealed class InputBuffer
-{
-    public string Text { get; private set; } = "";
-    public int Cursor { get; private set; }
-    public void Set(string value) { Text = TerminalText.Clean(value); Cursor = Text.Length; }
-    public void Insert(string value)
-    {
-        value = TerminalText.Clean(value);
-        if (Text.Length + value.Length > 128_000) return;
-        Text = Text.Insert(Cursor, value); Cursor += value.Length;
-    }
-    public void Key(ConsoleKeyInfo key)
-    {
-        var boundaries = StringInfo.ParseCombiningCharacters(Text);
-        int Previous() => boundaries.LastOrDefault(b => b < Cursor, 0);
-        int Next() => boundaries.FirstOrDefault(b => b > Cursor, Text.Length);
-        switch (key.Key)
-        {
-            case ConsoleKey.LeftArrow: Cursor = Previous(); break;
-            case ConsoleKey.RightArrow: Cursor = Next(); break;
-            case ConsoleKey.Home: Cursor = 0; break;
-            case ConsoleKey.End: Cursor = Text.Length; break;
-            case ConsoleKey.Backspace when Cursor > 0: int start = Previous(); Text = Text.Remove(start, Cursor - start); Cursor = start; break;
-            case ConsoleKey.Delete when Cursor < Text.Length: Text = Text.Remove(Cursor, Next() - Cursor); break;
-            case ConsoleKey.U when key.Modifiers.HasFlag(ConsoleModifiers.Control): Set(""); break;
-            default: if (!char.IsControl(key.KeyChar)) Insert(key.KeyChar.ToString()); break;
-        }
-    }
-}

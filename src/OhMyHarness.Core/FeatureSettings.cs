@@ -5,7 +5,12 @@ namespace OhMyHarness.Core;
 public sealed class FeatureSettings
 {
     public string Theme { get; set; } = "fluent-dark";
+    public string ResponseStyle { get; set; } = "default";
     public string CliTheme { get; set; } = "shared";
+    public string CliFont { get; set; } = "";
+    public int CliFontSize { get; set; } = 14;
+    public bool GuiCheckUpdates { get; set; } = true;
+    public bool CliCheckUpdates { get; set; } = true;
     public string ApplicationName { get; set; } = "OhMyHarness";
     public string LogoPath { get; set; } = "";
     public int FontZoomPercent { get; set; } = 100;
@@ -40,6 +45,8 @@ public sealed class FeatureSettings
     public static FeatureSettings Read(string json) { try { return JsonSerializer.Deserialize<FeatureSettings>(json) ?? new(); } catch { return new(); } }
     public string Json()
     {
+        ResponseStyle = ResponseStyles.Get(ResponseStyle).Id;
+        if (CliFont.Length > 100 || CliFont.Any(char.IsControl) || CliFontSize is < 8 or > 36) throw new ArgumentException("Police CLI invalide / Invalid CLI font.");
         if (VisionInstruction.Length > 8000 || NamingModel.Length > 200 || NamingProviderId < 0 || LogRetentionDays is < 1 or > 365 || !Enum.TryParse<AppLogLevel>(LogLevel, out _))
             throw new ArgumentException("Réglages vision, nommage ou logs invalides.");
         if (BrowserMode is not ("embedded" or "chrome" or "disabled") || RagMode is not ("local" or "api") || RagMaxFiles is < 1 or > 2000 || RagTopK is < 1 or > 20 || RagModel.Length > 200 || VisionProviderId < 0 || VisionModel.Length > 200)

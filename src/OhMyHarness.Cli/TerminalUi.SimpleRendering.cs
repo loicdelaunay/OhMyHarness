@@ -90,10 +90,7 @@ public sealed partial class TerminalUi
         canvas.Write(left, inputTop, rule, p.Dim);
         canvas.Write(left, inputTop + inputRows + 1, rule, p.Dim);
         canvas.Write(left, inputTop + 1, ">", p.Highlight);
-        var typed = TerminalText.Wrap(editor.Text.Insert(editor.Cursor, appearance.Crt ? "█" : "▏"), bodyWidth - 4);
-        int cursorRow = TerminalText.Wrap(editor.Text[..editor.Cursor], bodyWidth - 4).Count - 1;
-        int first = Math.Max(0, cursorRow - inputRows + 1);
-        for (int i = 0; i < inputRows && i + first < typed.Count; i++) canvas.Write(left + 2, inputTop + i + 1, typed[i + first], p.Normal, bodyWidth - 4);
+        InputRendering.Draw(canvas, editor, left + 2, inputTop + 1, bodyWidth - 4, inputRows, p, appearance.Crt);
         int limit = view.Limit > 0 ? view.Limit : CurrentProvider?.ContextLimit ?? 0;
         string context = limit > 0 ? $"{100.0 * view.Tokens / limit:0.#}%" : "—";
         var model = CurrentProvider?.Model ?? "/connect";
@@ -108,13 +105,14 @@ public sealed partial class TerminalUi
     {
         var p = appearance.Palette;
         canvas.Write(left, 1, "◈", new(p.Accent, p.Background, true));
-        canvas.Write(left + 4, 1, "OhMyHarness CLI 1.6.1", p.Highlight, width - 4);
+        canvas.Write(left + 4, 1, "OhMyHarness CLI 1.8.0", p.Highlight, width - 4);
         if (appearance.Crt) canvas.Write(left + 29, 1, appearance.Brand, p.Dim, width - 29);
         var thinking = workspace?.State.ThinkingLevel ?? "auto";
         canvas.Write(left + 4, 2, (CurrentProvider == null ? L("Aucun fournisseur · /connect", "No provider · /connect") : CurrentProvider.Name + " · " + CurrentProvider.Model) + " (" + thinking + ")", p.Dim, width - 4);
         canvas.Write(left + 4, 3, CurrentProject?.GetSourceFolders().FirstOrDefault() ?? Environment.CurrentDirectory, p.Dim, width - 4);
         int active = runs.Count(r => !r.Value.IsCompleted);
         if (active > 0) canvas.Write(left + 4, 4, $"{active} " + L("conversation(s) active(s) · /chats", "active conversation(s) · /chats"), new(p.Green, p.Background), width - 4);
+        else if (availableUpdate != null) canvas.Write(left + 4, 4, L("Mise à jour ", "Update ") + availableUpdate.Version + " · /update", p.Highlight, width - 4);
     }
 
     void DrawDialog(TerminalCanvas canvas, Palette p, UiDialog prompt, CliTheme appearance)
@@ -126,8 +124,8 @@ public sealed partial class TerminalUi
         var body = TerminalText.Wrap(prompt.Body, width); prompt.Scroll = Math.Clamp(prompt.Scroll, 0, Math.Max(0, body.Count - bodyRows));
         for (int i = 0; i < bodyRows && i + prompt.Scroll < body.Count; i++) canvas.Write(x, y + 2 + i, body[i + prompt.Scroll], p.Dim, width);
         int inputY = y + bodyRows + 2;
-        string input = prompt.Secret ? new string('•', Math.Min(width - 6, prompt.Input.Text.Length)) : TerminalText.Fit(prompt.Input.Text, width - 6);
-        canvas.Write(x, inputY, "> " + input + (appearance.Crt ? "█" : "▏"), p.Normal, width);
+        canvas.Write(x, inputY, "> ", p.Normal);
+        InputRendering.Draw(canvas, prompt.Input, x + 2, inputY, width - 4, 1, p, appearance.Crt, prompt.Secret);
         int firstRow = inputY + 2;
         if (prompt.Choices != null)
         {

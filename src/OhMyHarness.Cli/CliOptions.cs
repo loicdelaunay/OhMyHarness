@@ -52,7 +52,7 @@ public sealed class CliOptions
     }
 
     public const string HelpText = """
-    OhMyHarness CLI 1.6.1
+    OhMyHarness CLI 1.8.0
     Your portable AI workspace, in the terminal.
 
       omh [project-folder]                       Interactive terminal interface
@@ -80,6 +80,9 @@ public sealed class CliOptions
       Escape  Stop this run        Ctrl+Q  Quit
       PgUp / PgDn / mouse wheel    Scroll history; End follows the live response
       /       Commands             Ctrl+L  Redraw
+      Ctrl+A  Select all           Shift+arrows  Select text
+      Ctrl+arrows  Move by word    Ctrl+Shift+arrows  Select by word
+      Ctrl+C/X/V  Copy/cut/paste   Ctrl+Z/Y  Undo/redo
 
     Configure a provider with /connect. Browser and desktop automation are
     available through MCP in the CLI; the graphical WebView is not hosted here.

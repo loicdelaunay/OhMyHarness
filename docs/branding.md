@@ -1,24 +1,24 @@
-# Nom, logo et thèmes Fly
+# Name, logo and Fly themes
 
-Dans **Réglages → Général**, ouvrir **Nom et logo de l’application** :
+Under **Settings → General**, open **Application name and logo**:
 
-- Saisir le nom affiché, jusqu’à 80 caractères. Un champ vide rétablit OhMyHarness.
-- Choisir un logo PNG, JPEG, WebP, BMP ou ICO (10 Mo, 4096 × 4096 pixels maximum). Un aperçu permet de vérifier l’image avant d’enregistrer.
-- **Logo d’origine** restaure seulement le logo. **Rétablir le nom et le logo** réinitialise les deux champs.
-- Cliquer sur **Enregistrer** pour appliquer. Annuler conserve la personnalisation précédente.
+- Enter the displayed name, up to 80 characters. An empty field restores OhMyHarness.
+- Choose a PNG, JPEG, WebP, BMP or ICO logo (maximum 10 MB, 4096 × 4096 pixels). A preview lets you check the image before saving.
+- **Original logo** restores only the logo. **Reset name and logo** resets both fields.
+- Click **Save** to apply. Cancel keeps the previous customization.
 
-Le nom apparaît dans la barre latérale et les titres des fenêtres principale, Réglages et Tâches planifiées. Le logo apparaît dans la barre latérale et sert aussi d’icône de fenêtre sous Windows. Le nom du fichier EXE et l’identité système de l’application restent stables.
+The name appears in the sidebar and titles of the main, Settings and Scheduled tasks windows. The logo appears in the sidebar and also serves as the window icon on Windows. The EXE filename and application system identity remain unchanged.
 
-## Stockage portable
+## Portable storage
 
-Les champs `ApplicationName` et `LogoPath` sont stockés dans les réglages JSON de `database.sqlite`, sans nouvelle migration. Un logo déjà dans le dossier de l’exécutable ou un sous-dossier est référencé par son chemin relatif, par exemple `mon-logo.png` ou `images/logo.png`.
+`ApplicationName` and `LogoPath` are stored in the JSON settings in `database.sqlite`, without a new migration. A logo already inside the executable directory or a subfolder is referenced by a relative path, such as `my-logo.png` or `images/logo.png`.
 
-Un logo extérieur est copié à l’enregistrement dans `branding/`, sous un nom dérivé de son contenu. Son fichier d’origine est conservé. Sous Windows, `branding/window-icon.ico` est une version adaptée pour l’icône de fenêtre. Copier **le dossier complet**, base et images comprises, conserve ces références après déplacement. Les chemins relatifs sont résolus depuis le dossier portable réel, même avec un EXE auto-extractible.
+An external logo is copied into `branding/` when saved, using a content-derived filename. Its original file is retained. On Windows, `branding/window-icon.ico` is an adapted window-icon version. Copying **the complete folder**, including the database and images, preserves these references after relocation. Relative paths resolve from the actual portable directory, even for a self-extracting EXE.
 
-Si un logo manque ou devient illisible, l’interface utilise le logo d’origine ; les réglages permettent de choisir une nouvelle image. Une réinitialisation ne supprime pas les fichiers d’image.
+If a logo is missing or unreadable, the interface uses the original logo; Settings lets you choose a new image. Resetting does not delete image files.
 
-## Fly dark et Fly light
+## Fly dark and Fly light
 
-Les deux thèmes sont disponibles dans **Général → Thème**, en français comme en anglais. **Fly dark** associe un fond presque noir à des surfaces bleu profond ; **Fly light** associe un fond blanc à des surfaces neutres. Le bleu Airbus **#00205B** marque les actions et les sélections dans les deux thèmes, sans accent bleu clair. Les textes sur les boutons bleus restent blancs pour conserver leur lisibilité.
+Both themes are available under **General → Theme**, in French and English. **Fly dark** combines a near-black background with deep-blue surfaces; **Fly light** combines a white background with neutral surfaces. Airbus blue **#00205B** marks actions and selections in both themes, without a light-blue accent. Text on blue buttons stays white for readability.
 
-La couleur de référence est publiée dans le [Brand Centre officiel d’Airbus](https://www.brand.airbus.com/en/asset-library/airbus-logo). Il s’agit de thèmes inspirés de cette palette ; aucun logo Airbus n’est fourni avec l’application.
+The reference color is published in the [official Airbus Brand Centre](https://www.brand.airbus.com/en/asset-library/airbus-logo). These themes are inspired by that palette; the application does not include an Airbus logo.

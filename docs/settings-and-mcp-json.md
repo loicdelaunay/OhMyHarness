@@ -1,16 +1,30 @@
-# Réglages, thèmes et MCP.json
+# Settings, themes and MCP.json
 
-Général propose huit thèmes persistés dans le champ de réglages SQLite existant : Fluent sombre, Minuit, Forêt, Fluent clair, Ivoire, Brume, Fly dark et Fly light. Le nom affiché et le logo sont personnalisables dans la même section ; voir [le stockage portable du logo](branding.md). Les raccourcis de saisie restent actifs, mais leur ancien label a été retiré des paramètres.
+General offers themes persisted in the existing SQLite settings field: Fluent dark, Midnight, Forest, Fluent light, Ivory, Mist, Fly dark and Fly light, plus Electric dark/light. The displayed name and logo are customizable in the same section; see [portable logo storage](branding.md). Input shortcuts remain active, but their old label has been removed from Settings.
 
-Les fournisseurs sont affichés en cartes. La roue dentée ouvre le formulaire de la connexion concernée ; ajout, duplication, suppression et modèles composés restent disponibles.
+Providers appear as cards. The gear opens the selected connection's form; adding, duplicating, deleting and composite models remain available.
 
-Les informations du modèle, le débit, le contexte et la saisie partagent un même bloc. Son bouton d’en-tête replie ou déplie les informations et conserve ce choix dans SQLite.
+Model information, speed, context and input share one block. Its header button collapses or expands the information and saves that choice in SQLite.
 
-## Configuration MCP portable
+## Response style
 
-`MCP.json` est créé dans le dossier portable de l’application, à côté de `database.sqlite` et de l’EXE Windows, via `PortableStorage.Root` (jamais dans le cache d’extraction du binaire standalone). Le host macOS fournit son dossier portable au service.
+**General → Response style** and the CLI's **/settings → Response style** share a saved preference:
 
-Dans les réglages MCP, **Éditer MCP.json** ouvre l’éditeur. Exemple accepté :
+| Style | Behavior |
+| --- | --- |
+| DEFAULT | No additional style instruction; existing behavior is unchanged. |
+| SHORT (COURT) | The minimum answer needed to satisfy the request. |
+| PRAGMATIC (PRAGMATIQUE) | Fairly short, practical answers focused on results and next steps. |
+| DETAILED (DÉTAILLÉ) | Detailed explanations with useful context and examples. |
+| FUN (AMUSANT) | A playful, friendly tone with appropriate light humor. |
+
+The setting applies to subsequent sends in both interfaces, including OpenCode. It affects presentation, not task scope, permissions or required output formats. An already running response keeps the settings captured when it started.
+
+## Portable MCP configuration
+
+`MCP.json` is created in the application's portable folder, beside `database.sqlite` and the Windows EXE, through `PortableStorage.Root` (never in the standalone binary's extraction cache). The macOS host supplies its portable folder to the service.
+
+In MCP Settings, **Edit MCP.json** opens the editor. Accepted example:
 
 ```json
 {
@@ -27,17 +41,17 @@ Dans les réglages MCP, **Éditer MCP.json** ouvre l’éditeur. Exemple accept�
 }
 ```
 
-Remplacer le chemin par celui de Godot. Aucune connexion n’est lancée lors de l’enregistrement ; les connexions et appels utilisent les autorisations MCP existantes. Les serveurs sont activés par défaut dans ce format ; `"enabled": false` permet de les désactiver. Pour HTTP/SSE : `url`, `transport` et `headers` sont également acceptés. Le dossier de travail facultatif est `cwd`.
+Replace the path with your Godot path. Saving does not launch a connection; connections and calls use existing MCP permissions. Servers are enabled by default in this format; `"enabled": false` disables them. For HTTP/SSE, `url`, `transport` and `headers` are also accepted. The optional working directory is `cwd`.
 
-Le fichier est validé avant application à SQLite, qui conserve les identifiants et les secrets protégés nécessaires au moteur. Les modifications manuelles sont chargées au démarrage/à la consultation de la configuration et lors du chargement des outils. Un JSON invalide laisse les serveurs précédents disponibles. Une modification externe intervenue pendant l’édition demande un rechargement au lieu d’être écrasée.
+The file is validated before applying it to SQLite, which retains the identifiers and protected secrets needed by the engine. Manual changes load at startup, when viewing configuration and when loading tools. Invalid JSON leaves previous servers available. An external change made during editing requires reloading rather than overwriting it.
 
-Les secrets déjà enregistrés dans SQLite ne sont jamais exportés en clair. Les valeurs `env`/`headers` écrites explicitement dans le JSON restent naturellement présentes dans le fichier et sont chiffrées dans SQLite. Si un secret est ensuite remplacé via le formulaire, l’ancienne valeur explicite est retirée du fichier. La comparaison interne des secrets inchangés préserve les empreintes des autorisations. `MCP.json` est exclu de Git.
+Secrets already stored in SQLite are never exported in clear text. Explicit `env`/`headers` values in JSON naturally remain in that file and are encrypted in SQLite. If a secret is later replaced through the form, its old explicit value is removed from the file. Internal comparison of unchanged secrets preserves permission fingerprints. `MCP.json` is excluded from Git.
 
-Les noms des serveurs doivent être uniques. Les ajouts, suppressions et toggles du formulaire sont répercutés dans le fichier. Si formulaire et fichier sont modifiés simultanément, recharger le fichier avant d’enregistrer.
+Server names must be unique. Form additions, deletions and toggles are reflected in the file. If the form and file are changed simultaneously, reload the file before saving.
 
 ## Validation
 
-- Contrôles .NET de persistance, parsing du format Godot, absence d’export des secrets, synchronisation et conflits de fichier.
-- Tests du service pour les API JSON, les huit thèmes et la synchronisation des toggles.
-- Smoke Electron : thème clair, cartes fournisseurs, éditeur JSON et repli du panneau de saisie.
-- Compilation et publication WinUI Windows ; validation native visuelle interrompue par l’utilisateur (Échap). Aucun contrôle visuel macOS réalisé.
+- .NET checks for persistence, Godot-format parsing, absence of secret exports, synchronization and file conflicts.
+- Service tests for JSON APIs, the original eight themes and toggle synchronization.
+- Electron smoke test: light theme, provider cards, JSON editor and composer collapse.
+- WinUI Windows build and publish; native visual validation was interrupted by the user (Escape). No macOS visual check was performed.

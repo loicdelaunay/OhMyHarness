@@ -1,12 +1,12 @@
-# Windows et macOS avec Uno Platform
+# Windows and macOS with Uno Platform
 
-La solution possède deux projets applicatifs : `OhMyHarness.Core` et `OhMyHarness.App`. Le second utilise Uno Platform pour partager l’interface, les réglages, les conversations et les outils entre Windows et macOS. L’ancien service JSON se trouve dans `Core/Hosting` ; le dossier Electron `desktop` est conservé pour compatibilité, sans être nécessaire à la nouvelle publication.
+The GUI solution uses two projects: `OhMyHarness.Core` and `OhMyHarness.App`. The latter uses Uno Platform to share the interface, settings, conversations and tools between Windows and macOS. The former JSON service lives in `Core/Hosting`; the Electron `desktop` folder is retained for compatibility and is not required by the new publication. A separate `OhMyHarness.Cli` project provides the terminal interface.
 
-Voir [le guide Uno, tâches et modèles](uno-tasks-models.md) pour l’architecture et les nouvelles fonctions.
+See [the Uno, tasks and models guide](uno-tasks-models.md) for architecture and features.
 
-## Compiler et publier
+## Build and publish
 
-Sur Mac, installer le SDK .NET 10 et les outils de ligne de commande Xcode :
+On Mac, install the .NET 10 SDK and Xcode command-line tools:
 
 ```bash
 dotnet build src/OhMyHarness.App -f net10.0-desktop -c Release
@@ -17,33 +17,33 @@ bash ./publish-macos.sh arm64 # Apple Silicon
 bash ./publish-macos.sh x64   # Intel
 ```
 
-La publication autonome se trouve dans `artifacts/release/osx-arm64` ou `osx-x64`, avec le lanceur `OhMyHarness.App`. Elle ne nécessite ni installation .NET ni Electron. Le script ne produit pas de DMG signé et ne configure pas de notarisation Apple. Pour une distribution publique, signer et notariser sur Mac ; conserver les dépendances natives livrées avec la publication.
+The standalone publication is under `artifacts/release/osx-arm64` or `osx-x64`, with the `OhMyHarness.App` launcher. It requires neither installed .NET nor Electron. The script does not produce a signed DMG or configure Apple notarization. For public distribution, sign and notarize on Mac; retain native dependencies supplied with the publication.
 
-Sur Windows, `publish.ps1` publie Uno Desktop par défaut. `publish.ps1 -NativeWinUI -OutputDirectory artifacts/release-winui` cible WinUI native ; valider son lancement sur la machine cible. Le dossier `artifacts/official` reste le chemin de publication par défaut.
+On Windows, `publish.ps1` publishes Uno Desktop by default. Follow repository conventions with `./publish.ps1 -OutputDirectory artifacts/GUI`. `-NativeWinUI` targets native WinUI; validate startup on the target machine. Temporary validation publications belong in a dedicated folder under `artifacts/TEMP` and must be cleaned up afterward.
 
-## Adaptations
+## Platform adaptations
 
-| Fonction | Windows natif | Uno Desktop / macOS |
+| Feature | Native Windows | Uno Desktop / macOS |
 | --- | --- | --- |
-| Interface, modèles, CRON, historique, agents, skills | Interface partagée | Interface partagée |
-| Navigateur | WebView2 intégré | WebView2 de Uno dans l’onglet Web (WebKit sur macOS) |
-| DOM, JavaScript, capture et clavier web | API WebView2 | Scripts DOM ; capture de la vue depuis la fenêtre de l’application |
-| Aperçus locaux | Origine virtuelle approuvée | Serveur loopback limité au dossier approuvé |
-| Terminal | PowerShell | zsh sur Mac, PowerShell sur Windows |
-| Souris et clavier | API Windows | CoreGraphics sur Mac |
-| Capture bureau/application | API Windows | `screencapture`, cible par identifiant de fenêtre, curseur superposé |
-| Clés API | DPAPI CurrentUser | Trousseau macOS |
+| Interface, models, CRON, history, agents, skills | Shared interface | Shared interface |
+| Browser | Embedded WebView2 | Uno WebView2 in the Web tab (WebKit on macOS) |
+| DOM, JavaScript, web capture and keyboard | WebView2 API | DOM scripts; capture the view from the application window |
+| Local previews | Approved virtual origin | Loopback server limited to the approved folder |
+| Terminal | PowerShell | zsh on Mac, PowerShell on Windows |
+| Mouse and keyboard | Windows APIs | CoreGraphics on Mac |
+| Desktop/application capture | Windows APIs | `screencapture`, target by window ID, cursor overlay |
+| API keys | DPAPI CurrentUser | macOS Keychain |
 
-Le navigateur intégré Uno Desktop s’ouvre dans le panneau Outils et conserve une vue par conversation. Chrome/Edge et Node.js ne sont nécessaires que pour le mode externe Chrome · MCP. Sur macOS, les interactions JavaScript synthétiques peuvent être refusées par les sites qui exigent des événements natifs ; la capture du navigateur utilise l’autorisation système d’enregistrement de l’écran. Le parcours macOS reste à valider sur un Mac. Git, OpenCode, Docker et les serveurs MCP sont nécessaires uniquement aux fonctions qui les utilisent.
+The Uno Desktop embedded browser opens in Tools and keeps a view per conversation. Chrome/Edge and Node.js are needed only for external Chrome · MCP mode. On macOS, synthetic JavaScript interactions may be refused by sites requiring native events; browser capture uses the system Screen Recording permission. The macOS flow still needs validation on a Mac. Git, OpenCode, Docker and MCP servers are required only for features that use them.
 
-Les données (`database.sqlite`, `skills/`, `MCP.json`, profils, Python et temporaires) restent dans le dossier portable de l’exécutable. Placer la publication dans un dossier accessible en écriture. Les clés sont liées au compte système : celles provenant de Windows DPAPI ou de l’ancienne interface Electron doivent être ressaisies dans Uno sur Mac. Le reste de l’historique est conservé par les migrations EF Core. Ne pas ouvrir une ancienne version sur la base migrée sans sauvegarde.
+Data (`database.sqlite`, `skills/`, `MCP.json`, profiles, Python and temporary files) stays in the executable's portable directory. Put the publication in a writable folder. Keys are tied to the system account: keys from Windows DPAPI or the old Electron interface must be re-entered in Uno on Mac. EF Core migrations preserve the rest of the history. Do not open an older version against the migrated database without a backup.
 
-Dans **Réglages Système → Confidentialité et sécurité**, autoriser l’**Accessibilité** pour souris/clavier et l’**Enregistrement de l’écran** pour les captures. Les permissions applicatives restent nécessaires et ne remplacent pas les droits macOS. `keyboard_keys` décrit les touches disponibles pour l’OS.
+Under **System Settings → Privacy & Security**, allow **Accessibility** for mouse/keyboard and **Screen Recording** for captures. Application permissions are still required and do not replace macOS rights. `keyboard_keys` describes keys available on the OS.
 
 ## Validation
 
-Les builds Windows natif et Uno Desktop, les 413 contrôles Core, les deux EXE autonomes et les neuf contrôles Chromium ont été vérifiés. Le test UI contrôle aussi les cases des modèles et deux exécutions d’une tâche avec outil et historique, via un fournisseur local simulé. Les cibles macOS ARM64 et Intel ont été compilées depuis Windows. Le workflow `.github/workflows/desktop.yml` prévoit les builds et tests Windows, Mac ARM64 et Mac Intel.
+Native Windows and Uno Desktop builds, 413 Core checks, both standalone EXEs and nine Chromium checks were verified during the migration. The UI test also checks model checkboxes and two task executions with tools and history using a simulated local provider. macOS ARM64 and Intel targets were compiled from Windows. `.github/workflows/desktop.yml` includes Windows, Mac ARM64 and Mac Intel builds and tests.
 
-**À vérifier sur un Mac réel :** démarrage et fermeture, pickers, trousseau après redémarrage, permissions TCC, touches Command/Option et Unicode, curseur et coordonnées des captures Retina/multi-écrans, lancement de Python embarqué, signature/notarisation. Une compilation croisée ne valide pas ces interactions natives.
+**Still to verify on a real Mac:** startup and shutdown, pickers, Keychain after restart, TCC permissions, Command/Option keys and Unicode, cursor and coordinates in Retina/multi-monitor captures, embedded Python startup, signing/notarization. Cross-compilation does not validate these native interactions.
 
-Référence : [publication Uno Desktop](https://platform.uno/docs/articles/uno-publishing-desktop.html).
+Reference: [Uno Desktop publishing](https://platform.uno/docs/articles/uno-publishing-desktop.html).

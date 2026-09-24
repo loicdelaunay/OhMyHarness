@@ -71,26 +71,46 @@ public static class TerminalKeys
     {
         '\r' => new(c, ConsoleKey.Enter, false, false, false),
         '\x1b' => new(c, ConsoleKey.Escape, false, false, false),
-        '\b' or '\x7f' => new('\b', ConsoleKey.Backspace, false, false, false),
+        '\b' => new('\b', ConsoleKey.Backspace, false, false, false),
+        // Both BS and DEL can mean ordinary Backspace; require explicit modifiers for word deletion.
+        '\x7f' => new('\b', ConsoleKey.Backspace, false, false, false),
         '\t' => new(c, ConsoleKey.Tab, false, false, false),
         >= '\x01' and <= '\x1a' => new(c, ConsoleKey.A + (c - 1), false, false, true),
         _ => new(c, 0, false, false, false)
     };
     public static ConsoleKeyInfo? Sequence(string value)
     {
-        var key = value switch
+        if (value.Length < 3 || value[0] != '\x1b' || value[1] is not ('[' or 'O')) return null;
+        char final = value[^1];
+        var parameters = value[2..^1].Split(';');
+        int modifier = 1;
+        if (parameters.Length > 2 || (parameters.Length == 2 &&
+            (!int.TryParse(parameters[1], out modifier) || modifier is < 1 or > 8))) return null;
+        if (parameters[0].Length > 0 && !int.TryParse(parameters[0], out _)) return null;
+        var key = final switch
         {
-            "\x1b[A" or "\x1bOA" => ConsoleKey.UpArrow,
-            "\x1b[B" or "\x1bOB" => ConsoleKey.DownArrow,
-            "\x1b[C" or "\x1bOC" => ConsoleKey.RightArrow,
-            "\x1b[D" or "\x1bOD" => ConsoleKey.LeftArrow,
-            "\x1b[H" or "\x1bOH" or "\x1b[1~" or "\x1b[7~" => ConsoleKey.Home,
-            "\x1b[F" or "\x1bOF" or "\x1b[4~" or "\x1b[8~" => ConsoleKey.End,
-            "\x1b[3~" => ConsoleKey.Delete,
-            "\x1b[5~" => ConsoleKey.PageUp,
-            "\x1b[6~" => ConsoleKey.PageDown,
+            'A' => ConsoleKey.UpArrow,
+            'B' => ConsoleKey.DownArrow,
+            'C' => ConsoleKey.RightArrow,
+            'D' => ConsoleKey.LeftArrow,
+            'H' => ConsoleKey.Home,
+            'F' => ConsoleKey.End,
+            'u' => parameters[0] switch
+            {
+                "8" or "127" => ConsoleKey.Backspace, "13" => ConsoleKey.Enter,
+                "97" => ConsoleKey.A, "99" => ConsoleKey.C, "118" => ConsoleKey.V,
+                "120" => ConsoleKey.X, "121" => ConsoleKey.Y, "122" => ConsoleKey.Z,
+                _ => (ConsoleKey)0
+            },
+            '~' => parameters[0] switch
+            {
+                "1" or "7" => ConsoleKey.Home, "4" or "8" => ConsoleKey.End,
+                "3" => ConsoleKey.Delete, "5" => ConsoleKey.PageUp, "6" => ConsoleKey.PageDown,
+                _ => (ConsoleKey)0
+            },
             _ => (ConsoleKey)0
         };
-        return key == 0 ? null : new ConsoleKeyInfo('\0', key, false, false, false);
+        int flags = modifier - 1;
+        return key == 0 ? null : new ConsoleKeyInfo('\0', key, (flags & 1) != 0, (flags & 2) != 0, (flags & 4) != 0);
     }
 }

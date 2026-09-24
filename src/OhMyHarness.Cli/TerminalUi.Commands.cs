@@ -39,9 +39,10 @@ public sealed partial class TerminalUi
         new("/export", "Exporter Markdown / Export Markdown"),
         new("/sandbox", "Sandbox", "Activer · examiner"),
         new("/details", "Raisonnement et outils / Reasoning and tools", "Développer / réduire"),
-        new("/settings", "Réglages / Settings", "Langue · thème · réflexion"),
+        new("/settings", "Réglages / Settings", "Langue · thème · réflexion · style"),
         new("/theme", "Thème du CLI / CLI theme", "CRT vert · ambre · néon"),
         new("/font", "Police et CRT / Font and CRT", "Profil Windows Terminal"),
+        new("/update", "Mises à jour GitHub / GitHub updates"),
         new("/stop", "Arrêter ce tour / Stop this turn", "Échap"),
         new("/quit", "Quitter / Quit", "Ctrl+Q")
     ];
@@ -62,6 +63,7 @@ public sealed partial class TerminalUi
         {
             case "/theme": Work(() => ChooseCliTheme(snapshot, argument)); break;
             case "/font": Work(() => ConfigureTerminalFont(snapshot)); break;
+            case "/update": Work(UpdateSettings); break;
             case "/details": showDetails = !showDetails; break;
             case "/stop": halted.Add(id); Work(async () => { await client.Call("stop", new { chatId = id }); }); break;
             case "/new": Work(async () => { int created = await client.CreateChat(projectId, lifetime.Token); await Refresh(); Post(() => SwitchChat(created)); }); break;

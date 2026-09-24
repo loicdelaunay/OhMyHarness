@@ -11,7 +11,7 @@
   · <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.6.1">Download CLI</a>
   · <a href="#quick-start">Quick start</a>
   · <a href="#build-from-source">Build from source</a>
-  · <a href="docs/guide-fr.md">Français</a>
+  · <a href="docs/guide.md">User guide</a>
 </p>
 
 **Tired of powerful AI harnesses that need a stack of configuration and external services before the first conversation? What if a portable EXE handled the workspace?**
@@ -21,6 +21,8 @@ OhMyHarness brings projects, concurrent chats, agents, sources, tools, and setti
 > **Available in GUI and CLI modes.** Choose the desktop workspace or the keyboard-driven terminal experience. Both use the same .NET agent engine, portable storage, projects, and conversations. [GUI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0) · [CLI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.6.1) · [CLI guide](docs/cli.md)
 
 **Make it yours:** customize the desktop **theme, displayed application name, and logo/icon** in Settings. Keep the custom image beside the executable with a relative path to retain it when moving the folder. The CLI has its own color themes, including green/amber CRT and neon styles, with live previews; terminal fonts and CRT effects use an optional host-terminal profile.
+
+The latest source adds an independent CLI font/size picker with bundled **VT323**, **Share Tech Mono** and **Space Mono**, plus **GitHub update checks** for both interfaces. GUI Settings → General and CLI `/update` can download a verified compatible release and restart while preserving portable data. See the [font and update guide](docs/cli.md#cli-themes-fonts-and-crt); these features require the new 1.7.0 build and are not included in older downloads.
 
 The chat model itself is **not** bundled: cloud providers need network access and, depending on the service, an API key. Git, Docker/Podman, OpenCode, and Chrome MCP are optional integrations with their own prerequisites. The core app does not require a separate OhMyHarness server.
 
@@ -157,6 +159,6 @@ The [Windows v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/release
 
 ## More documentation
 
-The detailed guides are currently mostly in French: [browser, RAG, and subagents](docs/browser-rag-agents.md), [memory](docs/memory.md), [custom skills](docs/skill-authoring.md), [MCP](docs/mcp.md), [scheduled tasks and models](docs/uno-tasks-models.md), [macOS](docs/macos.md), and the [full French guide](docs/guide-fr.md).
+Detailed guides: [browser, RAG, and subagents](docs/browser-rag-agents.md), [memory](docs/memory.md), [custom skills](docs/skill-authoring.md), [MCP](docs/mcp.md), [scheduled tasks and models](docs/uno-tasks-models.md), [macOS](docs/macos.md), and the [full user guide](docs/guide.md).
 
 OhMyHarness is available under the [MIT license](LICENSE).

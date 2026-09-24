@@ -1,46 +1,46 @@
-# Modes, sous-agents et skills personnalisés
+# Modes, subagents and custom skills
 
-Dans **+**, chaque conversation possède deux réglages mémorisés en SQLite et capturés au prochain envoi. Modifier un réglage ne transforme pas une génération déjà en cours ; arrêtez-la avant de relancer avec un autre mode.
+The **+** menu provides two per-conversation settings, saved in SQLite and captured when the next message is sent. Changing a setting does not affect an active generation; stop it before restarting in another mode.
 
-## Plan et Exécution
+## Plan and Execution
 
-**Exécution** conserve les outils activés et leurs autorisations habituelles.
+**Execution** keeps enabled tools and their usual permissions.
 
-**Plan** ne se contente pas d'une instruction au modèle : les outils interdits sont retirés des définitions et leurs appels sont rejetés avant exécution, même si le fournisseur émet un appel inattendu ou si les autorisations sont en acceptation automatique. Les lectures de sources, glob/grep, Git, l'inspection d'une page déjà ouverte et les captures restent disponibles selon les skills activés. Écriture, patch, terminal (y compris une commande supposée en lecture seule), navigation, clavier, souris et MCP sont bloqués. Les commandes lancées manuellement par l'utilisateur dans l'onglet Terminal restent des actions de l'utilisateur.
+**Plan** goes beyond an instruction to the model: prohibited tools are removed from their definitions and calls are rejected before execution, even if the provider sends an unexpected call or permissions are set to automatic approval. Source reads, glob/grep, Git, inspection of an already open page and screenshots remain available according to enabled skills. Writing, patching, terminal commands (including supposedly read-only commands), navigation, keyboard, mouse and MCP are blocked. Commands entered manually in the Terminal tab remain user actions.
 
-Avec OpenCode, le message porte une règle de refus globale des outils, suivie uniquement des exceptions de lecture natives `read`, `glob`, `grep`, `list` lorsque les outils OpenCode sont activés. Les demandes d'autorisation restantes sont refusées en Plan. Les hooks/plugins exécutés par une installation externe OpenCode restent sous le contrôle de cette installation ; ce mode n'est pas un sandbox du processus externe.
+With OpenCode, the message carries a global tool-deny rule followed only by exceptions for native read tools `read`, `glob`, `grep`, `list` when OpenCode tools are enabled. Remaining permission requests are denied in Plan mode. Hooks/plugins run by an external OpenCode installation remain under its control; this mode does not sandbox the external process.
 
 ## Orchestration
 
-- **Disable** : aucun outil de délégation dans le moteur direct ; tout appel forgé est rejeté. L'outil `task` natif d'OpenCode est désactivé.
-- **Auto** : le modèle décide d'appeler `delegate_tasks` pour des tâches indépendantes. Avec OpenCode en Exécution, son outil natif `task` peut être utilisé si les outils OpenCode sont activés.
-- **Forced** : avant la réponse principale, deux sous-agents en lecture seule examinent respectivement les sources/conventions et les risques/critères de validation. Leurs rapports sont affichés et conservés dans la conversation. Le parent peut ensuite déléguer d'autres tâches avec le moteur direct.
+- **Disable**: no delegation tool in the direct engine; forged calls are rejected. OpenCode's native `task` tool is disabled.
+- **Auto**: the model decides when to call `delegate_tasks` for independent tasks. In OpenCode Execution mode, its native `task` tool may be used if OpenCode tools are enabled.
+- **Forced**: before the main answer, two read-only subagents examine sources/conventions and risks/validation criteria respectively. Their reports appear in the conversation and are retained. The parent can then delegate further tasks with the direct engine.
 
-Les sous-agents directs utilisent le même fournisseur et modèle que la conversation, avec un contexte séparé, les instructions du projet et les skills activés. Ils peuvent lire ou modifier les sources selon le mode hérité ; les analyses forcées restent en Plan. Ils n'ont pas d'outils terminal, bureau, navigateur ou MCP, et ne peuvent pas déléguer récursivement. Maximum trois tâches par appel, six sous-agents par envoi, huit étapes par sous-agent. Les rapports distinguent les limites atteintes des réponses terminées. Arrêter la conversation annule aussi ses sous-agents. Leurs appels consomment des tokens supplémentaires.
+Direct subagents use the conversation's provider and model, with separate context, project instructions and enabled skills. They can read or modify sources according to the inherited mode; forced analyses remain in Plan mode. They have no terminal, desktop, browser or MCP tools and cannot delegate recursively. Limits: three tasks per call, six subagents per message and eight steps per subagent. Reports distinguish limits reached from completed answers. Stopping a conversation also cancels its subagents. Their calls consume additional tokens.
 
-Les consultations forcées OpenCode utilisent des sessions distinctes et les outils natifs de lecture. Les sous-agents supplémentaires natifs OpenCode sont gérés par OpenCode ; ils n'utilisent pas la boucle `delegate_tasks` locale ni ses limites.
+Forced OpenCode consultations use separate sessions and native read tools. Additional native OpenCode subagents are managed by OpenCode; they do not use the local `delegate_tasks` loop or its limits.
 
-## Instructions du projet
+## Project instructions
 
-Les fichiers **AGENTS.md** des racines associées et de leurs sous-dossiers sont chargés au début de chaque envoi. Les chemins exclus et les liens symboliques sont ignorés ou refusés. Chaque texte est accompagné de son dossier d'application ; les règles d'un sous-dossier prévalent pour ses fichiers. Les fichiers situés hors des racines associées ne sont pas parcourus.
+**AGENTS.md** files in attached roots and subfolders are loaded at the start of each message. Excluded paths and symbolic links are skipped or rejected. Each text is accompanied by its scope directory; subfolder rules take precedence for files in that subfolder. Files outside attached roots are not scanned.
 
-Limites explicites : 32 Ko par fichier, 64 Ko au total, 2 000 dossiers parcourus par racine. Si une limite est atteinte, une erreur demande de réduire le périmètre au lieu de cacher une partie des instructions. Ces conventions ne peuvent pas modifier les autorisations ou le mode Plan.
+The original loading limits were 32 KB per file, 64 KB overall and 2,000 directories per root, with an error when a limit was reached. Current loading is asynchronous and best effort: see [the guide](guide.md) for updated behavior. Project conventions cannot change permissions or Plan mode.
 
-## Dossier skills
+## Skills folder
 
-Windows natif : `skills/` à côté de l'exécutable. Sur l'hôte Electron, il est placé à côté de `database.sqlite` (à côté de l'application distribuée ; dossier `.data` en développement). Le chemin exact apparaît dans **Réglages → Skills**.
+Native Windows: `skills/` beside the executable. In the Electron host, it sits beside `database.sqlite` (beside the distributed application; `.data` in development). The exact path appears under **Settings → Skills**.
 
-Un exemple `skills/exemple-revue/SKILL.md` et sa ressource `resources/checklist.md` sont fournis sans remplacer vos personnalisations. Pour importer un skill, copiez son dossier dans `skills`, puis rouvrez les réglages ou le menu **+ → Skills**. Activez le skill souhaité : les nouveaux skills sont désactivés par défaut.
+An example `skills/exemple-revue/SKILL.md` and its `resources/checklist.md` resource are supplied without replacing your customizations. To import a skill, copy its folder into `skills`, then reopen Settings or **+ → Skills**. Enable the desired skill: new imported skills are disabled by default.
 
-Chaque dossier doit contenir un `SKILL.md` avec ce frontmatter minimal (valeurs sur une ligne) :
+Each folder must contain a `SKILL.md` with this minimal frontmatter (single-line values):
 
 ```markdown
 ---
-name: mon-skill
-description: Quand et pourquoi utiliser ce skill.
+name: my-skill
+description: When and why to use this skill.
 ---
 # Instructions
-Décrire ici les étapes et les critères de validation.
+Describe the steps and validation criteria here.
 ```
 
-Le nom doit correspondre au dossier (minuscules, chiffres, tirets). Seules les descriptions des skills activés sont envoyées initialement. Le modèle charge le contenu avec `load_skill`, puis les ressources texte avec `read_skill_resource`. Aucun script n'est exécuté automatiquement. Les ressources restent limitées au dossier du skill. OpenCode peut lire le chemin explicite du `SKILL.md` avec son outil natif ; il conserve sa propre gestion des outils et permissions.
+The name must match the folder (lowercase letters, digits and hyphens). Only enabled skill descriptions are sent initially. The model loads content with `load_skill`, then text resources with `read_skill_resource`. No script runs automatically. Resources stay within the skill folder. OpenCode can read the explicit `SKILL.md` path with its native tool; it retains its own tool and permission management.

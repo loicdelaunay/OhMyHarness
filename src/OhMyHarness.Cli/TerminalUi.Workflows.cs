@@ -115,7 +115,15 @@ public sealed partial class TerminalUi
     }
     async Task Settings(WorkspaceSnapshot snapshot)
     {
-        var action = await Prompt("Réglages / Settings", client.Database, [new("language", "Langue / Language"), new("theme", "Thème / Theme"), new("font", "Police et CRT / Font and CRT"), new("thinking", "Réflexion / Thinking"), new("permissions", "Autorisations / Permissions"), new("continue", "Auto-continue : " + snapshot.State.AutoContinue), new("naming", "Nommage des conversations / Conversation naming"), new("vision", "Bypass image AI"), new("logs", "Logs")]);
+        var action = await Prompt("Réglages / Settings", client.Database, [new("language", "Langue / Language"), new("theme", "Thème / Theme"), new("font", "Police et CRT / Font and CRT"), new("thinking", "Réflexion / Thinking"), new("style", "Style de réponse / Response style"), new("permissions", "Autorisations / Permissions"), new("continue", "Auto-continue : " + snapshot.State.AutoContinue), new("naming", "Nommage des conversations / Conversation naming"), new("vision", "Bypass image AI"), new("logs", "Logs"), new("updates", "Mises à jour GitHub / GitHub updates")]);
+        if (action == "style")
+        {
+            var current = FeatureSettings.Read(snapshot.State.FeaturesJson).ResponseStyle;
+            var value = await Prompt(L("Style de réponse", "Response style"), L("Appliqué aux prochains envois. DEFAULT conserve le comportement habituel.", "Applies to subsequent messages. DEFAULT keeps the usual behavior."),
+                ResponseStyles.All.Select(style => new Choice(style.Id, L(style.French, style.English), style.Id == current ? "✓" : "")).ToList());
+            if (value != null) await client.State(s => { var settings = FeatureSettings.Read(s.FeaturesJson); settings.ResponseStyle = value; s.FeaturesJson = settings.Json(); });
+        }
+        if (action == "updates") await UpdateSettings();
         if (action == "naming") await NamingSettings(snapshot);
         if (action == "font") await ConfigureTerminalFont(snapshot);
         if (action == "vision") await VisionSettings(snapshot);

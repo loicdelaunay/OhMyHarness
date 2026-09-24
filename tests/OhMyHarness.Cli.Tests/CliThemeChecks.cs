@@ -28,6 +28,18 @@ static class CliThemeChecks
         var folder = Path.Combine(Path.GetTempPath(), "omh-theme-" + Guid.NewGuid().ToString("N"));
         try
         {
+            var fontSettings = new FeatureSettings { CliFont = "VT323", CliFontSize = 18, CliTheme = "crt-amber" };
+            var customized = CliFonts.Apply(CliThemes.Resolve(fontSettings.CliTheme), fontSettings);
+            check(customized.Font == "VT323" && customized.FontSize == 18 && customized.Id == "crt-amber", "Font and size override the theme without changing its palette");
+            fontSettings.CliTheme = "neon-synthwave";
+            check(CliFonts.Apply(CliThemes.Resolve(fontSettings.CliTheme), FeatureSettings.Read(fontSettings.Json())).Font == "VT323", "Custom CLI font survives theme changes and persistence");
+            foreach (var font in CliFonts.All.Where(f => f.File != null))
+            {
+                var file = await CliFonts.ExportAsync(font.Face, folder);
+                check(file != null && new FileInfo(file).Length > 1000 && (await File.ReadAllTextAsync(Path.Combine(Path.GetDirectoryName(file)!, "OFL.txt"))).Contains("SIL OPEN FONT LICENSE"), font.Face + ": embedded font exports with its original license");
+            }
+            var customProfile = TerminalProfiles.Build(customized, Path.Combine(folder, "omh.exe"), Path.Combine(folder, "database.sqlite"), folder);
+            check(customProfile["profiles"]![0]!["font"]!["face"]!.ToString() == "VT323" && customProfile["profiles"]![0]!["font"]!["size"]!.GetValue<int>() == 18, "Exported terminal profile uses independent font and size");
             foreach (var theme in CliThemes.All)
             {
                 check(CliOptions.Parse(["--render-demo", "--theme", theme.Id]).Theme == theme.Id, theme.Id + ": preview option accepted");

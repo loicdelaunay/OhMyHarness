@@ -102,6 +102,7 @@ public sealed partial class TerminalUi(CliOptions options) : IDisposable
         {
             var initial = await client.Initialize(options, lifetime.Token);
             Post(() => { workspace = initial.Snapshot; providerId = initial.ProviderId; notice = L("Prêt · / pour les commandes", "Ready · / for commands"); SwitchChat(initial.ChatId); });
+            if (FeatureSettings.Read(initial.Snapshot.State.FeaturesJson).CliCheckUpdates) await CheckStartupUpdate();
         });
         int previousWidth = 0, previousHeight = 0;
         try
@@ -324,13 +325,16 @@ public sealed partial class TerminalUi(CliOptions options) : IDisposable
     {
         bool ctrl = key.Modifiers.HasFlag(ConsoleModifiers.Control);
         if (ctrl && key.Key == ConsoleKey.Q) { RequestQuit(); return; }
+        if (InputShortcuts.HandleClipboard(dialog?.Input ?? editor, key, dialog?.Secret == true,
+            TerminalClipboard.Copy, TerminalClipboard.Paste,
+            () => notice = L("Presse-papiers indisponible ou texte trop long. Réessayez.", "Clipboard unavailable or text too long. Try again."))) return;
         if (dialog != null)
         {
             if (key.Key == ConsoleKey.Escape) dialog.Completion.TrySetResult(null);
             else if (key.Key == ConsoleKey.PageUp) dialog.Scroll = Math.Max(0, dialog.Scroll - 6);
             else if (key.Key == ConsoleKey.PageDown) dialog.Scroll += 6;
-            else if (key.Key == ConsoleKey.UpArrow) dialog.Selected = Math.Max(0, dialog.Selected - 1);
-            else if (key.Key == ConsoleKey.DownArrow) dialog.Selected = Math.Min(dialog.Filtered.Count - 1, dialog.Selected + 1);
+            else if (key.Key == ConsoleKey.UpArrow && key.Modifiers == 0 && dialog.Choices != null) dialog.Selected = Math.Max(0, dialog.Selected - 1);
+            else if (key.Key == ConsoleKey.DownArrow && key.Modifiers == 0 && dialog.Choices != null) dialog.Selected = Math.Min(dialog.Filtered.Count - 1, dialog.Selected + 1);
             else if (key.Key == ConsoleKey.Enter)
             {
                 if (dialog.Choices == null) dialog.Completion.TrySetResult(dialog.Input.Text);

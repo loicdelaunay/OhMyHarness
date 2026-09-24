@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.8.0 — 2026-09-24
+
+- Added a shared response-style preference in GUI General settings and CLI `/settings`: DEFAULT leaves prompts unchanged; SHORT, PRAGMATIC, DETAILED and FUN guide the length and tone of subsequent answers, including OpenCode sessions.
+- Fixed CLI Backspace deleting a word in terminal hosts that send DEL. Both ordinary Backspace encodings now delete one character/grapheme; word deletion requires explicit modifiers or Ctrl+W.
+- Moved update, automatic naming and logging settings to the bottom of the GUI General page.
+- Translated all Markdown guides under `docs/` into English and moved the full user guide to `docs/guide.md`, updating navigation links.
+
+## 1.7.1 — 2026-09-24
+
+- Fixed CLI keyboard editing in the composer and text dialogs: Ctrl+A, Shift+arrows, Ctrl+arrows, Ctrl+Shift+arrows, Home/End and word deletion now preserve selections and Unicode characters. Modified VT key sequences are decoded instead of being discarded.
+- Selected text is highlighted and replaced when typing or pasting. Added undo/redo, clipboard copy/cut/paste on Windows and macOS, and caret-aware rendering in long input fields. Ctrl+C still stops the active run when no text is selected; masked credentials cannot be copied or cut.
+
+## 1.7.0 — 2026-09-24
+
+- CLI fonts can now be selected independently from the color theme, with a separate size setting, a custom installed-font name, and bundled VT323, Share Tech Mono and Space Mono fonts under their original OFL licenses. `/font` exports the font/profile or installs them for the current Windows user; a new terminal tab applies the font.
+- Added GitHub updates to GUI Settings > General and CLI `/update`, with separate automatic startup-check preferences. Each interface selects only stable releases for its channel and architecture. Installation downloads and verifies SHA-256, preserves user data, waits for the application to close, replaces only the executable and restarts. The previous executable is retained for recovery.
+- Automatic installation is limited to published Windows standalone builds; no installation occurs during an agent run or with unsent drafts. Source builds and other platforms retain manual release downloads.
+
 ## 1.6.1 — 2026-09-24
 
 - CLI theme selection now previews colors immediately while browsing or filtering. Enter saves the selected theme; Escape restores the previous palette, including themes passed through `--theme`.

@@ -13,6 +13,7 @@ void Check(bool value, string name) { if (!value) throw new Exception(name); Con
 await CliThemeChecks.Run(Check);
 await ConnectChecks.Run(Check);
 CompletionChecks.Run(Check);
+InputChecks.Run(Check);
 var clean = TerminalText.Clean("\x1b]52;c;secret\aHello\x1b[2J\u202e");
 Check(!clean.Contains('\x1b') && !clean.Contains('\a') && !clean.Contains('\u202e'), "Untrusted text cannot issue terminal/clipboard/bidi control sequences");
 Check(TerminalText.Fit("é界x", 3) == "é界", "French and wide glyphs respect terminal cell width");

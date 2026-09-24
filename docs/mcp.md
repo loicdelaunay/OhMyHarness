@@ -1,46 +1,46 @@
-# MCP et continuation automatique
+# MCP and automatic continuation
 
-Les interfaces WinUI Windows et Electron Windows/macOS proposent **Réglages → MCP**, immédiatement après Skills, et **+ → MCP** pour activer ou désactiver chaque serveur.
+The WinUI Windows and Electron Windows/macOS interfaces provide **Settings → MCP**, immediately after Skills, and **+ → MCP** to enable or disable each server.
 
-## Ajouter un serveur
+## Add a server
 
-Choisir **Ajouter un serveur MCP**, donner un nom et sélectionner le transport :
+Choose **Add MCP server**, enter a name and select the transport:
 
-- `stdio` : exécutable (`node`, `npx`, `uvx`, chemin absolu…), arguments sous forme de tableau JSON, dossier de travail facultatif. L’exécutable doit être installé. Sur Windows, pour un lanceur `.cmd` qui exige un shell, utiliser explicitement `cmd.exe` avec ses arguments ; sur Mac, utiliser le lanceur Unix ou son chemin absolu.
-- `http` : URL MCP Streamable HTTP, par exemple `https://serveur.example/mcp`.
-- `sse` : endpoint SSE des anciens serveurs. Utiliser HTTP Streamable pour les serveurs récents.
+- `stdio`: executable (`node`, `npx`, `uvx`, absolute path…), arguments as a JSON array, optional working directory. The executable must be installed. On Windows, for a `.cmd` launcher requiring a shell, explicitly use `cmd.exe` with its arguments; on Mac, use the Unix launcher or its absolute path.
+- `http`: MCP Streamable HTTP URL, for example `https://server.example/mcp`.
+- `sse`: SSE endpoint for older servers. Use Streamable HTTP for newer servers.
 
-HTTPS est requis à distance ; HTTP est accepté sur localhost. Les secrets éventuels sont saisis dans **Secrets JSON**, par exemple :
+HTTPS is required remotely; HTTP is accepted on localhost. Enter optional secrets in **Secrets JSON**, for example:
 
 ```json
 {
-  "environment": { "MY_API_KEY": "valeur" },
-  "headers": { "Authorization": "Bearer valeur" }
+  "environment": { "MY_API_KEY": "value" },
+  "headers": { "Authorization": "Bearer value" }
 }
 ```
 
-`environment` s’applique à stdio, `headers` à HTTP/SSE. Laisser ce champ vide lors d’une modification conserve les secrets enregistrés ; la case dédiée les efface. Ils sont chiffrés avec DPAPI sous Windows ou le trousseau macOS. Ne pas placer les secrets dans les arguments ou l’URL, qui restent des champs de configuration ordinaires. Les serveurs locaux reçoivent les variables système usuelles et celles configurées, pas tous les secrets de l’environnement de l’application.
+`environment` applies to stdio, `headers` to HTTP/SSE. Leaving this field empty during editing keeps stored secrets; the dedicated checkbox clears them. They are encrypted with DPAPI on Windows or the macOS Keychain. Do not put secrets in arguments or URLs, which remain ordinary configuration fields. Local servers receive standard system variables and configured values, not every secret in the application's environment.
 
-Sous WinUI, **Tester la connexion MCP** utilise le brouillon ; **Enregistrer** applique tous les changements. Sous Electron, enregistrer le serveur puis cliquer sur **Tester la connexion**. Le résultat liste les outils annoncés par le serveur. Une configuration n’installe pas automatiquement les dépendances du serveur ; un lanceur tel que `npx -y …` peut le faire lorsqu’il est exécuté après approbation.
+In WinUI, **Test MCP connection** uses the draft; **Save** applies all changes. In Electron, save the server and then click **Test connection**. Results list the server's advertised tools. Configuration does not automatically install server dependencies; a launcher such as `npx -y …` may do so when run after approval.
 
-## Utilisation par l’agent
+## Agent use
 
-Les outils des serveurs activés sont ajoutés aux appels des fournisseurs **OpenAI compatibles et DeepSeek**. Chaque serveur possède un espace de noms séparé pour éviter les collisions entre outils homonymes. Les résultats texte/structurés sont transmis au modèle ; une image PNG/JPEG/WebP de 8 Mo maximum peut également être jointe si le modèle accepte les images. Les ressources et prompts MCP ne disposent pas encore d’un explorateur dédié, et l’authentification OAuth interactive n’est pas implémentée : utiliser les en-têtes ou variables fournis par le serveur.
+Tools from enabled servers are added to **OpenAI-compatible and DeepSeek** provider calls. Each server has a separate namespace to prevent collisions between identically named tools. Text/structured results are sent to the model; a PNG/JPEG/WebP image up to 8 MB may also be attached if the model accepts images. MCP resources and prompts do not yet have a dedicated explorer, and interactive OAuth authentication is not implemented: use headers or variables supplied by the server.
 
-**OpenCode conserve ses propres serveurs MCP et sa propre boucle d’outils.** Les serveurs configurés ici ne sont pas copiés dans sa configuration. L’option de continuation concerne la limite de douze appels imposée par OhMyHarness aux fournisseurs compatibles Chat Completions.
+**OpenCode keeps its own MCP servers and tool loop.** Servers configured here are not copied into its configuration. The continuation option concerns the twelve-call limit imposed by OhMyHarness on Chat Completions-compatible providers.
 
-Connexion et exécution des outils respectent **Demander / Refuser tout / Acceptation automatique**. « Toujours autoriser » reste limité au serveur et, pour une action, à l’outil concerné ; changer la commande, l’URL, les arguments ou les secrets invalide la portée précédente. Les approbations restent révocables dans les paramètres.
+Connections and tool execution respect **Ask / Deny all / Automatic approval**. “Always allow” remains scoped to the server and, for an action, to the relevant tool; changing command, URL, arguments or secrets invalidates the previous scope. Approvals remain revocable in Settings.
 
-Les réglages et interrupteurs sont globaux. Une désactivation bloque les appels suivants, y compris un appel encore en attente d’autorisation ; elle n’annule pas une opération déjà exécutée. **Arrêter** annule la conversation et ferme ses connexions. Chaque conversation possède ses connexions stdio : plusieurs conversations peuvent donc lancer plusieurs instances du même serveur. Les connexions refusées ou défaillantes ne sont pas relancées en boucle ; corriger la configuration ou démarrer un nouvel envoi pour retenter.
+Settings and toggles are global. Disabling a server blocks subsequent calls, including one still awaiting approval; it does not undo an operation already executed. **Stop** cancels the conversation and closes its connections. Each conversation owns its stdio connections, so multiple conversations may launch multiple instances of the same server. Denied or failed connections are not retried in a loop; fix the configuration or send a new message to retry.
 
-## Auto-continuation
+## Automatic continuation
 
-**Réglages → Général → Continuer automatiquement après 12 étapes** est désactivé par défaut. Activé, l’agent conserve son historique et poursuit ses appels après la douzième étape. Il s’arrête quand il produit une réponse finale, rencontre une erreur bloquante ou reçoit **Arrêter**. L’option n’accepte aucune autorisation à la place de l’utilisateur. La désactiver ramène l’arrêt à la prochaine frontière de douze étapes.
+**Settings → General → Automatically continue after 12 steps** is disabled by default. When enabled, the agent retains its history and continues calls beyond the twelfth step. It stops when it produces a final answer, encounters a blocking error or receives **Stop**. The option does not approve permissions for the user. Disabling it restores stopping at the next twelve-step boundary.
 
-La configuration est stockée dans `database.sqlite`, avec une migration EF Core qui conserve les données existantes. L’auto-continuation peut consommer davantage de tokens. Les opérations MCP sont limitées à 30 secondes pour la connexion et deux minutes pour un appel d’outil.
+Configuration is stored in `database.sqlite`, with an EF Core migration preserving existing data. Automatic continuation may consume more tokens. MCP operations are limited to 30 seconds for connection and two minutes for a tool call.
 
 ## Validation
 
-Tests automatisés locaux : migrations/persistance, serveurs MCP simulés stdio et HTTP, authentification par en-tête, transmission des variables, refus avant lancement, désactivation avant exécution, annulation pendant un outil, limite de douze appels et quatorze appels avec continuation active. Tests d’interface Electron : emplacement de l’onglet, création/modification et interrupteur du menu +. Les serveurs tiers et l’exécution native sur Mac nécessitent leurs propres essais.
+Local automated tests: migrations/persistence, simulated stdio and HTTP MCP servers, header authentication, environment transmission, denial before launch, disabling before execution, cancellation during a tool, twelve-call limit and fourteen calls with continuation enabled. Electron UI tests: tab placement, creation/editing and the + menu toggle. Third-party servers and native Mac execution require their own testing.
 
-L’intégration utilise le [SDK officiel MCP C#](https://csharp.sdk.modelcontextprotocol.io/v2/concepts/transports/transports.html), version 2.2.0.
+The integration uses the [official MCP C# SDK](https://csharp.sdk.modelcontextprotocol.io/v2/concepts/transports/transports.html), version 2.2.0.

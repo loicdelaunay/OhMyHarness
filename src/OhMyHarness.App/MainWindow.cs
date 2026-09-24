@@ -757,6 +757,7 @@ public sealed partial class MainWindow : Window
         PopulateThinkingSelector();
         await SelectProject();
         StartScheduler();
+        StartUpdateCheck();
         if(Environment.GetEnvironmentVariable("OHMYHARNESS_UI_SMOKE") is {Length:>0} smoke)
             DispatcherQueue.TryEnqueue(async () => await UnoSmokeAsync(smoke));
     }
@@ -1508,13 +1509,21 @@ public sealed partial class MainWindow : Window
                 ApplyTheme(AppearanceThemes.All[themeSelector.SelectedIndex].Id);
         };
         var general = new StackPanel { Spacing = 14 };
+        var updates = BuildUpdateSettings();
         var branding = BuildBrandingSettings();
         var conversationPreferences = BuildConversationPreferences();
-        general.Children.Add(conversationPreferences.Panel);
         general.Children.Add(branding.Panel);
         general.Children.Add(FluentDesign.Setting(WorkflowText("Thème", "Theme"), WorkflowText("Quatre thèmes sombres et quatre thèmes clairs, dont Fly dark et Fly light.", "Four dark and four light themes, including Fly dark and Fly light."), themeSelector));
         language.Header = null;
         general.Children.Add(FluentDesign.Setting(T("Langue de l’application"), "", language));
+        var responseStyle = new ComboBox
+        {
+            ItemsSource = ResponseStyles.All.Select(x => state.Language == "en" ? x.English : x.French).ToArray(),
+            SelectedIndex = ResponseStyles.All.ToList().FindIndex(x => x.Id == ResponseStyles.Get(FeatureSettings.Read(state.FeaturesJson).ResponseStyle).Id),
+            MinWidth = 170
+        };
+        general.Children.Add(FluentDesign.Setting(WorkflowText("Style de réponse", "Response style"),
+            WorkflowText("Appliqué aux prochains envois. DEFAULT conserve le comportement habituel.", "Applies to subsequent messages. DEFAULT keeps the usual behavior."), responseStyle));
         var autoContinue = new ToggleSwitch { Header = T("Continuer automatiquement après 12 étapes"), IsOn = state.AutoContinue,
             OnContent = T("Activé"), OffContent = T("Désactivé") };
         autoContinue.Header = null;
@@ -1526,6 +1535,8 @@ public sealed partial class MainWindow : Window
             WorkflowText("Déplie le raisonnement pendant la génération.", "Expand reasoning during generation."), showReasoning));
         var autoFocusTool = new CheckBox { IsChecked = FeatureSettings.Read(state.FeaturesJson).AutoFocusTool };
         general.Children.Add(FluentDesign.Setting(WorkflowText("Ouvrir et sélectionner le dernier outil utilisé par l’IA", "Open and focus the latest AI tool"), WorkflowText("Dans la conversation affichée uniquement.", "Only in the visible conversation."), autoFocusTool));
+        general.Children.Add(updates.Panel);
+        general.Children.Add(conversationPreferences.Panel);
 
         var skillPanel = new StackPanel { Spacing = 8 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
@@ -1639,6 +1650,8 @@ public sealed partial class MainWindow : Window
         savedFeatures.ComposerInfoExpanded = FeatureSettings.Read(state.FeaturesJson).ComposerInfoExpanded;
         savedFeatures.FontZoomPercent = FeatureSettings.Read(state.FeaturesJson).FontZoomPercent;
         savedFeatures.AutoFocusTool = autoFocusTool.IsChecked == true;
+        savedFeatures.ResponseStyle = ResponseStyles.All[Math.Clamp(responseStyle.SelectedIndex, 0, ResponseStyles.All.Count - 1)].Id;
+        updates.Save(savedFeatures);
         conversationPreferences.Save(savedFeatures);
         await branding.Save(savedFeatures);
         state.FeaturesJson = savedFeatures.Json();

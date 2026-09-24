@@ -1,29 +1,29 @@
-# Tâches, questions et protection contre les boucles
+# Tasks, questions and loop protection
 
-Disponibles dans WinUI sous Windows et dans l'interface Electron sous Windows/macOS.
+Available in WinUI on Windows and the Electron interface on Windows/macOS.
 
-## Liste de tâches
+## Task list
 
-L'agent dispose de `todowrite` pour remplacer la liste structurée de la conversation. Les statuts sont **À faire**, **En cours**, **Terminée** et **Annulée**. La carte se met à jour et indique le nombre de tâches terminées. Elle peut être repliée. La liste est enregistrée dans `database.sqlite`, relue après réouverture et incluse dans le contexte au prochain envoi. L'agent décide quand créer et mettre à jour ses étapes ; l'application ne transforme pas automatiquement tout texte de plan en tâches.
+The agent uses `todowrite` to replace the conversation's structured list. Statuses are **Pending**, **In progress**, **Completed** and **Cancelled**. The card updates and shows the number of completed tasks. It can be collapsed. The list is saved in `database.sqlite`, restored after reopening and included in context on the next send. The agent decides when to create and update steps; the application does not automatically turn every textual plan into tasks.
 
-La liste utilise une ligne `Message` avec `Role=tasks`, `State=ui`, distincte de l'historique transmis au fournisseur. Aucun changement du schéma SQLite n'est nécessaire. Les résultats de `todowrite` restent dans l'historique normal des outils. Les sous-agents directs ne remplacent pas la liste du parent.
+The list uses a `Message` row with `Role=tasks`, `State=ui`, separate from provider history. No SQLite schema change is required. `todowrite` results remain in normal tool history. Direct subagents do not replace the parent's list.
 
-## Questions interactives
+## Interactive questions
 
-L'outil `question` propose de 1 à 8 questions, des choix simples ou multiples et/ou une réponse libre. La réponse n'est envoyée qu'après validation du formulaire. Une sélection n'est jamais faite à la place de l'utilisateur. Le mode Plan autorise les questions et la liste de tâches.
+The `question` tool offers 1–8 questions with single/multiple choices and/or free text. Answers are sent only after form submission. A selection is never made on the user's behalf. Plan mode allows questions and task lists.
 
-Seul l'agent qui attend la réponse est suspendu : les autres conversations et sous-agents peuvent continuer. Les formulaires restent dans leur conversation, sans bloquer l'ouverture des réglages. Changer de conversation conserve les réponses en cours de saisie. Les réponses et annulations sont conservées dans SQLite ; arrêter la génération retire ses questions en attente. Un formulaire annulé renvoie explicitement une annulation au modèle, jamais une approbation. Les formulaires non soumis sont abandonnés à la fermeture de l'application, comme les générations en cours.
+Only the agent awaiting an answer pauses: other conversations and subagents can continue. Forms stay in their conversation without blocking Settings. Switching conversations preserves answers being entered. Answers and cancellations are saved in SQLite; stopping generation removes its pending questions. A cancelled form explicitly returns cancellation to the model, never approval. Unsubmitted forms are abandoned when the application closes, like active generations.
 
-Les questions ne sont pas des autorisations d'accès : **Refuser tout**, **Demander**, **Acceptation automatique** et les autorisations mémorisées ne répondent pas à ces formulaires. Les outils privilégiés conservent leurs propres contrôles.
+Questions are not access permissions: **Deny all**, **Ask**, **Automatic approval** and saved grants do not answer these forms. Privileged tools retain their own checks.
 
-## Appels répétés
+## Repeated calls
 
-Avant le **troisième appel consécutif** au même outil avec les mêmes arguments, l'application suspend ce travail et propose **Arrêter** ou **Continuer une fois**. L'ordre des propriétés JSON et les espaces de mise en forme n'évitent pas la détection. Un appel différent réinitialise la série. Continuer n'autorise que cet appel ; le suivant identique redemande une décision. La série est conservée pendant la compaction et l'auto-continue, et isolée par conversation/sous-agent. Il ne s'agit pas d'une détection sémantique de toutes les boucles possibles (par exemple alternance de deux outils).
+Before the **third consecutive call** to the same tool with identical arguments, the application pauses that work and offers **Stop** or **Continue once**. JSON property order and formatting whitespace do not evade detection. A different call resets the sequence. Continuing authorizes only that call; another identical call asks again. The sequence survives compaction and automatic continuation and is isolated per conversation/subagent. This is not semantic detection of every possible loop (such as alternating between two tools).
 
 ## OpenCode
 
-Avec les outils OpenCode activés, les questions sont relayées depuis `/question` et les tâches depuis `/session/{id}/todo`. Seules les demandes de la session concernée sont traitées. Les réponses passent par `reply` ou `reject`. La session reçoit une règle explicite `doom_loop: ask` ; ces décisions passent par le formulaire, même avec acceptation automatique. Arrêter cette boucle interrompt la session distante. Le relais attend l'état inactif de la session afin de ne pas confondre la fin d'un appel de modèle intermédiaire avec la fin du travail.
+With OpenCode tools enabled, questions are relayed from `/question` and tasks from `/session/{id}/todo`. Only requests from the relevant session are processed. Answers use `reply` or `reject`. The session receives an explicit `doom_loop: ask` rule; those decisions use the form even with automatic approval. Stopping this loop interrupts the remote session. The relay waits for the session's idle state to avoid confusing the end of an intermediate model call with completion of the work.
 
-Le serveur doit prendre en charge ces routes et la mise à jour des permissions de session. Une erreur de relais interrompt le suivi et demande l'arrêt de la session ; elle n'est pas transformée en accord implicite. La détection des appels natifs est réalisée par OpenCode lui-même. Les sessions de consultation créées par l'application disposent du même relais de questions, sans remplacer la liste de tâches du parent. Les sous-agents natifs créés par OpenCode conservent sa propre gestion.
+The server must support these routes and session-permission updates. A relay error interrupts monitoring and requests session shutdown; it is not treated as implicit consent. OpenCode itself detects repeated native calls. Consultation sessions created by the application have the same question relay without replacing the parent's task list. Native subagents created by OpenCode retain its own management.
 
-Références : [outils OpenCode](https://opencode.ai/docs/tools/), [permissions OpenCode](https://opencode.ai/docs/permissions/).
+References: [OpenCode tools](https://opencode.ai/docs/tools/), [OpenCode permissions](https://opencode.ai/docs/permissions/).

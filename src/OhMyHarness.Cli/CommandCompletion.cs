@@ -9,13 +9,13 @@ public sealed class CommandCompletion(IReadOnlyList<Choice> commands)
     public List<Choice> Matches(InputBuffer input)
     {
         if (previous != input.Text) { previous = input.Text; Selected = 0; dismissed = false; }
-        if (dismissed || !input.Text.StartsWith('/') || input.Text.Any(char.IsWhiteSpace) || input.Cursor != input.Text.Length) return [];
+        if (dismissed || input.HasSelection || !input.Text.StartsWith('/') || input.Text.Any(char.IsWhiteSpace) || input.Cursor != input.Text.Length) return [];
         return commands.Where(c => c.Value.StartsWith(input.Text, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
     public bool Handle(ConsoleKeyInfo key, InputBuffer input)
     {
-        if (key.Modifiers.HasFlag(ConsoleModifiers.Control) || key.Modifiers.HasFlag(ConsoleModifiers.Alt)) return false;
+        if (key.Modifiers != 0) return false;
         var matches = Matches(input);
         if (matches.Count == 0) return false;
         switch (key.Key)
