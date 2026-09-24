@@ -19,7 +19,7 @@ public sealed partial class MainWindow
         try
         {
             visibleProjectChats.Clear();
-            foreach (var item in visible) visibleProjectChats.Add(item);
+            foreach (var item in visible.OrderByDescending(c => c.IsFavorite)) visibleProjectChats.Add(item);
             chats.SelectedItem = visibleProjectChats.FirstOrDefault(item => item.Id == selectedId)
                 ?? (selectFirst ? visibleProjectChats.FirstOrDefault() : null);
         }

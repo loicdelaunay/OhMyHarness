@@ -25,6 +25,9 @@ public sealed partial class MainWindow
     {
         followChatTail = follow;
         autoScrollButton.IsChecked = follow;
+        if (follow)
+            foreach (var reference in reasoningViews)
+                if (reference.TryGetTarget(out var view)) view.Flush();
     }
 
     void ObserveChatScroll()

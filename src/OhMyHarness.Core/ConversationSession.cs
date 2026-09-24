@@ -37,7 +37,7 @@ public class ConversationSession : IDisposable
     public ConversationSession(Chat chat, Project project, Provider provider, AppState options,
         string prompt, IEnumerable<Attachment> images, string? databasePath = null, IEnumerable<Provider>? availableProviders = null)
     {
-        Chat = new Chat { Id = chat.Id, ProjectId = chat.ProjectId, Title = chat.Title,
+        Chat = new Chat { Id = chat.Id, ProjectId = chat.ProjectId, Title = chat.Title, IsFavorite = chat.IsFavorite,
             SandboxEnabled = chat.SandboxEnabled, ResourcePathsJson = chat.ResourcePathsJson, TodoDismissed = chat.TodoDismissed, ExecutionMode = AgentPolicy.Mode(chat.ExecutionMode), OrchestrationMode = AgentPolicy.Orchestration(chat.OrchestrationMode) };
         Project = new Project { Id = project.Id, Name = project.Name, PermissionProfileJson = project.PermissionProfileJson };
         Project.SetSourceFolders(ProjectResources.For(chat, project));

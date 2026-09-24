@@ -19,16 +19,27 @@ public sealed partial class MainWindow
         var pending=id==null?new List<PendingInput>():await ReadStoreAsync(context => context.PendingInputs.AsNoTracking().Where(x=>x.ChatId==id).OrderBy(x=>x.Id).ToList());
         if(chat?.Id!=id || revision != conversationLoadRevision)return;
         inboxPanel.Children.Clear();
-        if (pending.Count > 0) inboxPanel.Children.Add(new TextBlock { Text = WorkflowText("Messages en attente", "Queued messages") + $" · {pending.Count}", FontSize = 12, Foreground = FluentDesign.Secondary, Margin = new(12, 4, 12, 4) });
         foreach(var item in pending)
         {
-            var text=Label((item.Mode=="steering"?"↳ ":$"{pending.IndexOf(item)+1}. ")+item.Text[..Math.Min(220,item.Text.Length)] + (item.Text.Length > 220 ? "…" : "") + (item.Images().Count > 0 ? $"  · {item.Images().Count} image(s)" : ""),12);
-            text.TextWrapping = TextWrapping.Wrap;
-            var row = new StackPanel { Spacing = 4 };
+            var preview = item.Text[..Math.Min(500, item.Text.Length)].Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+            var text = Label(preview + (item.Text.Length > 500 ? "…" : "") + (item.Images().Count > 0 ? $"  · {item.Images().Count} image(s)" : ""), 14);
+            text.TextWrapping = TextWrapping.NoWrap;
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            text.MaxLines = 1;
+            ToolTipService.SetToolTip(text, item.Text);
+            var row = new Grid { ColumnSpacing = 8 };
+            row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            var queueIcon = new TextBlock { Text = "↳", FontSize = 16, Foreground = FluentDesign.Secondary, VerticalAlignment = VerticalAlignment.Center };
+            ToolTipService.SetToolTip(queueIcon, WorkflowText(item.Mode == "steering" ? "À la prochaine étape" : "Message en attente", item.Mode == "steering" ? "At the next step" : "Queued message"));
+            row.Children.Add(queueIcon);
+            text.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(text, 1);
             row.Children.Add(text);
-            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            actions.Children.Add(Action(WorkflowText("Supprimer", "Delete"), async()=>{await using var db=new HarnessDb();await db.PendingInputs.Where(x=>x.Id==item.Id && x.ChatId==item.ChatId).ExecuteDeleteAsync();await RefreshInboxAsync();}));
-            actions.Children.Add(Action(WorkflowText("Modifier", "Edit"), async()=>
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+            var delete = Action(WorkflowText("Supprimer", "Delete"), async()=>{await using var db=new HarnessDb();await db.PendingInputs.Where(x=>x.Id==item.Id && x.ChatId==item.ChatId).ExecuteDeleteAsync();await RefreshInboxAsync();});
+            async Task EditAsync()
             {
                 var editor = new TextBox { Text = item.Text, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100, MaxHeight = 300 };
                 var dialog = new ContentDialog { XamlRoot = root.XamlRoot, Title = WorkflowText("Modifier le message en attente", "Edit queued message"), Content = editor,
@@ -38,7 +49,7 @@ public sealed partial class MainWindow
                     await ConversationInbox.UpdateAsync(HarnessDb.DatabasePath, item.ChatId, item.Id, item.Text, editor.Text);
                     await RefreshInboxAsync();
                 }
-            }));
+            }
             var steer = Action("Steer", async()=>
             {
                 if (!conversationRuns.TryGetValue(item.ChatId, out var active)) throw new InvalidOperationException(WorkflowText("Aucune exécution en cours.", "No active run."));
@@ -46,8 +57,35 @@ public sealed partial class MainWindow
                 await RefreshInboxAsync();
             });
             steer.IsEnabled = item.Mode == "queued" && conversationRuns.ContainsKey(item.ChatId);
+            FluentDesign.IconButton(steer, "\uE72A", WorkflowText("Orienter", "Steer"));
             ToolTipService.SetToolTip(steer, WorkflowText("Transmettre à l’agent à sa prochaine étape", "Send to the agent at its next step"));
-            actions.Children.Add(steer); row.Children.Add(actions); inboxPanel.Children.Add(FluentDesign.Surface(row, 10));
+            actions.Children.Add(steer);
+            FluentDesign.IconButton(delete, "\uE74D", WorkflowText("Supprimer", "Delete"), false);
+            actions.Children.Add(delete);
+            var menu = new MenuFlyout();
+            var edit = new MenuFlyoutItem { Text = WorkflowText("Modifier", "Edit"), Icon = new SymbolIcon(Symbol.Edit) };
+            edit.Click += async (_, _) => await Guard(EditAsync);
+            menu.Items.Add(edit);
+            var more = new Button { Flyout = menu };
+            FluentDesign.IconButton(more, "\uE712", WorkflowText("Plus d’actions", "More actions"), false);
+            actions.Children.Add(more);
+            foreach (var button in actions.Children.OfType<Button>())
+            {
+                button.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+                button.Resources["ButtonBackgroundDisabled"] = button.Background;
+                button.BorderThickness = new(0);
+                button.Foreground = FluentDesign.Secondary;
+                button.Padding = new(7, 5, 7, 5);
+                button.MinWidth = 30;
+                button.MinHeight = 30;
+                button.CornerRadius = new(6);
+            }
+            actions.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(actions, 2);
+            row.Children.Add(actions);
+            var card = FluentDesign.Surface(row, 0);
+            card.Padding = new(12, 4, 6, 4);
+            card.CornerRadius = new(16);
+            inboxPanel.Children.Add(card);
         }
         if(pending.Count>0 && ActiveRun==null)inboxPanel.Children.Add(Action("Reprendre la file / Resume queue",()=>RunNextQueuedAsync(id!.Value,messages)));
     }

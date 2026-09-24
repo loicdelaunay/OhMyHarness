@@ -22,7 +22,7 @@ public sealed partial class HarnessService
         try
         {
             await using var db = Db();
-            var mode = await db.States.Select(x => x.PermissionMode).SingleAsync(ct);
+            var mode = hostOptions?.PermissionModeOverride ?? await db.States.Select(x => x.PermissionMode).SingleAsync(ct);
             var profile = permissionProject.Value?.PermissionProfileJson ?? "";
             if (ProjectResources.AutomaticDecision(mode, profile, scope) is bool automatic) return automatic;
             if (ProjectResources.Decision(profile, scope) != "ask" && await db.PermissionGrants.AnyAsync(x => x.Scope == scope, ct)) return true;
@@ -132,6 +132,8 @@ public sealed partial class HarnessService
             "run_terminal" => "terminal", "write_source" or "edit_source" => "write_sources",
             "list_sources" or "read_source" or "git_changes" => "sources", _ => "web"
         };
+        if (hostOptions?.DisabledSkills.Contains(required) == true)
+            throw new NotSupportedException("This host does not support the skill: " + required);
         if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
         if (name == "desktop_applications")
         {

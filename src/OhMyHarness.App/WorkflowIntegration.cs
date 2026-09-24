@@ -86,7 +86,7 @@ public sealed partial class MainWindow
             };
             cancel.Click += (_, _) => completion.TrySetResult(new(true, []));
             buttons.Children.Add(send); buttons.Children.Add(cancel); panel.Children.Add(error); panel.Children.Add(buttons);
-            var card = new Border { Child = panel, Padding = new(18), CornerRadius = new(12), BorderThickness = new(1), BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.DodgerBlue) };
+            var card = new Border { Child = panel, Padding = new(18), CornerRadius = new(12), BorderThickness = new(1), BorderBrush = FluentDesign.Resource("AccentFillColorDefaultBrush") };
             run.Messages.Children.Add(card); ScrollRunToBottom(run);
             SetRunStatus(run, WorkflowText("Réponse attendue dans la conversation", "Waiting for your answer in the conversation"), StatusKind.Notice);
             try

@@ -2,5 +2,6 @@
   <Folder Name="/src/">
     <Project Path="src/OhMyHarness.App/OhMyHarness.App.csproj" />
     <Project Path="src/OhMyHarness.Core/OhMyHarness.Core.csproj" />
+    <Project Path="src/OhMyHarness.Cli/OhMyHarness.Cli.csproj" />
   </Folder>
 </Solution>

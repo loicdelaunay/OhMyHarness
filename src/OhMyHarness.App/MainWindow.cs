@@ -105,7 +105,7 @@ public sealed partial class MainWindow : Window
     async Task Guard(Func<Task> action)
     {
         try { await action(); }
-        catch (Exception ex) { ShowStatus(T("Erreur : ") + ex.Message, StatusKind.Error); }
+        catch (Exception ex) { AppLog.Write(AppLogLevel.Error, "ui.action_failed", ex); ShowStatus(T("Erreur : ") + ex.Message, StatusKind.Error); }
     }
     public MainWindow()
     {
@@ -205,7 +205,11 @@ public sealed partial class MainWindow : Window
                         <Grid.ColumnDefinitions><ColumnDefinition Width="3"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                         <Border Tag="conversation-selection" Grid.Column="0" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="2" Visibility="Collapsed" />
                         <StackPanel Grid.Column="1" Spacing="5" HorizontalAlignment="Stretch">
-                            <TextBlock Tag="conversation-title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="13" FontWeight="SemiBold" />
+                            <Grid ColumnSpacing="4">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Button Tag="conversation-favorite" Width="26" Height="26" Padding="2" Opacity="0" Background="Transparent" BorderThickness="0"/>
+                                <TextBlock Grid.Column="1" Tag="conversation-title" Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </Grid>
                             <ProgressBar Tag="conversation-progress" Height="2" IsIndeterminate="True" Visibility="Collapsed" />
                             <Border Tag="conversation-subagents" Margin="0,2,0,0" Padding="7,0,0,0" BorderThickness="1,0,0,0" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Visibility="Collapsed">
                                 <StackPanel Tag="subagents" Spacing="3" />
@@ -270,6 +274,12 @@ public sealed partial class MainWindow : Window
             deleteItem.Click += async (_, _) => await Guard(() => DeleteChatAsync(targetChat));
 
             menu.Items.Add(renameItem);
+            var autoName = new MenuFlyoutItem { Text = WorkflowText("Nommer avec l’IA", "Name with AI"), Icon = new FontIcon { Glyph = "\uE8D4" } };
+            autoName.Click += async (_, _) => await Guard(() => AutoNameAsync(targetChat.Id));
+            menu.Items.Add(autoName);
+            var favoriteItem = new MenuFlyoutItem { Text = WorkflowText(targetChat.IsFavorite ? "Retirer des favoris" : "Ajouter aux favoris", targetChat.IsFavorite ? "Remove favorite" : "Add favorite"), Icon = new FontIcon { Glyph = "\uE734" } };
+            favoriteItem.Click += async (_, _) => await Guard(() => ToggleFavoriteAsync(targetChat));
+            menu.Items.Add(favoriteItem);
             menu.Items.Add(deleteItem);
             menu.ShowAt(chats, e.GetPosition(chats));
         };
@@ -313,7 +323,7 @@ public sealed partial class MainWindow : Window
         var headerActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         headerActions.Children.Add(Action("Exporter", ExportConversationAsync));
         headerActions.Children.Add(toolsButton);
-        autoScrollButton.Click += (_, _) => { chatScrollInputUntil = 0; followChatTail = autoScrollButton.IsChecked == true; if (followChatTail) ScrollToBottom(); };
+        autoScrollButton.Click += (_, _) => { chatScrollInputUntil = 0; SetChatFollow(autoScrollButton.IsChecked == true); if (followChatTail) ScrollToBottom(); };
         headerActions.Children.Add(autoScrollButton);
         Grid.SetColumn(headerActions, 2); header.Children.Add(headerActions);
         main.Children.Add(header);
@@ -731,6 +741,8 @@ public sealed partial class MainWindow : Window
         await SyncMcpFile();
         await db.McpServers.LoadAsync();
         state = await db.States.SingleAsync();
+        AppLog.Configure(FeatureSettings.Read(state.FeaturesJson));
+        AppLog.Write(AppLogLevel.Information, "ui.started");
         UiText.Language = state.Language;
         ApplyLanguage();
         ApplyAppearance();
@@ -805,7 +817,8 @@ public sealed partial class MainWindow : Window
                     catch { }
                 }
                 var text = item.Content + (item.State == "interrupted" ? T("\n[Réponse interrompue]") : "");
-                actionCard = AddAssistantMessage(text, reasoning, target: messages, sourceProject: sourceProject).Container;
+                var rendered = AddAssistantMessage(text, reasoning, target: messages, sourceProject: sourceProject);
+                rendered.SetDuration(item.Seconds); actionCard = rendered.Container;
             }
             else if (item.Role == "tool")
             {
@@ -873,15 +886,34 @@ public sealed partial class MainWindow : Window
         }
         public string CurrentText { get; private set; } = "";
         public Func<string, Task>? OpenFile { get; init; }
-
-        public void UpdateContent(string text)
+        public TextBlock Duration { get; init; } = null!;
+        public Func<bool> CanPaint { get; init; } = () => true;
+        string? pendingText;
+        (string Text, bool Complete)? pendingThinking;
+        public void SetDuration(double seconds)
         {
+            Duration.Text = seconds > 0 ? (UiText.Language == "en" ? "Duration: " : "Durée : ") + (seconds >= 60 ? $"{(int)(seconds / 60)} min {seconds % 60:0.#} s" : $"{seconds:0.#} s") : "";
+            Duration.Visibility = seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        public void Flush()
+        {
+            if (pendingText is { } text) { pendingText = null; MarkdownRenderer.RenderTo(BodyContainer, text, OpenFile); }
+            if (pendingThinking is { } thinking) { pendingThinking = null; UpdateThinking(thinking.Text, thinking.Complete); }
+        }
+
+        public void UpdateContent(string text, bool streaming = false)
+        {
+            if (CurrentText == text && pendingText == null) return;
             CurrentText = text;
+            if ((streaming || pendingText != null) && !CanPaint()) { pendingText = text; return; }
+            pendingText = null;
             MarkdownRenderer.RenderTo(BodyContainer, text, OpenFile);
         }
 
-        public void UpdateThinking(string reasoning, bool isComplete = false)
+        public void UpdateThinking(string reasoning, bool isComplete = false, bool streaming = false)
         {
+            if ((streaming || pendingThinking != null) && !CanPaint()) { pendingThinking = (reasoning, isComplete); return; }
+            pendingThinking = null;
             if (string.IsNullOrEmpty(reasoning))
             {
                 ThinkingCard.Visibility = Visibility.Collapsed;
@@ -895,7 +927,8 @@ public sealed partial class MainWindow : Window
             ThinkingHeaderLabel.Text = $"🧠 {prefix} ({reasoning.Length:N0} {T("car.")})  {chevron}";
             if (!isComplete && IsThinkingExpanded)
             {
-                ThinkingScroll.UpdateLayout();
+            if (!CanPaint()) return;
+            ThinkingScroll.UpdateLayout();
                 ThinkingScroll.ChangeView(null, ThinkingScroll.ScrollableHeight, null, true);
                 ThinkingScroll.DispatcherQueue.TryEnqueue(() =>
                     ThinkingScroll.ChangeView(null, ThinkingScroll.ScrollableHeight, null, true));
@@ -906,6 +939,7 @@ public sealed partial class MainWindow : Window
     {
         var messageProject = sourceProject ?? project;
         var bodyContainer = new StackPanel { Spacing = 4 };
+        var duration = Label("", 11); duration.Foreground = FluentDesign.Secondary; duration.Visibility = Visibility.Collapsed;
 
         var stack = new StackPanel { Spacing = 10 };
         var roleLabel = Label(T("ASSISTANT"), 11);
@@ -958,6 +992,8 @@ public sealed partial class MainWindow : Window
         var ui = new AssistantMessageUi
         {
             BodyContainer = bodyContainer,
+            Duration = duration,
+            CanPaint = () => followChatTail || !ReferenceEquals(target ?? messages, scroll.Content),
             ShowReasoningDetails = () => state.ShowReasoningDetails,
             OpenFile = path => OpenChatFileAsync(path, messageProject),
             ThinkingCard = thinkingCard,
@@ -985,6 +1021,7 @@ public sealed partial class MainWindow : Window
 
         stack.Children.Add(thinkingCard);
         stack.Children.Add(bodyContainer);
+        stack.Children.Add(duration);
 
         var container = FluentDesign.MessageSurface(stack, "assistant");
         ui.Container = container;
@@ -1472,6 +1509,8 @@ public sealed partial class MainWindow : Window
         };
         var general = new StackPanel { Spacing = 14 };
         var branding = BuildBrandingSettings();
+        var conversationPreferences = BuildConversationPreferences();
+        general.Children.Add(conversationPreferences.Panel);
         general.Children.Add(branding.Panel);
         general.Children.Add(FluentDesign.Setting(WorkflowText("Thème", "Theme"), WorkflowText("Quatre thèmes sombres et quatre thèmes clairs, dont Fly dark et Fly light.", "Four dark and four light themes, including Fly dark and Fly light."), themeSelector));
         language.Header = null;
@@ -1569,6 +1608,7 @@ public sealed partial class MainWindow : Window
         tabs.Add(WorkflowText("Navigateur", "Browser"),features.Browser);
         if (!await ShowSettingsWindowAsync(loadingWindow, tabs, () =>
         {
+            if (!conversationPreferences.Validate()) { tabs.SelectedIndex = 0; return false; }
             var valid = true;
             var providerError = ValidateProviderDrafts(providerEditor);
             if (conversationRuns.Values.Any(run => run.AgentProviders.Values.Select(x=>x.Id).Append(run.Provider.Id).Append(run.SelectedProviderId).Any(id=>!providerEditor.Drafts.Any(draft=>draft.Id==id))))
@@ -1599,8 +1639,11 @@ public sealed partial class MainWindow : Window
         savedFeatures.ComposerInfoExpanded = FeatureSettings.Read(state.FeaturesJson).ComposerInfoExpanded;
         savedFeatures.FontZoomPercent = FeatureSettings.Read(state.FeaturesJson).FontZoomPercent;
         savedFeatures.AutoFocusTool = autoFocusTool.IsChecked == true;
+        conversationPreferences.Save(savedFeatures);
         await branding.Save(savedFeatures);
         state.FeaturesJson = savedFeatures.Json();
+        AppLog.Configure(savedFeatures);
+        AppLog.Write(AppLogLevel.Information, "settings.saved");
         if(FeatureSettings.Read(state.FeaturesJson).BrowserMode != previousBrowserMode)
         { foreach(var id in conversationBrowsers.Keys.ToArray())CloseConversationBrowser(id); ShowBrowserNotice(); }
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
@@ -2244,7 +2287,6 @@ public sealed partial class MainWindow : Window
         var ct = run.Cancellation.Token;
         var history = await db.Messages.Include(x => x.Attachments).Where(x => x.ChatId == chat.Id && x.State == "complete").OrderBy(x => x.Id).ToListAsync();
         var user = new Message { ChatId = chat.Id, Content = run.Prompt, Attachments = run.Images };
-        if (history.Count == 0) chat.Title = user.Content.Length > 0 ? user.Content[..Math.Min(50, user.Content.Length)] : T("Discussion autour d’une image");
         await ConversationInbox.SubmitAsync(run,user,ct); history.Add(user);
         MarkRunSubmitted(run);
         await RefreshInboxAsync();
@@ -2318,10 +2360,10 @@ public sealed partial class MainWindow : Window
                     if ((DateTime.UtcNow - lastPaint).TotalMilliseconds < 70) return;
                     if (update.Reasoning.Length > 0)
                     {
-                        assistantUi.UpdateThinking(update.Reasoning, isComplete: update.Text.Length > 0);
+                        assistantUi.UpdateThinking(update.Reasoning, isComplete: update.Text.Length > 0, streaming: true);
                     }
                     var displayText = update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…";
-                    assistantUi.UpdateContent(displayText);
+                    assistantUi.UpdateContent(displayText, streaming: true);
                     UpdateMetrics(run, update, inputEstimate); lastPaint = DateTime.UtcNow;
                     if (IsVisible(run)) ScrollToBottom();
                 }, ct, run.Options.ThinkingLevel);
@@ -2332,6 +2374,7 @@ public sealed partial class MainWindow : Window
                 if (run.Tracker != null) messageTrackers[active.Id] = run.Tracker;
                 run.Tracker = null;
                 assistantUi.UpdateContent(active.Content); UpdateMetrics(run, new(active.Content, "", completion.InputTokens, completion.OutputTokens, completion.Seconds), inputEstimate);
+                assistantUi.SetDuration(completion.Seconds);
                 if (IsVisible(run)) RefreshSpeedTooltip();
                 ScrollRunToBottom(run);
                 var finalReasoning = completion.Message["reasoning_content"]?.GetValue<string>();
@@ -2366,7 +2409,7 @@ public sealed partial class MainWindow : Window
                                 else result = await RunTool(call!, source, run, ct);
                             }
                             catch (OperationCanceledException) { throw; }
-                            catch (Exception ex) { result = T("Erreur outil : ") + ex.Message; }
+                            catch (Exception ex) { AppLog.Write(AppLogLevel.Warning, "tool.failed", ex, run.Chat.Id); result = T("Erreur outil : ") + ex.Message; }
                             screenshot = ownsToolQueue ? TakePendingToolScreenshot() : null;
                         }
                         finally { if (ownsToolQueue) { TakePendingToolScreenshot(); toolQueue.Release(); } }
@@ -2413,6 +2456,7 @@ public sealed partial class MainWindow : Window
             SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message,
                 ex is OperationCanceledException ? StatusKind.Notice : StatusKind.Error);
             run.Failed=true;
+            AppLog.Write(ex is OperationCanceledException ? AppLogLevel.Information : AppLogLevel.Error, "generation.failed", ex, run.Chat.Id);
             if (active != null && activeAssistantUi != null)
             {
                 if (ex is not OperationCanceledException)

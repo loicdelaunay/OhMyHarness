@@ -29,6 +29,7 @@ public sealed class Project
 }
 public sealed class Chat
 {
+    public bool IsFavorite { get; set; }
     public int Id { get; set; }
     public int ProjectId { get; set; }
     public string Title { get; set; } = "Nouvelle conversation";
@@ -145,13 +146,10 @@ public sealed class HarnessDb : DbContext
 {
     public static string DataDirectory => PortableStorage.Root;
     public static string DatabasePath => Path.Combine(DataDirectory, "database.sqlite");
-    public static string LegacyDatabasePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OhMyHarness", "harness.db");
     readonly string path;
-    readonly bool usesDefaultPath;
     public HarnessDb(string? path = null)
     {
-        usesDefaultPath = string.IsNullOrWhiteSpace(path);
-        this.path = Path.GetFullPath(usesDefaultPath ? DatabasePath : path!);
+        this.path = Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? DatabasePath : path);
     }
     public DbSet<SubagentRecord> Subagents => Set<SubagentRecord>();
     public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
@@ -196,7 +194,6 @@ public sealed class HarnessDb : DbContext
     public async Task InitializeAsync()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        if (usesDefaultPath) await ImportLegacyDatabaseAsync();
         await Database.MigrateAsync();
         if (!await States.AnyAsync())
         {
@@ -211,12 +208,6 @@ public sealed class HarnessDb : DbContext
             foreach (var item in legacyProviders) item.Kind = "openai";
             await SaveChangesAsync();
         }
-    }
-
-    async Task ImportLegacyDatabaseAsync()
-    {
-        if (File.Exists(path) || !File.Exists(LegacyDatabasePath)) return;
-        await CopyDatabaseAsync(LegacyDatabasePath, path);
     }
 
     public static async Task CopyDatabaseAsync(string sourcePath, string destinationPath)

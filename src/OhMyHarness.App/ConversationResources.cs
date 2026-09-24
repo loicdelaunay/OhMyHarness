@@ -72,12 +72,15 @@ public sealed partial class MainWindow
         var visual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(glow);
         var sprite = visual.Compositor.CreateSpriteVisual();
         var shadow = visual.Compositor.CreateDropShadow(); shadow.BlurRadius = 22; shadow.Opacity = .38f;
-        shadow.Color = Windows.UI.Color.FromArgb(255, 65, 165, 245); sprite.Shadow = shadow;
-        sprite.Brush = visual.Compositor.CreateColorBrush(Windows.UI.Color.FromArgb(255, 65, 165, 245));
+        var accent = (Microsoft.UI.Xaml.Media.SolidColorBrush)FluentDesign.Resource("AccentFillColorDefaultBrush");
+        shadow.Color = accent.Color; sprite.Shadow = shadow;
+        var glowBrush = visual.Compositor.CreateColorBrush(accent.Color); sprite.Brush = glowBrush;
+        var accentCallback = accent.RegisterPropertyChangedCallback(Microsoft.UI.Xaml.Media.SolidColorBrush.ColorProperty, (_, _) => { shadow.Color = accent.Color; glowBrush.Color = accent.Color; });
+        Closed += (_, _) => accent.UnregisterPropertyChangedCallback(Microsoft.UI.Xaml.Media.SolidColorBrush.ColorProperty, accentCallback);
         Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(glow, sprite);
         host.SizeChanged += (_, e) => { sprite.Size = new System.Numerics.Vector2((float)Math.Max(0,e.NewSize.Width-44), (float)Math.Max(0,e.NewSize.Height-14)); sprite.Offset = new System.Numerics.Vector3(22,7,0); };
 #else
-        for (int i=6; i>0; i--) glow.Children.Add(new Border { Background=new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(6,65,165,245)), CornerRadius=new(24), Margin=new(-i*2,-i,-i*2,-i) });
+        for (int i=6; i>0; i--) glow.Children.Add(new Border { Background=FluentDesign.Resource("ActivityGlowBrush"), CornerRadius=new(24), Margin=new(-i*2,-i,-i*2,-i) });
 #endif
         ConnectStatusGlow(chip, glow);
         chip.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) => host.Visibility = chip.Visibility);

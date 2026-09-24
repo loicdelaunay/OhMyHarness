@@ -19,10 +19,12 @@ static class MemoryChecks
         try
         {
             await using var db = new HarnessDb(path);
-            await db.GetService<IMigrator>().MigrateAsync("20260922172725_ScheduledTasksAndProviderModels");
+            await db.Database.MigrateAsync();
             var p = new Project { Name = "Memory project", Chats = [new Chat { Title = "A" }, new Chat { Title = "B" }] };
             var other = new Project { Name = "Other project", Chats = [new Chat { Title = "C" }] };
             db.Projects.AddRange(p, other); await db.SaveChangesAsync();
+            // Seed with the current entity model, then downgrade the fixture to the pre-memory schema.
+            await db.GetService<IMigrator>().MigrateAsync("20260922172725_ScheduledTasksAndProviderModels");
             await db.InitializeAsync();
             check(await db.Chats.CountAsync() == 3 && !db.Database.HasPendingModelChanges(), "Mémoire : migration EF conserve les chats et concorde avec le modèle");
             var a = new MemoryAccess(p.Id, p.Chats[0].Id); var b = new MemoryAccess(p.Id, p.Chats[1].Id); var c = new MemoryAccess(other.Id, other.Chats[0].Id);

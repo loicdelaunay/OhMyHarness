@@ -41,13 +41,21 @@ public sealed partial class MainWindow
         visionProvider.SelectionChanged += (_, _) => { UpdateVisionModels(); visionModel.Text = (visionProvider.SelectedItem as Provider)?.Model ?? ""; };
         UpdateVisionModels();
         vision.Children.Add(visionProvider); vision.Children.Add(visionModel);
+        var visionInstruction = new TextBox { Header = WorkflowText("Instruction personnalisée", "Custom instruction"), Text = config.VisionInstruction, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 80, MaxHeight = 200, MaxLength = 8000 };
+        var visionComponents = new CheckBox { Content = WorkflowText("Décomposer en composants et formes avec coordonnées", "Describe components and shapes with coordinates"), IsChecked = config.VisionComponents };
+        vision.Children.Add(visionInstruction); vision.Children.Add(visionComponents);
+        vision.Children.Add(Label(WorkflowText("Coordonnées relatives à l’image : X, Y, X2, Y2 et polygones. Ce sont des estimations visuelles, pas des coordonnées absolues du bureau ni des fichiers découpés.", "Image-relative X, Y, X2, Y2 and polygons. These are visual estimates, not absolute desktop coordinates or cropped files."), 12));
         vision.Children.Add(Action(WorkflowText("Charger les modèles", "Load models"), async()=>
         {
             if (visionProvider.SelectedItem is not Provider selected) return;
             visionModel.ItemsSource = await engine.ModelsAsync(selected, KeyVault.Decrypt(selected.ProtectedKey), CancellationToken.None);
         }));
         vision.Children.Add(Label(WorkflowText("Choisissez un modèle acceptant les images. Les images jointes et captures sont décrites automatiquement si le modèle principal n’a pas la vision. L’outil analyze_image permet une question ciblée, même avec un modèle principal vision. Les images sont envoyées au fournisseur choisi après autorisation et peuvent être facturées. Les descriptions peuvent être inexactes. OpenCode conserve ses propres outils ; ce relais y couvre seulement les images jointes.", "Choose an image-capable model. Attachments and screenshots are described automatically for non-vision main models. analyze_image supports focused questions even with a vision main model. Images are sent to the selected provider after approval and may incur charges. Descriptions can be inaccurate. OpenCode retains its own tools; this bridge only covers its attachments."),12));
-        return (browser,rag,vision,()=>new FeatureSettings { BrowserMode=mode.SelectedIndex==1?"chrome":mode.SelectedIndex==2?"disabled":"embedded",ChromePath=executable.Text.Trim(),RagMode=ragMode.SelectedIndex==1?"api":"local",RagProviderId=(provider.SelectedItem as Provider)?.Id??0,RagModel=model.Text.Trim(),RagMaxFiles=(int)maxFiles.Value,RagTopK=(int)topK.Value,VisionProviderId=(visionProvider.SelectedItem as Provider)?.Id??0,VisionModel=visionModel.Text.Trim() }.Json());
+        return (browser,rag,vision,()=> {
+            config.BrowserMode=mode.SelectedIndex==1?"chrome":mode.SelectedIndex==2?"disabled":"embedded"; config.ChromePath=executable.Text.Trim();
+            config.RagMode=ragMode.SelectedIndex==1?"api":"local";config.RagProviderId=(provider.SelectedItem as Provider)?.Id??0;config.RagModel=model.Text.Trim();config.RagMaxFiles=(int)maxFiles.Value;config.RagTopK=(int)topK.Value;
+            config.VisionProviderId=(visionProvider.SelectedItem as Provider)?.Id??0;config.VisionModel=visionModel.Text.Trim();config.VisionInstruction=visionInstruction.Text;config.VisionComponents=visionComponents.IsChecked==true;
+            return config.Json(); });
     }
     readonly TextBlock browserNotice = new() { TextWrapping=TextWrapping.Wrap, Margin=new Thickness(20), Text="Navigateur arrêté. Utilisez → pour démarrer. / Browser stopped. Use → to start." };
     void ShowBrowserNotice(string? error=null)

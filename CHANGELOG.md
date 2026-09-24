@@ -1,0 +1,43 @@
+# Changelog
+
+## 1.6.1 — 2026-09-24
+
+- CLI theme selection now previews colors immediately while browsing or filtering. Enter saves the selected theme; Escape restores the previous palette, including themes passed through `--theme`.
+- Updated the Windows CLI publication to include inline slash-command completion introduced in 1.6.0.
+
+## 1.6.0 — 2026-09-24
+
+- Added inline CLI slash-command suggestions, filtered as you type. Use arrow keys to select, Tab/Enter to complete, and Escape to dismiss without interrupting the agent. Suggestions include descriptions and adapt to small terminals.
+
+## 1.5.0 — 2026-09-24
+
+- Simplified the CLI to a compact header, a single-column transcript, a prompt between two separators and unobtrusive model/usage information. Command menus are plain searchable lists with command names and descriptions; conversations remain accessible through `/chats` and Ctrl+O.
+- Rebuilt `/connect` as a guided flow: provider type (including DeepSeek, local/compatible APIs and OpenCode), masked credentials, automatic discovery or manual model IDs, default model and final confirmation. Failed discovery offers retry/manual entry. Cancelling leaves no partial connection; provider, visible models and selection are saved together.
+
+## 1.4.0 — 2026-09-24
+
+- Added CLI-specific CRT Green, CRT Amber and Neon Synthwave themes with distinct palettes, retro headings, square/double borders and block cursors. CLI appearance is saved independently of the desktop theme; `/theme` and `--theme` select it.
+- Added `/font` to export or explicitly install a dedicated Windows Terminal profile with the theme's font and experimental CRT scanline/glow effect. Other terminals keep their own font while displaying the CLI colors and typography. Profiles are also exported beside the portable database and do not rewrite Windows Terminal's existing settings.
+
+## 1.3.0 — 2026-09-24
+
+- Added Electric dark and Electric light themes based on Midnight Black (#0E0F12) and Electric Cyan (#4CC9F0), available in the desktop app and CLI.
+- Fixed text selection, accent label/button contrast, menu and dropdown surfaces, and selected/hovered list colors across all themes. Theme previews update shared control colors and activity glows immediately.
+- The CLI now uses the complete theme catalog, including correct light palettes for Ivory and Mist.
+
+## 1.2.0 — 2026-09-24
+
+- Project instructions now load off the UI thread across nested folders without stopping conversations at 2,000 directories. Inaccessible or oversized instruction files are skipped.
+- Added pinned favorite conversations, configurable AI naming after the first response, and manual AI naming from the conversation menu or CLI.
+- Vision bridge now accepts custom guidance and an optional component/shape breakdown with image-relative bounds and polygons.
+- Added portable diagnostic logs with severity filtering, configurable retention (seven days by default), and an off switch. Prompts, response content, keys and tool arguments are excluded.
+- Queue actions are inline icon buttons; completed model messages show their duration. Streaming preserves completed Markdown blocks and pauses repainting while reading earlier content; the CLI also keeps the reading position anchored.
+
+## 1.1.0 — 2026-09-24
+
+- Added OhMyHarness CLI, a full-screen terminal workspace with searchable commands and conversations, concurrent streaming chats, model/provider selection, Plan/Execution modes, approvals, agent questions, task lists, subagent inspection, memory, MCP, Git diffs, terminals, attachments, queue/steering and Markdown exports. It reuses the shared agent engine and portable SQLite storage.
+- Added non-interactive runs with plain text or JSON events, explicit execution/approval options, and standalone CLI publishing for Windows and macOS.
+
+## 1.0.1 — 2026-09-23
+
+- A standalone executable started in a new folder now creates a fresh portable database instead of silently copying conversations and settings from a previous AppData installation. Legacy browser and OpenCode workspace folders are no longer imported automatically. Existing `database.sqlite` files beside the executable remain untouched and continue to migrate normally.

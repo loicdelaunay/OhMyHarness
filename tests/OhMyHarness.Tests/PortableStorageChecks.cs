@@ -2,7 +2,7 @@ using OhMyHarness.Core;
 
 static class PortableStorageChecks
 {
-    public static void Run(Action<bool, string> check)
+    public static async Task Run(Action<bool, string> check)
     {
         var previous = HarnessDb.DatabasePath;
         var root = Path.Combine(Path.GetTempPath(), "omh-portable-" + Guid.NewGuid().ToString("N"));
@@ -22,10 +22,26 @@ static class PortableStorageChecks
             File.WriteAllText(imported, "new");
             PortableStorage.ImportLegacyDirectory(legacy, "WebView2");
             check(File.ReadAllText(imported) == "new", "Profil portable existant jamais écrasé par le profil historique");
+            await using (var first = new HarnessDb())
+            {
+                await first.InitializeAsync();
+                first.Messages.Add(new Message { ChatId = first.Chats.Single().Id, Content = "conversation du premier dossier" });
+                await first.SaveChangesAsync();
+            }
+            var freshFolder = Path.Combine(root, "nouvel-exe");
+            PortableStorage.UseDatabase(Path.Combine(freshFolder, "database.sqlite"));
+            await using (var fresh = new HarnessDb())
+            {
+                await fresh.InitializeAsync();
+                check(File.Exists(Path.Combine(freshFolder, "database.sqlite")) && fresh.Messages.Count() == 0 && fresh.Projects.Count() == 1,
+                    "Nouvel EXE : base locale initialisée sans conversation précédente");
+            }
+            check(File.Exists(Path.Combine(destination, "database.sqlite")), "Ancienne base portable conservée dans son propre dossier");
         }
         finally
         {
             PortableStorage.UseDatabase(previous);
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
     }

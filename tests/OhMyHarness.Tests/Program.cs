@@ -11,6 +11,8 @@ async Task Throws<T>(Func<Task> action, string name) where T : Exception
 string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Serialize(value) + "\r\n\r\n";
 if(args.Contains("--browser-smoke")) { await ChromiumChecks.Run(Check); return; }
 if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
+await ConversationEnhancementChecks.Run(Check);
+if (args.Contains("--conversation-enhancements")) { Console.WriteLine($"{passed} contrôles réussis."); return; }
 await MemoryChecks.Run(Check);
 if(args.Contains("--memory-only")) return;
 var stream = ": heartbeat\r\n\r\n" + Event(new { choices = new[] { new { delta = new { content = "Bonjour " } } } })
@@ -54,7 +56,7 @@ await Throws<ArgumentException>(() => Task.FromResult(MouseInput.SlidePath(0, 0,
 Check(PermissionModes.AutomaticDecision("deny") == false && PermissionModes.AutomaticDecision("allow") == true && PermissionModes.AutomaticDecision("ask") == null, "Politique globale des autorisations appliquée avant les dialogues");
 Check(PermissionModes.Normalize("inconnu") == PermissionModes.Ask, "Politique d’autorisation invalide ramenée au mode Demander");
 Check(HarnessDb.DatabasePath == Path.Combine(Path.GetDirectoryName(Environment.ProcessPath!)!, "database.sqlite"), "Base SQLite par défaut placée à côté du processus exécutable");
-PortableStorageChecks.Run(Check);
+await PortableStorageChecks.Run(Check);
 ConversationExportChecks.Run(Check);
 var saveChord = KeyboardInput.ParseChord("ctrl+s");
 Check(saveChord.Modifiers.SequenceEqual(["CTRL"]) && saveChord.Key == "S", "Raccourci clavier CTRL+S normalisé");

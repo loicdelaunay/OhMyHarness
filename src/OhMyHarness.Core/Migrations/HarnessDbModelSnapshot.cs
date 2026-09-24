@@ -105,6 +105,9 @@ namespace OhMyHarness.Core.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("IsFavorite")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("OrchestrationMode")
                         .IsRequired()
                         .HasColumnType("TEXT");

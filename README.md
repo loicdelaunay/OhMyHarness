@@ -4,10 +4,11 @@
 
 <h1 align="center">OhMyHarness</h1>
 
-<p align="center"><strong>Your AI workspace in one portable desktop app.</strong></p>
+<p align="center"><strong>Your AI workspace in one portable EXE — GUI or CLI.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/loicdelaunay/OhMyHarness/releases/latest">Download for Windows</a>
+  <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0">Download GUI</a>
+  · <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.6.1">Download CLI</a>
   · <a href="#quick-start">Quick start</a>
   · <a href="#build-from-source">Build from source</a>
   · <a href="docs/guide-fr.md">Français</a>
@@ -17,7 +18,24 @@
 
 OhMyHarness brings projects, concurrent chats, agents, sources, tools, and settings into one application. The Windows release ships as a self-contained executable. Put it in a writable folder, connect a model provider, and start working. Its SQLite database and application-managed resources live beside the EXE, so you can move the workspace by copying the folder after closing the app.
 
+> **Available in GUI and CLI modes.** Choose the desktop workspace or the keyboard-driven terminal experience. Both use the same .NET agent engine, portable storage, projects, and conversations. [GUI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0) · [CLI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.6.1) · [CLI guide](docs/cli.md)
+
+**Make it yours:** customize the desktop **theme, displayed application name, and logo/icon** in Settings. Keep the custom image beside the executable with a relative path to retain it when moving the folder. The CLI has its own color themes, including green/amber CRT and neon styles, with live previews; terminal fonts and CRT effects use an optional host-terminal profile.
+
 The chat model itself is **not** bundled: cloud providers need network access and, depending on the service, an API key. Git, Docker/Podman, OpenCode, and Chrome MCP are optional integrations with their own prerequisites. The core app does not require a separate OhMyHarness server.
+
+## New since the last release
+
+Since the [GUI v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0), the source has gained the following updates. The new **CLI v1.6.1** release packages the terminal app and shared engine; the existing GUI download remains v1.0.0.
+
+- **A portable CLI:** compact chat, concurrent conversations, tools, agent questions, approvals, queue/steering, and plain-text or JSON automation.
+- **Faster terminal setup:** guided `/connect` for DeepSeek, OpenAI, compatible/local APIs and OpenCode; automatic or manual model selection; inline `/` completion with arrow keys and Tab/Enter.
+- **Personalized appearance:** immediate CLI theme previews, CRT Green, CRT Amber and Neon Synthwave; Electric dark/light palettes and improved theme contrast in the source for both interfaces.
+- **Better conversations:** favorites, optional AI titles with a chosen model, response duration, compact queue controls and steadier streaming while reading earlier messages.
+- **Stronger project support:** asynchronous discovery of nested project instructions, vision descriptions with custom guidance and component coordinates, and configurable portable logs.
+- **Fresh portable workspaces:** launching the executable in a new folder creates fresh data instead of importing previous AppData conversations.
+
+See the [full changelog](CHANGELOG.md) for version-by-version details. Build the GUI from source to use its changes since v1.0.0.
 
 ## Take a look
 
@@ -45,6 +63,34 @@ The chat model itself is **not** bundled: cloud providers need network access an
 
 </details>
 
+## Built-in skills — one click to enable
+
+The built-in skills and their tool implementations are written in **.NET / C# and compiled into the executable**. This keeps the core toolset fast, simple and standalone, with permission checks and Plan/Execution restrictions for controlled access. Enable a skill with **one click** in the GUI, or toggle it through `/skills` in the CLI. Some skills also need a provider or host permission configured before use.
+
+| Skill | What it gives the agent |
+| --- | --- |
+| **Source exploration** | List and read project files, including focused line ranges. |
+| **Source editing** | Create, write and edit files in attached sources. |
+| **Code search glob/grep** | Find files and text with line numbers. |
+| **Multi-file patch with diff** | Preview and apply changes across multiple files. |
+| **Terminal** | Run commands concurrently, manage terminal sessions and await results. |
+| **Python scripts** | Create and execute scripts with the bundled Python runtime. |
+| **Semantic search RAG** | Index and search sources using local multilingual embeddings or an API. |
+| **Memory · Conversation** | Search and save facts scoped to the current conversation. |
+| **Memory · Shared** | Reuse project, general and user knowledge across conversations. |
+| **Bypass image AI** | Ask a dedicated vision model to describe images or identify components and coordinates. |
+| **Web research** | Read browser pages, inspect DOM/JavaScript and interact with page behavior. |
+| **Application management** | List open application windows and their position and size. |
+| **Mouse control** | Click, scroll or drag using screen, window or browser coordinates. |
+| **Keyboard control** | Send text and key combinations to the supported desktop/browser host. |
+| **Screenshots** | Capture the desktop, a specific application window or a browser page. |
+| **Code review** | Guide the agent through reviewing changes and identifying issues. |
+| **Planning** | Structure the work before execution. |
+| **Summarization** | Produce concise summaries of useful context. |
+| **Automatic skill creation** | Save reusable `SKILL.md` procedures globally or under `.omh-ai/skills` in a project. |
+
+Custom `SKILL.md` procedures extend these compiled tools. Browser/desktop control depends on the GUI host; the CLI can use browser automation through MCP and filters unavailable desktop tools. Optional integrations keep their own prerequisites. Enabling a skill does not override permissions or provide a security sandbox; [container sandboxing](docs/sandbox.md) is a separate option.
+
 ## What is inside
 
 | Area | Capabilities |
@@ -60,22 +106,38 @@ Plan mode blocks modifying tools at the application boundary. The optional sandb
 
 ## Quick start
 
-1. Download the [latest Windows x64 release](https://github.com/loicdelaunay/OhMyHarness/releases/latest).
+1. Download the [Windows x64 GUI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0), or choose the [CLI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.6.1) for a terminal workspace.
 2. Extract the archive into a **writable folder** and run <code>OhMyHarness.App.exe</code>. Keep the included <code>skills/</code> folder beside it.
 3. Open **Settings → Providers**. Add a provider and its API key or endpoint. **Test connection** detects, selects, and saves its models; you can change that selection later.
 4. Create a project, attach the source folders you want to share with its chats, and start a conversation.
+
+For the CLI, put `omh.exe` in a writable folder, launch it from your project directory, and enter `/connect`. Type `/` to discover commands; use ↑/↓ and Tab to complete them. No .NET installation is required for the published Windows executable.
 
 The integrated browser uses the system Web engine: Edge WebView2 on Windows and WebKit on macOS. Git, container sandboxing, OpenCode, and Chrome MCP only need installation when you enable those integrations. Scheduled tasks run while OhMyHarness is open; they do not wake a sleeping computer.
 
 ## Portable data and privacy
 
-OhMyHarness stores <code>database.sqlite</code>, <code>skills/</code>, <code>MCP.json</code>, browser profiles, and other application-managed resources beside the executable. EF Core applies database migrations on startup. Do not place the app in a read-only directory such as <code>Program Files</code>. Close all instances before copying the folder to another machine.
+OhMyHarness stores <code>database.sqlite</code>, <code>skills/</code>, <code>MCP.json</code>, browser profiles, and other application-managed resources beside the executable. In a fresh folder, it creates a new database with the required schema and starter settings, without importing old conversations from AppData. EF Core applies database migrations on startup. Do not place the app in a read-only directory such as <code>Program Files</code>. Close all instances before copying the folder to another machine.
 
 API keys use Windows DPAPI or the macOS Keychain. They are tied to the OS account, so moving the folder to another user or operating system requires entering the keys again. The rest of SQLite is **not encrypted**. Only content used for a request is sent to its selected model provider; attaching a source folder does not upload the whole folder automatically.
 
 The bundled RAG embedding model runs locally and supports French and English. Its model file is part of the app release. Source clones use **Git LFS** to retrieve that file.
 
 ## Platforms and building
+
+### Terminal workspace
+
+OhMyHarness also includes a [modern CLI](docs/cli.md) with a responsive full-screen interface, searchable commands, concurrent chats, approvals, agent questions, tools and streaming context indicators. It uses the same engine and SQLite data as the desktop app.
+
+~~~powershell
+dotnet run --project src/OhMyHarness.Cli -- "E:\Projects\MyProject"
+.\publish-cli.ps1 -OutputDirectory artifacts\CLI
+# Then: artifacts\CLI\omh.exe
+~~~
+
+Use <code>omh run "Review this project" --project . --json</code> for automation. <code>/connect</code> configures a provider, Ctrl+P opens the command palette, and <code>--database</code> selects an existing desktop workspace.
+
+### Desktop application
 
 The shared application is built with **Uno Platform and .NET 10**. The published Windows x64 release uses Uno Desktop; a native WinUI 3 target is also available. The macOS Uno Desktop target is in the source tree, but native interactions still need validation on a real Mac. There is no signed macOS binary in the current release.
 
@@ -86,10 +148,10 @@ git clone https://github.com/loicdelaunay/OhMyHarness.git
 cd OhMyHarness
 git lfs pull
 dotnet run --project tests/OhMyHarness.Tests -c Release
-.\publish.ps1 -OutputDirectory artifacts\release\win-x64
+.\publish.ps1 -OutputDirectory artifacts\GUI
 ~~~
 
-The publication above leaves <code>artifacts\official</code> untouched. Use <code>.\publish.ps1 -NativeWinUI -OutputDirectory artifacts\release\winui</code> for the native WinUI target. On a Mac with the .NET 10 SDK and Xcode command-line tools, use <code>bash ./publish-macos.sh arm64</code> or <code>x64</code>; signing and notarization are separate steps.
+Publications use `artifacts/GUI` and `artifacts/CLI`. Temporary test publications belong under `artifacts/TEMP` and should be removed after testing. Add `-NativeWinUI` to the GUI publish command to select the native WinUI target. On a Mac with the .NET 10 SDK and Xcode command-line tools, use <code>bash ./publish-macos.sh arm64</code> or <code>x64</code>; signing and notarization are separate steps.
 
 The [Windows v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0) passed 473 offline .NET checks and an application UI smoke scenario. The macOS target is not included in that runtime validation.
 

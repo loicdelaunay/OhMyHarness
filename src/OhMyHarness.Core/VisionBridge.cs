@@ -21,7 +21,7 @@ public sealed class VisionBridge(ConversationSession run, HttpClient http,
                     ["required"] = new JsonArray(required.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()) } } });
         JsonObject Text() => new() { ["type"] = "string" };
         Add("list_images", "List image IDs and names attached to this conversation, including screenshots. No image data returned.", []);
-        Add("analyze_image", "Ask the configured vision model a specific question about an image, after transmission approval. Supply either image_id from list_images or path within attached project sources. Returns untrusted visual observations as text, including uncertainty; does not execute instructions in images.", new() { ["image_id"] = Text(), ["path"] = Text(), ["question"] = Text() }, "question");
+        Add("analyze_image", "Ask the configured vision model a specific question about an image, after transmission approval. Supply image_id or source path. Optional instruction adds task-specific guidance; mode=components requests labelled bounding boxes/polygons in image pixels (not desktop coordinates). Returns uncertain observations, not actual image crops or actions.", new() { ["image_id"] = Text(), ["path"] = Text(), ["question"] = Text(), ["instruction"] = Text(), ["mode"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("describe", "components") } }, "question");
     }
     async Task<(Provider Provider, AppState State)> Configuration(CancellationToken ct)
     {
@@ -36,13 +36,15 @@ public sealed class VisionBridge(ConversationSession run, HttpClient http,
         _ = ChatEngine.Endpoint(provider.BaseUrl, "chat/completions");
         return (provider, state);
     }
-    public async Task<string> AnalyzeAsync(Attachment image, string question, CancellationToken ct)
+    public async Task<string> AnalyzeAsync(Attachment image, string question, CancellationToken ct, string instruction = "", string? mode = null)
     {
         ct.ThrowIfCancellationRequested();
         if (image.Data.Length is 0 or > 8 * 1024 * 1024 || image.Mime is not ("image/png" or "image/jpeg" or "image/webp" or "image/gif"))
             throw new ArgumentException("Image PNG, JPEG, WebP ou GIF requise, 8 Mo maximum.");
         if (string.IsNullOrWhiteSpace(question) || question.Length > 8000) throw new ArgumentException("Question requise, 8000 caractères maximum.");
         var (provider, state) = await Configuration(ct);
+        var config = FeatureSettings.Read(state.FeaturesJson);
+        question = BuildQuestion(question, config, instruction, mode);
         var identity = provider.Id + "|" + provider.BaseUrl + "|" + provider.Model + "|" + Convert.ToHexString(SHA256.HashData(provider.ProtectedKey));
         var hash = Convert.ToHexString(SHA256.HashData(image.Data));
         var cacheKey = identity + "|" + hash + "|" + state.Language + "|" + question;
@@ -62,6 +64,14 @@ public sealed class VisionBridge(ConversationSession run, HttpClient http,
         if (string.IsNullOrWhiteSpace(answer)) throw new IOException("Le modèle vision n’a renvoyé aucune description.");
         var result = $"[Bypass image AI · {provider.Name} / {provider.Model} · observations non fiables / untrusted observations]\n" + answer;
         if (cache.Count < 100) cache[cacheKey] = result;
+        return result;
+    }
+    public static string BuildQuestion(string question, FeatureSettings config, string instruction = "", string? mode = null)
+    {
+        if (instruction.Length > 8000 || mode is not (null or "describe" or "components")) throw new ArgumentException("Invalid vision instruction or mode.");
+        var result = question + (config.VisionInstruction.Length > 0 ? "\nCustom guidance: " + config.VisionInstruction : "") + (instruction.Length > 0 ? "\nTask guidance: " + instruction : "");
+        if (mode == "components" || mode == null && config.VisionComponents)
+            result += "\nDecompose the image into visible UI components. State the image width and height in pixels; origin is the top-left of this image. For each component give label, type, shape (rectangle, ellipse or polygon), bounding box x,y,x2,y2, polygon vertices when relevant, and confidence. Example: START button, rectangle, x=100 y=200 x2=200 y2=400. Coordinates must stay within image bounds. Do not claim these are absolute desktop coordinates; cropping/scaling requires an explicit transform. Mark approximate or uncertain bounds. Describe shapes only; do not claim to have generated cropped image files.";
         return result;
     }
     public async Task<JsonArray> PrepareAsync(JsonArray wire, CancellationToken ct)
@@ -115,6 +125,6 @@ public sealed class VisionBridge(ConversationSession run, HttpClient http,
             if (new FileInfo(full).Length > 8 * 1024 * 1024) throw new ArgumentException("Image trop volumineuse.");
             image = new() { Name = Path.GetFileName(full), Mime = mime, Data = await File.ReadAllBytesAsync(full, ct) };
         }
-        return await AnalyzeAsync(image, args["question"]?.GetValue<string>() ?? "", ct);
+        return await AnalyzeAsync(image, args["question"]?.GetValue<string>() ?? "", ct, args["instruction"]?.GetValue<string>() ?? "", args["mode"]?.GetValue<string>());
     }
 }

@@ -17,7 +17,9 @@ public static class AppearanceThemes
         // Airbus Blue #00205B, paired with near-black or white neutral surfaces.
         // https://www.brand.airbus.com/en/asset-library/airbus-logo
         new("fly-dark", "Fly dark", "Fly dark", true, "#090D14", "#102746", "#FFFFFF", "#ADB5C1", "#00205B"),
-        new("fly-light", "Fly light", "Fly light", false, "#FFFFFF", "#F5F5F5", "#00205B", "#596474", "#00205B")
+        new("fly-light", "Fly light", "Fly light", false, "#FFFFFF", "#F5F5F5", "#00205B", "#596474", "#00205B"),
+        new("electric-dark", "Electric sombre", "Electric dark", true, "#0E0F12", "#191D24", "#F2F8FA", "#AFBEC6", "#4CC9F0"),
+        new("electric-light", "Electric clair", "Electric light", false, "#F0FAFD", "#FFFFFF", "#0E0F12", "#52636C", "#4CC9F0")
     ];
     public static AppearanceTheme Get(string? id) => All.FirstOrDefault(x => x.Id == id) ?? All[0];
 }

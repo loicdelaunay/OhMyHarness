@@ -78,6 +78,14 @@ public sealed partial class MainWindow
         var hover = ReferenceEquals(hoveredConversationContainer, container);
         card.Background = hover ? FluentDesign.Resource("ConversationHoverFillBrush") : FluentDesign.Card;
         card.BorderBrush = hover ? FluentDesign.Resource("ConversationHoverStrokeBrush") : FluentDesign.Stroke;
+        if (FindConversationElement<Button>(container, "conversation-favorite") is { } favorite && container.Content is Chat item)
+        {
+            favorite.Opacity = item.IsFavorite || hover ? 1 : 0;
+            favorite.Content = new FontIcon { Glyph = item.IsFavorite ? "\uE735" : "\uE734", FontSize = 14 };
+            ToolTipService.SetToolTip(favorite, WorkflowText(item.IsFavorite ? "Retirer des favoris" : "Ajouter aux favoris", item.IsFavorite ? "Remove favorite" : "Add favorite"));
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(favorite, WorkflowText("Favori", "Favorite"));
+            favorite.Click -= FavoriteClick; favorite.Click += FavoriteClick;
+        }
     }
 
     void RefreshConversationProgress()
@@ -176,6 +184,7 @@ public sealed partial class MainWindow
     }
     async Task ExecuteRunAsync(ConversationRun run)
     {
+        AppLog.Write(AppLogLevel.Information, "generation.started", chatId: run.Chat.Id);
         permissionProject.Value = run.Project;
         automaticToolRun.Value = run;
         bool success=false;
@@ -191,6 +200,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
+            AppLog.Write(ex is OperationCanceledException ? AppLogLevel.Information : AppLogLevel.Error, "generation.failed", ex, run.Chat.Id);
             run.Failed = true;
             SetRunStatus(run, ex is OperationCanceledException
                 ? T("Génération arrêtée. Réponse partielle conservée.") : T("Erreur : ") + ex.Message,
@@ -218,7 +228,12 @@ public sealed partial class MainWindow
             if (IsVisible(run)) RestoreRunMetrics(run);
             await RefreshInboxAsync();
         }
-        if(success)await RunNextQueuedAsync(run.Chat.Id,run.Messages);
+        if (success)
+        {
+            await AutoNameAsync(run.Chat.Id, true);
+            AppLog.Write(AppLogLevel.Information, "generation.completed", chatId: run.Chat.Id);
+            await RunNextQueuedAsync(run.Chat.Id,run.Messages);
+        }
     }
 
     async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog, CancellationToken ct = default)

@@ -10,6 +10,7 @@ public partial class App : Application
     {
         if(OperatingSystem.IsMacOS())Environment.SetEnvironmentVariable("PATH","/opt/homebrew/bin:/usr/local/bin:"+Environment.GetEnvironmentVariable("PATH"));
         InitializeComponent();
+        UnhandledException += (_, args) => AppLog.Write(AppLogLevel.Critical, "ui.unhandled", args.Exception);
         FluentDesign.SetTheme("fluent-dark");
     }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -26,17 +27,12 @@ public partial class App : Application
                 using var fixture = new HarnessDb(HarnessDb.DatabasePath);
                 await fixture.InitializeAsync();
             }
-            else await Task.Run(() =>
-            {
-                var legacy = Path.GetDirectoryName(HarnessDb.LegacyDatabasePath)!;
-                foreach (var name in new[] { "WebView2", "OpenCodeWorkspaces" })
-                    PortableStorage.ImportLegacyDirectory(Path.Combine(legacy, name), name);
-            });
             window = new MainWindow();
             window.Activate();
         }
         catch (Exception ex)
         {
+            AppLog.Write(AppLogLevel.Critical, "ui.startup_failed", ex);
             if (Environment.GetEnvironmentVariable("OHMYHARNESS_UI_SMOKE") is { Length: > 0 } output)
             {
                 Directory.CreateDirectory(output); File.WriteAllText(Path.Combine(output,"smoke-error.txt"),ex.ToString()); Exit(); return;

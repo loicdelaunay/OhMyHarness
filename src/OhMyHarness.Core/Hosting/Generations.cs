@@ -14,6 +14,7 @@ public sealed partial class HarnessService
         var project = await setup.Projects.SingleAsync(x => x.Id == chat.ProjectId, lifetime);
         var provider = await setup.Providers.SingleAsync(x => x.Id == I(p, "providerId"), lifetime);
         var options = await setup.States.SingleAsync(lifetime);
+        hostOptions?.Apply(options);
         var images = (p["images"] as JsonArray ?? []).Select(x => new Attachment
         { Name = x!["name"]!.GetValue<string>(), Mime = x["mime"]!.GetValue<string>(), Data = Convert.FromBase64String(x["data"]!.GetValue<string>()) }).ToList();
         if (images.Count > 4 || images.Any(x => x.Data.Length > 8 * 1024 * 1024 || x.Mime is not ("image/png" or "image/jpeg" or "image/webp"))) throw new ArgumentException("4 PNG/JPEG/WebP images maximum, 8 MB each.");
@@ -35,12 +36,12 @@ public sealed partial class HarnessService
         string completionStatus = "";
         try
         {
+            AppLog.Write(AppLogLevel.Information, "generation.started", chatId: chat.Id);
             await emit(new{@event="started",chatId=chat.Id});
             await run.PrepareSandboxAsync(ct);
             var secret = await Decrypt(provider.ProtectedKey, ct);
             var history = await History(run, ct);
             var user = new Message { ChatId = chat.Id, Content = text, Attachments = run.Images };
-            if (history.Count == 0) run.Chat.Title = text.Length == 0 ? "Images" : text[..Math.Min(50, text.Length)];
             await ConversationInbox.SubmitAsync(run,user,ct); history.Add(user);
             await NotifyInbox(chat.Id);
             await emit(new { @event = "message", chatId = chat.Id, title = run.Chat.Title, message = MessageView(user) });
@@ -137,7 +138,7 @@ public sealed partial class HarnessService
                                 else result = await Tool(run, name, JsonNode.Parse(arguments) as JsonObject ?? [], ct);
                             }
                             catch (OperationCanceledException) { throw; }
-                            catch (Exception ex) { result = new("Erreur outil / Tool error: " + ex.Message); }
+                            catch (Exception ex) { AppLog.Write(AppLogLevel.Warning, "tool.failed", ex, chat.Id); result = new("Erreur outil / Tool error: " + ex.Message); }
                         }
                         finally { if (ownsToolQueue) tools.Release(); }
                         var toolWire = new JsonObject { ["role"] = "tool", ["tool_call_id"] = call["id"]!.GetValue<string>(), ["content"] = result.Text };
@@ -168,6 +169,7 @@ public sealed partial class HarnessService
         }
         catch (Exception ex)
         {
+            AppLog.Write(ex is OperationCanceledException ? AppLogLevel.Information : AppLogLevel.Error, "generation.failed", ex, chat.Id);
             error = ex is OperationCanceledException ? "Génération arrêtée / Generation stopped" : ex.Message;
             if (active != null && ex is not OperationCanceledException)
                 active.Content += "\n[Erreur de génération / Generation error] " + ex.Message;
@@ -182,7 +184,17 @@ public sealed partial class HarnessService
             }
             finally { if (run.Sandbox != null) await terminals.StopChatAsync(chat.Id, true); runs.TryRemove(chat.Id, out _); await emit(new { @event = "done", chatId = chat.Id, error, status = completionStatus }); }
         }
-        if(error.Length==0 && !run.Cancellation.IsCancellationRequested)await SendNext(chat.Id,lifetime);
+        if(error.Length==0 && !run.Cancellation.IsCancellationRequested)
+        {
+            try
+            {
+                if (await ConversationNaming.RenameAsync(database, chat.Id, http, Decrypt, true, lifetime) is { } name)
+                    await emit(new { @event = "chat.renamed", chatId = chat.Id, title = name });
+            }
+            catch (Exception ex) { AppLog.Write(AppLogLevel.Warning, "conversation.naming_failed", ex, chat.Id); }
+            AppLog.Write(AppLogLevel.Information, "generation.completed", chatId: chat.Id);
+            await SendNext(chat.Id,lifetime);
+        }
         return true;
     }
     static async Task<List<Message>> History(ConversationSession run, CancellationToken ct)

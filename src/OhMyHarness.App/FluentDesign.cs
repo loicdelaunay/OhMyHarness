@@ -7,16 +7,27 @@ using OhMyHarness.Core;
 
 namespace OhMyHarness.App;
 
-internal static class FluentDesign
+internal static partial class FluentDesign
 {
     static AppearanceTheme theme = AppearanceThemes.All[0];
     static readonly Dictionary<string, SolidColorBrush> resources = [];
     static readonly Dictionary<(byte R, byte G, byte B), SolidColorBrush> adapted = [];
     static Windows.UI.Color Color(string hex) => ColorHelper.FromArgb(255, Convert.ToByte(hex.Substring(1,2),16), Convert.ToByte(hex.Substring(3,2),16), Convert.ToByte(hex.Substring(5,2),16));
-    static Windows.UI.Color ResourceColor(string key) => key switch
+    static Windows.UI.Color ResourceColor(string key) => aliases.TryGetValue(key, out var canonical) ? ResourceColor(canonical) : key switch
     {
         "TextFillColorPrimaryBrush" => Color(theme.Text),
         "TextFillColorSecondaryBrush" => Color(theme.Muted),
+        "TextFillColorTertiaryBrush" => Color(theme.Muted),
+        "TextFillColorDisabledBrush" => WithOpacity(Color(theme.Text), 100),
+        "TransparentBrush" => Colors.Transparent,
+        "ControlHoverBrush" => Blend(Color(theme.Surface), Color(theme.Text), .07),
+        "ControlPressedBrush" => Blend(Color(theme.Surface), Color(theme.Text), .11),
+        "ControlSelectedBrush" => Blend(Color(theme.Surface), Color(theme.Accent), theme.Dark ? .18 : .13),
+        "ControlSelectedHoverBrush" => Blend(Color(theme.Surface), Color(theme.Accent), theme.Dark ? .25 : .20),
+        "SelectionBrush" => Color(ThemeContrast.Selection(theme)),
+        "SelectedTextBrush" => Colors.White,
+        "ControlStrokeColorDefaultBrush" => WithOpacity(Color(theme.Text), 65),
+        "ActivityGlowBrush" => WithOpacity(Color(theme.Accent), 6),
         "CardStrokeColorDefaultBrush" => ColorHelper.FromArgb(theme.Dark ? (byte)24 : (byte)32, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0, theme.Dark ? (byte)255 : (byte)0),
         "ConversationHoverFillBrush" => Blend(Color(theme.Surface), Color(theme.Dark ? theme.Text : theme.Accent), theme.Dark ? .09 : .08),
         "ConversationHoverStrokeBrush" => WithOpacity(Color(theme.Dark ? theme.Text : theme.Accent), theme.Dark ? (byte)80 : (byte)120),
@@ -30,24 +41,15 @@ internal static class FluentDesign
         "ToolMessageErrorStrokeBrush" => Color(theme.Dark ? "#E58C88" : "#B5413C"),
         "SolidBackgroundFillColorBaseBrush" => Color(theme.Background),
         "SystemAccentColor" => Color(theme.Accent),
-        "AccentFillColorDefaultBrush" or "AccentTextFillColorPrimaryBrush" or "AccentTextFillColorSecondaryBrush" or "AccentTextFillColorTertiaryBrush" => Color(theme.Accent),
+        "AccentFillColorDefaultBrush" => Color(theme.Accent),
+        "AccentTextFillColorPrimaryBrush" or "AccentTextFillColorSecondaryBrush" or "AccentTextFillColorTertiaryBrush" => Color(ThemeContrast.AccentText(theme)),
         "AccentFillColorSecondaryBrush" => WithOpacity(Color(theme.Accent), 230),
         "AccentFillColorTertiaryBrush" => WithOpacity(Color(theme.Accent), 204),
         "TextOnAccentFillColorPrimaryBrush" => AccentForeground(),
         "TextOnAccentFillColorSecondaryBrush" => WithOpacity(AccentForeground(), 200),
         _ => Color(theme.Surface)
     };
-    static Windows.UI.Color AccentForeground()
-    {
-        var accent = Color(theme.Accent);
-        static double Channel(byte value)
-        {
-            double normalized = value / 255d;
-            return normalized <= .04045 ? normalized / 12.92 : Math.Pow((normalized + .055) / 1.055, 2.4);
-        }
-        double luminance = .2126 * Channel(accent.R) + .7152 * Channel(accent.G) + .0722 * Channel(accent.B);
-        return Color(luminance > .179 && theme.Dark ? theme.Background : "#FFFFFF");
-    }
+    static Windows.UI.Color AccentForeground() => Color(ThemeContrast.On(theme.Accent));
     static Windows.UI.Color WithOpacity(Windows.UI.Color color, byte alpha) => ColorHelper.FromArgb(alpha, color.R, color.G, color.B);
     static Windows.UI.Color Blend(Windows.UI.Color background, Windows.UI.Color foreground, double amount) =>
         ColorHelper.FromArgb(255,
@@ -69,20 +71,24 @@ internal static class FluentDesign
         if (Math.Max(r,Math.Max(g,b)) < 115) return Color(theme.Surface);
         if (Math.Max(r,Math.Max(g,b)) - Math.Min(r,Math.Min(g,b)) < 85 && Math.Min(r,Math.Min(g,b)) > 105)
             return Color(Math.Max(r,Math.Max(g,b)) > 220 ? theme.Text : theme.Muted);
-        if (!theme.Dark) return ColorHelper.FromArgb(255, (byte)(r*.55), (byte)(g*.55), (byte)(b*.55));
-        return ColorHelper.FromArgb(255,r,g,b);
+        return Color(ThemeContrast.Readable($"#{r:X2}{g:X2}{b:X2}", theme.Surface));
     }
     public static void SetTheme(string id)
     {
         theme = AppearanceThemes.Get(id);
         foreach (var (key,brush) in resources) brush.Color = ResourceColor(key);
         foreach (var (key,brush) in adapted) brush.Color = AdaptColor(key.R,key.G,key.B);
-        // Install shared brushes before controls are built, then mutate them on theme changes.
-        foreach (var key in new[] { "AccentFillColorDefaultBrush", "AccentFillColorSecondaryBrush", "AccentFillColorTertiaryBrush",
-            "AccentTextFillColorPrimaryBrush", "AccentTextFillColorSecondaryBrush", "AccentTextFillColorTertiaryBrush",
-            "TextOnAccentFillColorPrimaryBrush", "TextOnAccentFillColorSecondaryBrush" })
+        // Explicit control aliases also cover popups, whose templates can cache StaticResource aliases.
+        foreach (var key in ThemeResourceKeys.Concat(aliases.Keys))
             Application.Current.Resources[key] = Resource(key);
         Application.Current.Resources["SystemAccentColor"] = Color(theme.Accent);
+        Application.Current.Resources["TextOnAccentFillColorSelectedText"] = Colors.White;
+        if (!Application.Current.Resources.ContainsKey(typeof(TextBlock)))
+        {
+            var textStyle = new Style(typeof(TextBlock));
+            textStyle.Setters.Add(new Setter(TextBlock.SelectionHighlightColorProperty, Resource("SelectionBrush")));
+            Application.Current.Resources[typeof(TextBlock)] = textStyle;
+        }
     }
     public static Brush Card => Resource("CardBackgroundFillColorDefaultBrush");
     public static Brush Stroke => Resource("CardStrokeColorDefaultBrush");

@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OhMyHarness vs opencode — Rapport d'écart fonctionnel</title>
+<style>
+  :root{
+    --bg:#11141a; --bg2:#171b23; --bg3:#1e232d; --line:#2a3140;
+    --fg:#e6e9ef; --fg2:#a8b1c2; --fg3:#7c8798;
+    --accent:#4aa8ff; --accent2:#7c5cff;
+    --ok:#3ecf8e; --warn:#ffb454; --bad:#ff6b6b; --info:#59c2ff;
+    --radius:12px; --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.6 "Segoe UI",system-ui,-apple-system,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+  header.hero{padding:56px 0 28px;border-bottom:1px solid var(--line);margin-bottom:28px}
+  .kicker{color:var(--accent);font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:12px}
+  h1{font-size:34px;line-height:1.2;margin:10px 0 8px}
+  h1 small{display:block;font-size:16px;font-weight:400;color:var(--fg2);margin-top:8px}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--fg3);font-size:13px;margin-top:14px}
+  .meta b{color:var(--fg2);font-weight:600}
+  h2{font-size:23px;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:26px 0 8px}
+  h4{font-size:14px;margin:16px 0 6px;color:var(--fg2);text-transform:uppercase;letter-spacing:.06em}
+  p{margin:8px 0}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--bg3);border:1px solid var(--line);
+    border-radius:6px;padding:1px 5px;color:#cfe3ff;word-break:break-word}
+  pre{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;overflow:auto}
+  pre code{background:none;border:0;padding:0;color:#cfd8e8;font-size:12.5px;line-height:1.55}
+  nav.toc{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin:24px 0}
+  nav.toc ol{margin:6px 0 0;padding-left:20px;columns:2;column-gap:32px}
+  nav.toc li{margin:3px 0;color:var(--fg2)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--bg3);color:var(--fg2);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  tbody tr:hover{background:#1a1f28}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;
+    border:1px solid transparent;white-space:nowrap}
+  .p0{background:#40202a;color:#ff9aa5;border-color:#6b2c3a}
+  .p1{background:#3d3320;color:#ffcb7d;border-color:#6a5527}
+  .p2{background:#213040;color:#8ec9ff;border-color:#2f5473}
+  .ok{background:#17352a;color:#7fe0af;border-color:#235c46}
+  .eff{font-family:var(--mono);font-size:12px;color:var(--fg2)}
+  .card{background:var(--bg2);border:1px solid var(--line);border-left:3px solid var(--accent2);
+    border-radius:var(--radius);padding:16px 18px;margin:14px 0}
+  .card.gap{border-left-color:var(--bad)}
+  .card.keep{border-left-color:var(--ok)}
+  .card h3{margin-top:0;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .card h3 .id{font-family:var(--mono);font-size:13px;color:var(--fg3)}
+  .note{background:#1a2230;border:1px solid #2b3b52;border-left:3px solid var(--info);
+    border-radius:var(--radius);padding:12px 16px;margin:16px 0;color:var(--fg2);font-size:14px}
+  .warnbox{background:#2a2114;border:1px solid #5c4520;border-left:3px solid var(--warn);
+    border-radius:var(--radius);padding:12px 16px;margin:16px 0;color:#ffdcae;font-size:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:16px 0}
+  .kpi{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+  .kpi .n{font-size:26px;font-weight:700;color:var(--accent)}
+  .kpi .n.bad{color:var(--bad)} .kpi .n.ok{color:var(--ok)} .kpi .n.warn{color:var(--warn)}
+  .kpi .l{font-size:12.5px;color:var(--fg2);margin-top:2px}
+  ul.tight li{margin:4px 0}
+  .path{font-family:var(--mono);font-size:12.5px;color:#9fd0ff}
+  footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--fg3);font-size:13px}
+  @media (max-width:760px){nav.toc ol{columns:1}h1{font-size:26px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">Rapport d'écart fonctionnel</div>
+  <h1>OhMyHarness vs <em>opencode</em>
+    <small>Ce que le code source d'OhMyHarness ne fait pas encore, et ce qu'il faudrait ajouter pour atteindre la parité agentique.</small>
+  </h1>
+  <div class="meta">
+    <span><b>Date :</b> 20/09/2026</span>
+    <span><b>Projet :</b> E:\Projects\OhMyHarness</span>
+    <span><b>Périmètre :</b> src/, desktop/, tests/, docs/</span>
+    <span><b>Type :</b> analyse statique du code (lecture + recherche textuelle)</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <strong>Sommaire</strong>
+  <ol>
+    <li><a href="#exec">Résumé exécutif</a></li>
+    <li><a href="#methode">Méthode et périmètre</a></li>
+    <li><a href="#existant">Ce que OhMyHarness fait déjà</a></li>
+    <li><a href="#moteur">Moteur agent et extensibilité</a></li>
+    <li><a href="#outils">Outils de code et qualité</a></li>
+    <li><a href="#sessions">Sessions et cycle de vie</a></li>
+    <li><a href="#fournisseurs">Fournisseurs, modèles et coûts</a></li>
+    <li><a href="#interfaces">Interfaces, API et distribution</a></li>
+    <li><a href="#securite">Permissions et confinement</a></li>
+    <li><a href="#dette">Fragilités observées dans le code</a></li>
+    <li><a href="#roadmap">Feuille de route proposée</a></li>
+    <li><a href="#limites">Limites de cette analyse</a></li>
+  </ol>
+</nav>
+
+<h2 id="exec">1. Résumé exécutif</h2>
+
+<div class="grid">
+  <div class="kpi"><div class="n bad">28</div><div class="l">écarts fonctionnels identifiés face à opencode</div></div>
+  <div class="kpi"><div class="n warn">6</div><div class="l">écarts classés P0 (bloquants pour la parité agentique)</div></div>
+  <div class="kpi"><div class="n ok">7</div><div class="l">capacités d'OhMyHarness absentes d'opencode (avantage propre)</div></div>
+  <div class="kpi"><div class="n">~3&nbsp;800</div><div class="l">lignes de C# utiles hors migrations et code généré</div></div>
+</div>
+
+<p>
+OhMyHarness est aujourd'hui un <b>client de chat multimodal très complet</b> avec une couche d'outils
+réelle (sources, éditeur de fichiers, terminal, Git en lecture, navigateur intégré avec accès DOM,
+automatisation souris/clavier/captures, permissions persistantes). Il sait aussi <b>piloter un serveur
+opencode local</b> via HTTP et lui déléguer la boucle agentique.
+</p>
+<p>
+Mais comparé à opencode, il lui manque tout le socle qui fait d'opencode une <b>plateforme agentique
+extensible</b> plutôt qu'une application fermée : protocole MCP, agents/sous-agents personnalisables,
+règles projet (<code>AGENTS.md</code>), commandes personnalisées, outils utilisateur, plugins/hooks,
+diagnostics LSP, recherche de code (<code>glob</code>/<code>grep</code>), application de patch avec
+diff, annulation/restauration de session, export/import, mode headless scriptable, OAuth fournisseurs,
+catalogue de modèles avec coûts, et configuration portable hors base SQLite.
+</p>
+
+<h3>Tableau de synthèse</h3>
+<table>
+  <thead>
+    <tr><th style="width:56px">Id</th><th>Écart</th><th style="width:96px">Priorité</th><th style="width:110px">Effort</th><th style="width:250px">Point d'ancrage principal</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>G1</td><td>Serveurs MCP (local et distant, OAuth)</td><td><span class="badge p0">P0</span></td><td class="eff">M&nbsp;· 1-2 sem.</td><td class="path">src/OhMyHarness.Service/Tools.cs</td></tr>
+    <tr><td>G2</td><td>Fichiers de règles projet (<code>AGENTS.md</code>, instructions)</td><td><span class="badge p0">P0</span></td><td class="eff">S&nbsp;· 1-2 j</td><td class="path">src/OhMyHarness.Core/Skills.cs</td></tr>
+    <tr><td>G3</td><td>Recherche de code <code>glob</code> / <code>grep</code></td><td><span class="badge p0">P0</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">src/OhMyHarness.Core/SourceAccess.cs</td></tr>
+    <tr><td>G4</td><td>Patch multi-fichiers avec diff visible avant application</td><td><span class="badge p0">P0</span></td><td class="eff">M&nbsp;· 1-2 sem.</td><td class="path">src/OhMyHarness.Core/SourceAccess.cs</td></tr>
+    <tr><td>G5</td><td>Annulation / restauration (snapshots, <code>/undo</code>, <code>/redo</code>)</td><td><span class="badge p0">P0</span></td><td class="eff">M&nbsp;· 1 sem.</td><td class="path">src/OhMyHarness.Service/Generations.cs</td></tr>
+    <tr><td>G6</td><td>Configuration portable versionnable (équivalent <code>opencode.json</code>)</td><td><span class="badge p0">P0</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">src/OhMyHarness.Core/Storage.cs</td></tr>
+    <tr><td>G7</td><td>Sous-agents et délégation (<code>task</code>, agents primaires build/plan)</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 1-2 sem.</td><td class="path">src/OhMyHarness.Service/Generations.cs</td></tr>
+    <tr><td>G8</td><td>Agents personnalisés définis par l'utilisateur</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 1 sem.</td><td class="path">src/OhMyHarness.Core/Storage.cs</td></tr>
+    <tr><td>G9</td><td>Commandes personnalisées avec arguments et injection</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 3-5 j</td><td class="path">src/OhMyHarness.Core/Storage.cs</td></tr>
+    <tr><td>G10</td><td>Diagnostics LSP après édition</td><td><span class="badge p1">P1</span></td><td class="eff">L&nbsp;· 2-4 sem.</td><td class="path">src/OhMyHarness.Service/Tools.cs</td></tr>
+    <tr><td>G11</td><td>Écriture atomique et sauvegardes de fichiers</td><td><span class="badge p1">P1</span></td><td class="eff">S&nbsp;· 1-2 j</td><td class="path">src/OhMyHarness.Core/SourceAccess.cs</td></tr>
+    <tr><td>G12</td><td>Reprise, régénération et édition d'un message</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 4-6 j</td><td class="path">src/OhMyHarness.Service/Generations.cs</td></tr>
+    <tr><td>G13</td><td>File d'attente de messages / pilotage pendant une génération</td><td><span class="badge p1">P1</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">desktop/ui/app.js</td></tr>
+    <tr><td>G14</td><td>Export / import / partage / fork de session</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 4-6 j</td><td class="path">src/OhMyHarness.Service/Program.cs</td></tr>
+    <tr><td>G15</td><td>Compaction manuelle et budget de contexte piloté</td><td><span class="badge p1">P1</span></td><td class="eff">S&nbsp;· 1-2 j</td><td class="path">src/OhMyHarness.Core/ContextWindow.cs</td></tr>
+    <tr><td>G16</td><td>Authentification OAuth (abonnements Anthropic, Copilot, Google…)</td><td><span class="badge p1">P1</span></td><td class="eff">L&nbsp;· 2-3 sem.</td><td class="path">src/OhMyHarness.App/ProviderEditor.cs</td></tr>
+    <tr><td>G17</td><td>Catalogue de modèles (capacités + coûts) au lieu de listes figées</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 1 sem.</td><td class="path">src/OhMyHarness.Core/ModelCatalog.cs</td></tr>
+    <tr><td>G18</td><td>Suivi du coût monétaire par session</td><td><span class="badge p1">P1</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">src/OhMyHarness.Service/Generations.cs</td></tr>
+    <tr><td>G19</td><td>Permissions par motif (commandes, chemins) au lieu d'un flag par portée</td><td><span class="badge p1">P1</span></td><td class="eff">M&nbsp;· 1 sem.</td><td class="path">src/OhMyHarness.Core/Storage.cs</td></tr>
+    <tr><td>G20</td><td>CLI headless et API HTTP publique (équivalent <code>opencode run</code> / <code>serve</code>)</td><td><span class="badge p1">P1</span></td><td class="eff">L&nbsp;· 2-3 sem.</td><td class="path">src/OhMyHarness.Service/Program.cs</td></tr>
+    <tr><td>G21</td><td>Plugins et hooks utilisateur</td><td><span class="badge p2">P2</span></td><td class="eff">L&nbsp;· 2-4 sem.</td><td class="path">src/OhMyHarness.Service/Tools.cs</td></tr>
+    <tr><td>G22</td><td>Outils personnalisés fournis par l'utilisateur</td><td><span class="badge p2">P2</span></td><td class="eff">L&nbsp;· 2-3 sem.</td><td class="path">src/OhMyHarness.Service/Tools.cs</td></tr>
+    <tr><td>G23</td><td>Skills à chargement progressif (<code>SKILL.md</code>)</td><td><span class="badge p2">P2</span></td><td class="eff">M&nbsp;· 4-6 j</td><td class="path">src/OhMyHarness.Core/Skills.cs</td></tr>
+    <tr><td>G24</td><td>Formateurs automatiques après édition</td><td><span class="badge p2">P2</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">src/OhMyHarness.Service/Tools.cs</td></tr>
+    <tr><td>G25</td><td>Liste de tâches (<code>todo</code>) persistée et affichée</td><td><span class="badge p2">P2</span></td><td class="eff">S&nbsp;· 2-3 j</td><td class="path">src/OhMyHarness.Core/Storage.cs</td></tr>
+    <tr><td>G26</td><td>Thèmes, raccourcis configurables, mode TUI/vim, mise à jour automatique</td><td><span class="badge p2">P2</span></td><td class="eff">L&nbsp;· 2-4 sem.</td><td class="path">src/OhMyHarness.App/MainWindow.cs</td></tr>
+    <tr><td>G27</td><td>Lecture d'images par l'outil de lecture</td><td><span class="badge p2">P2</span></td><td class="eff">S&nbsp;· 1-2 j</td><td class="path">src/OhMyHarness.Core/SourceAccess.cs</td></tr>
+    <tr><td>G28</td><td>Confinement du terminal exécuté par l'IA</td><td><span class="badge p1">P1</span></td><td class="eff">L&nbsp;· 2-3 sem.</td><td class="path">src/OhMyHarness.Core/WorkspaceTools.cs</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>Lecture du tableau.</b> <span class="badge p0">P0</span> = sans ces briques, l'agent reste un assistant de
+  conversation et ne peut pas être étendu ni scénarisé. <span class="badge p1">P1</span> = nécessaire pour un usage
+  agentique quotidien sur un vrai dépôt. <span class="badge p2">P2</span> = confort, écosystème et différenciation.
+  Effort : S ≈ 1-3 jours, M ≈ 1-2 semaines, L ≈ 2-4 semaines (estimation indicative, un seul développeur).
+</div>
+
+<h2 id="methode">2. Méthode et périmètre</h2>
+<p>Trois passes ont été effectuées, en lecture seule :</p>
+<ol class="tight">
+  <li><b>Lecture ciblée</b> des fichiers structurants : <span class="path">src/OhMyHarness.Core/Skills.cs</span>,
+    <span class="path">ChatEngine.cs</span>, <span class="path">SourceAccess.cs</span>, <span class="path">WorkspaceTools.cs</span>,
+    <span class="path">Storage.cs</span>, <span class="path">ModelCatalog.cs</span>, <span class="path">ContextWindow.cs</span>,
+    <span class="path">ConversationSession.cs</span>, <span class="path">OpenCodeEngine.cs</span>,
+    <span class="path">src/OhMyHarness.Service/Tools.cs</span>, <span class="path">HarnessService.cs</span>,
+    <span class="path">Generations.cs</span>, <span class="path">Program.cs</span>,
+    <span class="path">src/OhMyHarness.App/UiText.cs</span>, <span class="path">desktop/ui/app.js</span>,
+    <span class="path">README.md</span>.</li>
+  <li><b>Recherche textuelle</b> sur <code>src</code>, <code>desktop</code>, <code>tests</code>, <code>docs</code>
+    (hors <code>obj</code>, <code>bin</code>, <code>dist</code>, <code>node_modules</code>) des motifs :
+    <code>lsp</code>, <code>language server</code>, <code>mcp</code>, <code>modelcontextprotocol</code>,
+    <code>todowrite</code>, <code>glob</code>, <code>grep</code>, <code>patch</code>, <code>undo</code>,
+    <code>revert</code>, <code>share</code>, <code>plugin</code>, <code>AGENTS.md</code>, <code>formatter</code>,
+    <code>models.dev</code>, <code>subagent</code>, <code>worktree</code>, <code>keybind</code>, <code>websocket</code>.</li>
+  <li><b>Comptage de lignes</b> pour situer la taille du socle (≈ 1 940 lignes pour
+    <span class="path">MainWindow.cs</span>, 1 135 pour <span class="path">WorkspacePane.cs</span>,
+    431 pour les tests, le reste des fichiers C# métier entre 20 et 330 lignes).</li>
+</ol>
+<div class="warnbox">
+  <b>Périmètre de la comparaison.</b> Les fonctionnalités attribuées à opencode reposent sur la connaissance
+  publique de ce projet (sst/opencode) et <u>n'ont pas pu être revérifiées en ligne</u> : l'accès navigateur est
+  désactivé dans cette session. Aucune affirmation sur opencode n'est utilisée pour trancher un détail
+  d'implémentation d'OhMyHarness ; tous les constats côté OhMyHarness sont, eux, appuyés sur un fichier et une
+  construction de code précise.
+</div>
+
+<h2 id="existant">3. Ce que OhMyHarness fait déjà</h2>
+<p>Il faut le poser avant les manques, car plusieurs briques sont déjà au niveau d'opencode, voire au-delà.</p>
+
+<div class="grid">
+  <div class="card keep">
+    <h3>Boucle d'outils native multi-tours</h3>
+    <p>Jusqu'à 12 tours d'appels d'outils par envoi, journal visible, résultats persistés
+      (<span class="path">src/OhMyHarness.Service/Generations.cs</span>).</p>
+  </div>
+  <div class="card keep">
+    <h3>Permissions granulaires et révocables</h3>
+    <p>Autoriser une fois / toujours / refuser, portées persistées, mode global Refuser-Demander-Accepter
+      (<span class="path">Tools.cs</span>, <span class="path">Storage.cs</span>).</p>
+  </div>
+  <div class="card keep">
+    <h3>Navigateur intégré avec accès DOM</h3>
+    <p>WebView2, <code>inspect_dom</code>, <code>browser_mouse</code>, <code>browser_keyboard</code>,
+      aperçu local à origine dédiée et dossier de ressources autorisé.</p>
+  </div>
+  <div class="card keep">
+    <h3>Automatisation du bureau</h3>
+    <p>Souris, clavier, captures multi-écrans avec curseur enregistré, restauration de la fenêtre active
+      (<span class="path">WorkspacePane.cs</span>, <span class="path">DesktopInput.cs</span>).</p>
+  </div>
+  <div class="card keep">
+    <h3>Conversations parallèles</h3>
+    <p>Plusieurs générations simultanées, y compris sur des projets différents, avec sémaphores dédiés
+      outils/permissions.</p>
+  </div>
+  <div class="card keep">
+    <h3>Compaction de contexte automatique</h3>
+    <p>Seuil 95 %, résumé persisté, conservation des tours récents
+      (<span class="path">ContextWindow.cs</span>, <code>Compact()</code>).</p>
+  </div>
+  <div class="card keep">
+    <h3>Intégration d'un serveur opencode</h3>
+    <p>Démarrage automatique, sessions dédiées par conversation, pont de permissions, désactivation ciblée
+      des outils opencode (<span class="path">OpenCodeEngine.cs</span>, <span class="path">Generations.cs</span>).</p>
+  </div>
+</div>
+
+<h2 id="moteur">4. Moteur agent et extensibilité</h2>
+<p>
+C'est la famille de manques la plus lourde : OhMyHarness possède un <b>ensemble fermé</b> d'outils et un
+prompt système <b>construit dans le code</b>. Rien de tout cela n'est étendable sans recompiler.
+</p>
+
+<div class="card gap">
+  <h3><span class="id">G1</span> Serveurs MCP <span class="badge p0">P0</span> <span class="eff">M · 1-2 semaines</span></h3>
+  <p><b>Constat.</b> Aucune mention de MCP dans le code : la recherche de <code>mcp</code> et
+    <code>modelcontextprotocol</code> renvoie 0 occurrence sur tout le périmètre analysé.</p>
+  <p><b>Impact.</b> Impossible de brancher un serveur d'outils externe (base de données, Jira, Figma,
+    Playwright, serveurs distants authentifiés). opencode en fait son principal mécanisme d'extension ;
+    ici, chaque nouveau besoin d'outil implique une modification du C# et une nouvelle publication.</p>
+  <p><b>Piste.</b> Un client MCP (stdio + HTTP/SSE) dans <span class="path">src/OhMyHarness.Core/</span>, une entité
+    <code>McpServer</code> dans <span class="path">Storage.cs</span> + migration, l'agrégation des outils distants
+    dans <code>Definitions()</code> de <span class="path">src/OhMyHarness.Service/Tools.cs</span>, et la
+    réutilisation du flux d'approbation existant (<code>Approve()</code>) pour chaque appel d'outil MCP.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G2</span> Règles projet <code>AGENTS.md</code> <span class="badge p0">P0</span> <span class="eff">S · 1-2 jours</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>AGENTS.md</code>. Le prompt système est assemblé en dur par
+    <code>Skills.Prompt()</code> (<span class="path">src/OhMyHarness.Core/Skills.cs</span>) et
+    <code>PlatformSupport.SystemPrompt</code>; aucune lecture d'un fichier d'instructions du dépôt.</p>
+  <p><b>Impact.</b> Les conventions d'un projet (style, architecture, commandes de build) doivent être répétées à
+    chaque session ou collées dans un template. C'est le levier de qualité le moins coûteux d'opencode, et il
+    manque ici.</p>
+  <p><b>Piste.</b> Découverte hiérarchique (<code>AGENTS.md</code> global utilisateur, puis racine du projet, puis
+    sous-dossiers) injectée dans le prompt après <code>Skills.Prompt()</code>, affichée dans l'IHM pour que
+    l'utilisateur voie ce qui est chargé. À combiner avec la commande <code>/init</code> qui génère le fichier.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G9</span> Commandes personnalisées <span class="badge p1">P1</span> <span class="eff">M · 3-5 jours</span></h3>
+  <p><b>Constat.</b> Le concept le plus proche est le template : <code>PromptTemplate { Name, Content }</code>
+    (<span class="path">Storage.cs</span>) édité par <span class="path">TemplateEditor.cs</span>. Un template
+    <b>préremplit</b> la zone de saisie (<code>DefaultTemplates.WebApp</code>).</p>
+  <p><b>Impact.</b> Pas d'arguments (<code>$ARGUMENTS</code>), pas d'injection de sortie shell, pas de référence
+    <code>@fichier</code>, pas de sélection d'agent/modèle par commande, donc pas de commandes réutilisables
+    du type <code>/revue chemin/</code> ou <code>/test</code>.</p>
+  <p><b>Piste.</b> Étendre <code>PromptTemplate</code> (description, agent cible, modèle, arguments déclarés) et
+    ajouter un résolveur de placeholders côté <span class="path">Generations.cs</span> avant l'envoi.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G7</span> Sous-agents et délégation <span class="badge p1">P1</span> <span class="eff">M · 1-2 semaines</span></h3>
+  <p><b>Constat.</b> Une seule boucle, un seul rôle assistant. La liste d'outils ne contient aucun équivalent de
+    <code>task</code> : les identifiants opencode <code>task</code>, <code>glob</code>, <code>grep</code>,
+    <code>todowrite</code> n'apparaissent que dans la liste de désactivation
+    (<span class="path">src/OhMyHarness.Core/OpenCodeEngine.cs</span>, méthode <code>DisabledToolsAsync</code>).</p>
+  <p><b>Impact.</b> Pas de séparation exploration / édition, pas de sous-agent spécialisé, pas de parallélisme
+    intra-conversation : chaque tâche longue sature la fenêtre de contexte principale.</p>
+  <p><b>Piste.</b> Ouvrir la notion d'agent (prompt, modèle, liste d'outils, permissions) et un outil
+    <code>task</code> qui démarre un <code>ConversationSession</code> enfant dans
+    <span class="path">src/OhMyHarness.Service/Generations.cs</span>.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G8</span> Agents personnalisés <span class="badge p1">P1</span> <span class="eff">M · 1 semaine</span></h3>
+  <p><b>Constat.</b> Aucune entité « agent » dans <span class="path">Storage.cs</span> (les entités sont
+    <code>Project</code>, <code>Chat</code>, <code>Message</code>, <code>Attachment</code>, <code>Provider</code>,
+    <code>ExternalChatSession</code>, <code>AppState</code>, <code>PromptTemplate</code>,
+    <code>PermissionGrant</code>). Le comportement est global : <code>EnabledSkills</code> et
+    <code>ThinkingLevel</code> dans <code>AppState</code>, donc identiques pour tous les projets.</p>
+  <p><b>Impact.</b> Impossible d'avoir un agent « plan » en lecture seule et un agent « build » qui écrit,
+    ni un agent par projet. C'est pourtant le principal garde-fou d'opencode.</p>
+  <p><b>Piste.</b> Ajouter <code>Agent</code> (nom, prompt, outil autorisé, modèle, mode) + migration, et
+    remplacer la lecture directe de <code>State.EnabledSkills</code> dans
+    <span class="path">src/OhMyHarness.Service/Tools.cs</span> par une résolution « agent → outils ».</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G21</span> Plugins et hooks <span class="badge p2">P2</span> <span class="eff">L · 2-4 semaines</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>plugin</code>. Aucun point d'extension entre l'appel du modèle et
+    l'exécution d'un outil : dans <span class="path">src/OhMyHarness.Service/Generations.cs</span>, l'exécution
+    est en ligne (<code>try { result = await Tool(...) }</code>).</p>
+  <p><b>Impact.</b> Pas de garde-fou utilisateur (bloquer <code>rm -rf</code>, masquer un secret, formater après
+    écriture) sans modifier et recompiler l'application.</p>
+  <p><b>Piste.</b> Points d'accroche avant/après outil, avant envoi de message, sur événement de session.
+    Techniquement, un hôte de script (JS via ClearScript, ou Python via un sous-processus JSON-RPC comme
+    celui de <span class="path">Program.cs</span>) évite d'introduire un runtime lourd dans le binaire.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G22</span> Outils fournis par l'utilisateur <span class="badge p2">P2</span> <span class="eff">L · 2-3 semaines</span></h3>
+  <p><b>Constat.</b> Le catalogue d'outils est écrit à la main en deux endroits qui se recouvrent partiellement :
+    <code>ChatEngine.ToolDefinitions(sources, browser, writeSources)</code>
+    (<span class="path">src/OhMyHarness.Core/ChatEngine.cs</span>) et <code>HarnessService.Definitions()</code>
+    (<span class="path">src/OhMyHarness.Service/Tools.cs</span>). Le tri se fait par un <code>switch</code> sur le
+    nom dans <code>Tool()</code>.</p>
+  <p><b>Impact.</b> Aucun moyen d'ajouter un outil métier sans publier une nouvelle version de l'application.</p>
+  <p><b>Piste.</b> Introduire un registre d'outils (<code>ITool</code> : nom, schéma JSON, skill requis,
+    exécution, portée d'autorisation) et faire converger les deux fonctions <code>Definitions</code> vers ce
+    registre — c'est aussi le prérequis de G1, G7, G21 et G23.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G23</span> Skills à chargement progressif <span class="badge p2">P2</span> <span class="eff">M · 4-6 jours</span></h3>
+  <p><b>Constat.</b> Un skill est un simple interrupteur : <code>Skills.Enabled(selection, id)</code> teste
+    l'appartenance à une chaîne séparée par des virgules
+    (<span class="path">src/OhMyHarness.Core/Skills.cs</span>), et toutes les instructions des skills actifs sont
+    concaténées dans le prompt système.</p>
+  <p><b>Impact.</b> Chaque skill actif consomme des tokens à chaque appel, même inutilisé ; impossible d'en
+    installer beaucoup.</p>
+  <p><b>Piste.</b> Un outil <code>skill</code> qui charge le contenu d'un dossier de skill à la demande, avec
+    seulement les métadonnées (nom + description) dans le prompt.</p>
+</div>
+
+<h2 id="outils">5. Outils de code et qualité</h2>
+
+<div class="card gap">
+  <h3><span class="id">G3</span> Recherche de code <code>glob</code> / <code>grep</code> <span class="badge p0">P0</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> La surface d'exploration se limite à <code>list_sources</code> et <code>read_source</code>.
+    <code>SourceAccess</code> n'expose que <code>List()</code>, <code>ReadAsync()</code>, <code>WriteAsync()</code>,
+    <code>ModifyAsync()</code> (<span class="path">src/OhMyHarness.Core/SourceAccess.cs</span>).</p>
+  <p><b>Impact.</b> Sur un dépôt réel, l'agent doit deviner les chemins ou parcourir dossier par dossier :
+    coût en tours d'outils et en tokens très élevé, avec une fenêtre de 12 tours seulement.</p>
+  <p><b>Piste.</b> <code>search_sources(pattern, glob?)</code> renvoyant les correspondances avec numéros de
+    ligne, en réutilisant le filtrage déjà écrit (<code>Excluded</code>, <code>ReparsePoint</code>,
+    <code>Take(300)</code>) pour rester cohérent avec les exclusions de secrets.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G4</span> Patch multi-fichiers et diff avant application <span class="badge p0">P0</span> <span class="eff">M · 1-2 semaines</span></h3>
+  <p><b>Constat.</b> L'édition se fait par <code>write_source</code> (réécriture intégrale) ou
+    <code>edit_source</code> (remplacement d'<b>une seule occurrence</b>, via
+    <code>current.IndexOf(oldText, StringComparison.Ordinal)</code> dans <code>ModifyAsync</code>). Aucun diff
+    n'est calculé ni montré avant écriture ; aucun mode multi-fichiers en un seul appel.</p>
+  <p><b>Impact.</b> Risque d'erreur réel : si <code>old_text</code> apparaît plusieurs fois, c'est la première
+    occurrence qui est modifiée, ce qui peut corrompre silencieusement un fichier. L'utilisateur approuve en
+    outre un texte à remplacer sans voir le résultat final.</p>
+  <p><b>Piste.</b> Un outil <code>patch</code> (format <code>*** Update File</code> ou diff unifié) appliqué de
+    façon transactionnelle, avec rendu du diff dans le popup d'autorisation existant et refus si
+    l'ancrage est ambigu.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G11</span> Écriture atomique et sauvegardes <span class="badge p1">P1</span> <span class="eff">S · 1-2 jours</span></h3>
+  <p><b>Constat.</b> <code>WriteAsync</code> et <code>ModifyAsync</code> écrivent directement
+    (<code>File.WriteAllTextAsync(full, content, ct)</code>) sans fichier temporaire ni renommage, sans
+    conservation de l'original, et sans verrou contre une écriture concurrente de l'éditeur de l'utilisateur.</p>
+  <p><b>Impact.</b> Une interruption pendant l'écriture peut tronquer un fichier source ; aucune marche arrière
+    n'existe (voir G5).</p>
+  <p><b>Piste.</b> Écriture temporaire + <code>File.Move(temp, cible, overwrite: true)</code>, copie de sauvegarde
+    horodatée, et refus d'écrire si le fichier a changé depuis la dernière lecture par l'IA.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G10</span> Diagnostics LSP <span class="badge p1">P1</span> <span class="eff">L · 2-4 semaines</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>lsp</code> et de <code>language server</code> ; aucun client LSP dans les
+    trois projets C#.</p>
+  <p><b>Impact.</b> L'agent ne sait pas qu'il vient de casser la compilation : c'est à l'utilisateur de signaler
+    l'erreur, ce qui coûte un aller-retour complet par itération.</p>
+  <p><b>Piste.</b> Client LSP minimal (initialisation, <code>didOpen/didChange</code>, collecte des
+    <code>publishDiagnostics</code>) alimenté après chaque écriture, avec les erreurs du fichier touché
+    renvoyées en fin de tour. Les serveurs détectables par extension peuvent être déclarés en configuration
+    (voir G6).</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G24</span> Formateurs automatiques <span class="badge p2">P2</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>formatter</code>. Le terminal est disponible
+    (<code>WorkspaceTools.ShellAsync</code>) mais rien n'est déclenché automatiquement après une écriture.</p>
+  <p><b>Impact.</b> Les diffs de l'IA ne respectent pas le format du projet ; le bruit de formatage pollue
+    les relectures.</p>
+  <p><b>Piste.</b> Exécuter le formateur du projet (Prettier, <code>dotnet format</code>, <code>gofmt</code>…)
+    après chaque écriture réussie, avec le même mécanisme de timeout de 60 s que
+    <span class="path">WorkspaceTools.cs</span>.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G25</span> Liste de tâches (<code>todo</code>) <span class="badge p2">P2</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> Aucun outil de planification persistée ; le skill <code>planning</code>
+    (<span class="path">Skills.cs</span>) n'injecte qu'une instruction textuelle. <code>todowrite</code>
+    n'apparaît que dans la liste de désactivation d'<span class="path">OpenCodeEngine.cs</span>.</p>
+  <p><b>Impact.</b> Sur une tâche de plus de 12 tours, la limite est atteinte
+    (<code>for (int round = 0; round &lt; 12; round++)</code> dans <span class="path">Generations.cs</span>)
+    sans état intermédiaire visible pour reprendre.</p>
+  <p><b>Piste.</b> Entité <code>Todo</code> par conversation + panneau dédié à côté du panneau Outils.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G27</span> Lecture d'images par l'outil de lecture <span class="badge p2">P2</span> <span class="eff">S · 1-2 jours</span></h3>
+  <p><b>Constat.</b> <code>ReadAsync</code> refuse tout ce qui n'est pas dans la liste blanche d'extensions
+    textuelles (<code>SourceAccess.Extensions</code>) et tout fichier de plus de 128 Ko.</p>
+  <p><b>Impact.</b> L'agent ne peut pas lire une capture d'écran, un diagramme ou une maquette déposée dans le
+    dépôt, alors que le pipeline multimodal existe déjà (le résultat d'outil joint une image :
+    <code>ToolResult(string Text, Attachment? Image)</code> dans <span class="path">Tools.cs</span>).</p>
+  <p><b>Piste.</b> Brancher <code>read_source</code> sur le chemin image existant, sous réserve de
+    <code>Provider.SupportsImages</code>.</p>
+</div>
+
+<h2 id="sessions">6. Sessions et cycle de vie</h2>
+
+<div class="card gap">
+  <h3><span class="id">G5</span> Annulation et restauration <span class="badge p0">P0</span> <span class="eff">M · 1 semaine</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>undo</code> et de <code>revert</code>. L'intégration Git est
+    strictement en lecture : <code>GitChangesAsync</code> n'appelle que <code>status</code>, <code>diff</code> et
+    <code>diff --cached</code> (<span class="path">src/OhMyHarness.Core/WorkspaceTools.cs</span>). Aucun
+    <code>snapshot</code> de dépôt (les 46 occurrences de « snapshot » concernent le curseur de souris et les
+    captures d'écran).</p>
+  <p><b>Impact.</b> Après une série d'écritures de l'IA, revenir en arrière demande un <code>git checkout</code>
+    manuel, et rien ne relie un état de fichiers à un tour de conversation.</p>
+  <p><b>Piste.</b> Snapshot avant le premier outil d'écriture d'un tour (arbre Git temporaire ou copie
+    incrémentale), puis un point d'entrée « Revenir à ce message » dans l'IHM.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G12</span> Reprise, régénération, édition de message <span class="badge p1">P1</span> <span class="eff">M · 4-6 jours</span></h3>
+  <p><b>Constat.</b> L'historique est filtré sur <code>State == "complete"</code> (<code>History()</code> dans
+    <span class="path">Generations.cs</span>) : une réponse interrompue est conservée en base, affichée avec la
+    mention « Réponse interrompue », mais <b>jamais renvoyée</b> au modèle. Il n'existe ni « continuer », ni
+    « régénérer », ni « modifier ce message ».</p>
+  <p><b>Impact.</b> Une coupure réseau ou un arrêt volontaire oblige à réécrire la demande complète, en perdant
+    le raisonnement déjà produit et facturé.</p>
+  <p><b>Piste.</b> Bouton de reprise qui remet le message partiel dans le fil, et suppression/branche à partir
+    d'un message donné.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G14</span> Export, import, partage, fork <span class="badge p1">P1</span> <span class="eff">M · 4-6 jours</span></h3>
+  <p><b>Constat.</b> Le protocole du service est un JSON-RPC sur entrée/sortie standard
+    (<span class="path">src/OhMyHarness.Service/Program.cs</span>, ligne à ligne sur
+    <code>Console.In.ReadLineAsync</code>) : il n'expose ni export de session, ni import, ni lien de partage.
+    Les conversations vivent uniquement dans <code>database.sqlite</code>.</p>
+  <p><b>Impact.</b> Impossible de transmettre une session à un collègue, de l'archiver, de la rejouer comme test
+    de non-régression d'agent, ni de la bifurquer pour explorer deux pistes.</p>
+  <p><b>Piste.</b> Export JSON/JSONL d'une conversation (messages, outil, métadonnées) et import inverse, sur
+    le même modèle que <code>history</code> et <code>snapshot</code> déjà présents dans <code>Dispatch</code>.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G15</span> Compaction manuelle et pilotage du contexte <span class="badge p1">P1</span> <span class="eff">S · 1-2 jours</span></h3>
+  <p><b>Constat.</b> La compaction est uniquement automatique au-delà de 95 %
+    (<code>ContextWindow.ShouldCompact</code>). La cible de 60 % est déclarée
+    (<code>CompactTarget</code>) mais jamais utilisée dans <span class="path">Generations.cs</span>. Aucune
+    commande utilisateur, aucune estimation affichée du coût d'un résumé.</p>
+  <p><b>Impact.</b> L'utilisateur subit la compaction au pire moment et ne peut pas anticiper (« je résume
+    maintenant, avant d'attaquer la grosse tâche »).</p>
+  <p><b>Piste.</b> Commande de compaction déclenchée à la demande, plus affichage du niveau de remplissage
+    courant (la valeur <code>limit</code> est déjà envoyée à l'IHM dans l'événement <code>stream</code>).</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G13</span> File d'attente et pilotage pendant une génération <span class="badge p1">P1</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> Le bouton d'envoi est désactivé tant que la conversation tourne :
+    <code>$('send').disabled = !chatId || !providerId || running.has(chatId)</code>
+    (<span class="path">desktop/ui/app.js</span>, <code>updateControls()</code>), et le service refuse un second
+    envoi sur la même conversation (<code>if (!runs.TryAdd(chat.Id, run)) throw</code> dans
+    <span class="path">Generations.cs</span>).</p>
+  <p><b>Impact.</b> Impossible de corriger le cap en cours de route (« en fait, pas ce dossier ») ni de préparer
+    la demande suivante : il faut arrêter et perdre la génération en cours.</p>
+  <p><b>Piste.</b> Autoriser la saisie et l'empilement du message ; l'appliquer soit après la fin du tour, soit
+    en interrompant proprement (le mécanisme <code>Cancellation</code> et l'abandon d'OpenCode existent déjà).</p>
+</div>
+
+<h2 id="fournisseurs">7. Fournisseurs, modèles et coûts</h2>
+
+<div class="card gap">
+  <h3><span class="id">G16</span> Authentification OAuth et abonnements <span class="badge p1">P1</span> <span class="eff">L · 2-3 semaines</span></h3>
+  <p><b>Constat.</b> Le seul mode d'authentification est la clé API / le mot de passe, stocké chiffré :
+    <code>Provider.ProtectedKey</code> + <code>KeyVault</code> DPAPI sur Windows, Keychain via l'hôte sur macOS
+    (<span class="path">src/OhMyHarness.Core/Storage.cs</span>,
+    <span class="path">src/OhMyHarness.Service/HarnessService.cs</span>).</p>
+  <p><b>Impact.</b> Pas d'accès aux offres par abonnement (Claude Pro/Max, GitHub Copilot, Google), qui
+    représentent souvent l'essentiel du quota réel des utilisateurs. Le partage de clé par compte devient
+    la seule option.</p>
+  <p><b>Piste.</b> Flux OAuth par fournisseur (ouvrir le navigateur, écouter le retour de redirection,
+    rafraîchir le jeton) avec les mêmes garanties de stockage chiffré que les clés actuelles, et une
+    entrée « renouvellement » dans <code>ProviderEditor</code>.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G17</span> Catalogue de modèles et capacités <span class="badge p1">P1</span> <span class="eff">M · 1 semaine</span></h3>
+  <p><b>Constat.</b> <span class="path">src/OhMyHarness.Core/ModelCatalog.cs</span> est une liste figée
+    (30 modèles DeepSeek, 10 OpenAI, 12 génériques, 6 opencode) et
+    <code>GetDefaultContextLimit</code> devine la fenêtre par sous-chaîne du nom
+    (<code>if (m.Contains("gpt-4o")) return 128_000;</code>). Le README assume que la limite est une
+    configuration utilisateur et non une détection. Aucune mention de <code>models.dev</code>.</p>
+  <p><b>Impact.</b> Chaque nouveau modèle exige une recompilation, et la fenêtre de contexte — dont dépend
+    directement la compaction et donc la qualité des longues sessions — peut être fausse.</p>
+  <p><b>Piste.</b> Charger un catalogue distant (avec cache local et repli hors ligne), l'exposer dans
+    <code>provider.models</code> qui sait déjà interroger <code>/models</code>, et préremplir
+    <code>ContextLimit</code> et <code>SupportsImages</code> à la sélection.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G18</span> Coût monétaire par session <span class="badge p1">P1</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> Le suivi est en tokens et tokens/s :
+    <code>Message { InputTokens, OutputTokens, Seconds }</code>, <code>GenerationSpeedTracker</code>,
+    <code>SpeedStats</code> (<span class="path">src/OhMyHarness.Core/ChatEngine.cs</span>). Aucun prix n'est
+    stocké ni affiché, et les tarifs ne sont pas dans le catalogue de modèles.</p>
+  <p><b>Impact.</b> Impossible de savoir ce qu'a coûté une session ou une compaction automatique — alors qu'une
+    compaction déclenche un appel de modèle supplémentaire payant, fait notable et invisible
+    (voir <code>Compact()</code> dans <span class="path">Generations.cs</span>).</p>
+  <p><b>Piste.</b> Ajouter <code>inputCost</code>/<code>outputCost</code> au catalogue (G17) et un compteur
+    cumulé par conversation, affiché à côté du débit déjà présent.</p>
+</div>
+
+<h2 id="interfaces">8. Interfaces, API et distribution</h2>
+
+<div class="card gap">
+  <h3><span class="id">G6</span> Configuration portable et versionnable <span class="badge p0">P0</span> <span class="eff">S · 2-3 jours</span></h3>
+  <p><b>Constat.</b> Toute la configuration vit dans SQLite via EF Core et des migrations
+    versionnées (<span class="path">Storage.cs</span>, dossier <span class="path">src/OhMyHarness.Core/Migrations</span>).
+    Aucun équivalent d'<code>opencode.json</code> (~0 occurrence de <code>keybind</code>, <code>theme</code>).</p>
+  <p><b>Impact.</b> On ne peut pas committer la configuration d'un projet, la partager, ni la relire. Une
+    équipe ne peut pas normaliser les fournisseurs, agents, commandes et permissions d'un dépôt.</p>
+  <p><b>Piste.</b> Fichier <code>ohmyharness.json</code> (schéma + validation) au niveau utilisateur et au
+    niveau projet, fusionné au-dessus des valeurs SQLite, avec les secrets <b>exclus</b> du fichier.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G20</span> CLI headless et API HTTP <span class="badge p1">P1</span> <span class="eff">L · 2-3 semaines</span></h3>
+  <p><b>Constat.</b> Le service est un side-car en JSON-RPC sur stdin/stdout, démarré par l'hôte
+    (<span class="path">Program.cs</span>, argument <code>--database</code> obligatoire). Aucun écouteur
+    réseau, aucune ligne de commande d'agent, aucun SDK : le dispatch interne
+    (<code>Dispatch(method, JsonObject, ct)</code> dans <span class="path">HarnessService.cs</span>) contient déjà
+    tout le métier, mais n'est joignable que par le processus parent.</p>
+  <p><b>Impact.</b> Pas d'usage en intégration continue (« corrige les tests et ouvre une PR »), pas de
+    scénario reproductible, pas d'intégration par un autre outil. C'est le principal écart de <i>plateforme</i>
+    avec opencode.</p>
+  <p><b>Piste.</b> Transporter le même protocole sur un socket local (HTTP + authentification par jeton, comme
+    le mode serveur d'opencode) et ajouter un mode « run » non interactif avec code de sortie exploitable en CI.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G26</span> TUI, thèmes, raccourcis, mise à jour automatique <span class="badge p2">P2</span> <span class="eff">L · 2-4 semaines</span></h3>
+  <p><b>Constat.</b> 0 occurrence de <code>keybind</code>, <code>theme</code> ; les libellés sont figés dans le
+    code de l'IHM (<span class="path">src/OhMyHarness.App/MainWindow.cs</span>, 1 940 lignes) et traduits par un
+    dictionnaire statique (voir §9). Aucun mécanisme de mise à jour.</p>
+  <p><b>Impact.</b> Pas d'usage sur un serveur distant sans interface graphique, pas de personnalisation, et
+    chaque correctif exige de republier et de faire réinstaller l'application.</p>
+  <p><b>Piste.</b> À traiter après G20 : une fois l'API réseau disponible, une interface texte peut s'y brancher
+    sans réécrire le métier.</p>
+</div>
+
+<h2 id="securite">9. Permissions et confinement</h2>
+
+<div class="card gap">
+  <h3><span class="id">G19</span> Permissions par motif <span class="badge p1">P1</span> <span class="eff">M · 1 semaine</span></h3>
+  <p><b>Constat.</b> Une autorisation est stockée comme une chaîne de portée unique
+    (<code>PermissionGrant { Scope, Name, Details }</code>, index unique sur <code>Scope</code>) et testée par
+    égalité exacte : <code>await db.PermissionGrants.AnyAsync(x =&gt; x.Scope == scope)</code> dans
+    <code>Approve()</code> (<span class="path">src/OhMyHarness.Service/Tools.cs</span>). Les portées sont
+    construites par concaténation : <code>"terminal|" + directory</code>, <code>"preview|" + folder</code>,
+    <code>"opencode|{id}|{directory}|{action}|…"</code>.</p>
+  <p><b>Impact.</b> Le choix est binaire par dossier : autoriser <code>git status</code> dans un projet autorise
+    aussi <code>rm -rf</code> dans ce projet. Aucune règle du type « autoriser <code>git *</code>, refuser
+    <code>rm *</code> », et pas de granularité par outil ou par agent.</p>
+  <p><b>Piste.</b> Table de règles (outil, motif, décision) évaluée avant le flux actuel, avec les motifs en
+    tête de liste prioritaires ; l'IHM des Autorisations
+    (<span class="path">SettingsWindow.cs</span>) affiche déjà la liste, elle peut être étendue.</p>
+</div>
+
+<div class="card gap">
+  <h3><span class="id">G28</span> Confinement du terminal <span class="badge p1">P1</span> <span class="eff">L · 2-3 semaines</span></h3>
+  <p><b>Constat.</b> Le terminal exécute <code>powershell.exe</code> (ou <code>zsh</code>/<code>sh</code>) avec les
+    droits de l'utilisateur, sans restriction réseau ni système de fichiers
+    (<code>WorkspaceTools.PowerShellAsync</code> / <code>ExecuteAsync</code>). Le README le reconnaît :
+    « Ces restrictions ne constituent pas un sandbox pour les commandes terminal autorisées. »</p>
+  <p><b>Impact.</b> Le modèle de permissions protège contre une erreur, pas contre une commande hostile ou un
+    fichier source piégé (une instruction cachée dans un fichier lu peut proposer une commande destructrice —
+    attaque par injection de prompt, que le prompt système tente d'atténuer sans pouvoir l'empêcher).</p>
+  <p><b>Piste.</b> Exécution dans une tâche restreinte Windows (AppContainer/Job Object) avec liste blanche de
+    chemins et coupure réseau par défaut, au moins pour les commandes proposées par l'IA.</p>
+</div>
+
+<h2 id="dette">10. Fragilités observées dans le code</h2>
+<p>Ces points ne sont pas des écarts avec opencode, mais des dettes qui gêneront les évolutions ci-dessus.</p>
+
+<div class="card gap">
+  <h3>Traduction par correspondance inverse de chaîne</h3>
+  <p><span class="path">src/OhMyHarness.App/UiText.cs</span> :</p>
+  <pre><code>var key = English.ContainsKey(text) ? text : English.FirstOrDefault(x =&gt; x.Value == text).Key ?? text;
+return Language == "en" ? English.GetValueOrDefault(key, text) : key;</code></pre>
+  <p>La clé du dictionnaire est <b>la chaîne française elle-même</b>, et la traduction inverse se fait en
+    comparant les valeurs. Conséquences : une chaîne non répertoriée reste en français en mode anglais, une
+    virgule typographique ou une espace insécable modifiée dans l'IHM casse silencieusement la traduction, et
+    deux entrées de même valeur sont indiscernables. Le dictionnaire compte environ 190 entrées pour une
+    interface de près de 2 000 lignes.</p>
+  <p><b>Piste.</b> Clés stables (<code>ui.settings.title</code>) et ressources <code>.resw</code> ou fichiers JSON
+    par langue, avec un test qui échoue quand une clé manque.</p>
+</div>
+
+<div class="card gap">
+  <h3>Prompt et descriptions d'outils non localisés</h3>
+  <p>Les descriptions d'outils de <code>ChatEngine.ToolDefinitions</code>
+    (<span class="path">src/OhMyHarness.Core/ChatEngine.cs</span>) sont <b>en français uniquement</b>, tandis que
+    celles de <code>HarnessService.Definitions()</code> (<span class="path">Tools.cs</span>) sont en anglais. Le
+    prompt système mélange également les deux : en mode anglais, le renvoi d'aide cite les libellés français —
+    « inform them to open the <i>'Navigateur'</i> panel and enable the <i>'Accès IA au navigateur'</i> switch »
+    (<span class="path">Skills.cs</span>) — alors que l'interface affiche alors <i>Browser</i> et
+    <i>AI browser access</i> (<span class="path">UiText.cs</span>).</p>
+  <p><b>Impact.</b> L'agent donne des instructions que l'utilisateur anglophone ne peut pas retrouver à l'écran.</p>
+</div>
+
+<div class="card gap">
+  <h3>Limites codées en dur</h3>
+  <ul class="tight">
+    <li>12 tours d'outils par envoi : <code>for (int round = 0; round &lt; 12; round++)</code>
+      (<span class="path">Generations.cs</span>), avec un message demandant « continue ».</li>
+    <li>Délai de génération : <code>CancellationTokenSource(TimeSpan.FromMinutes(provider.IsOpenCode ? 30 : 10))</code>
+      (<span class="path">ConversationSession.cs</span>) — une tâche agentique longue est coupée à 10 minutes,
+      sans possibilité de prolonger.</li>
+    <li>Fenêtre de contexte : 128 000 par défaut, plafonnée par <code>Math.Clamp(..., 1024, 10_000_000)</code>
+      (<span class="path">HarnessService.cs</span>).</li>
+    <li>Lecture : 128 Ko par fichier, 300 entrées par listage, 100 000 caractères de sortie terminal, 8 Mo par image.</li>
+  </ul>
+  <p><b>Impact.</b> Ces valeurs devraient devenir des réglages (elles sont aujourd'hui des constantes), sinon
+    les cas d'usage longs resteront impossibles.</p>
+</div>
+
+<div class="card gap">
+  <h3>Tolérance des entrées de <code>Skills.Enabled</code></h3>
+  <p><code>selection.Split(',', StringSplitOptions.RemoveEmptyEntries)</code> sans <code>TrimEntries</code>, puis
+    <code>Contains(id, StringComparer.Ordinal)</code> (<span class="path">Skills.cs</span>) : une espace après une
+    virgule suffit à désactiver un skill sans message d'erreur. Le filtrage à l'écriture
+    (<code>state.EnabledSkills = string.Join(',', ...)</code> dans <span class="path">HarnessService.cs</span>)
+    ne supprime pas non plus les espaces.</p>
+</div>
+
+<div class="card gap">
+  <h3>Deux définitions d'outils à maintenir en parallèle</h3>
+  <p><code>ChatEngine.ToolDefinitions</code> et <code>HarnessService.Definitions</code> déclarent tous deux les
+    outils, avec des types de paramètres gérés différemment : la première force <code>"type":"string"</code> pour
+    <b>tous</b> les paramètres, la seconde accepte un type par propriété (utile pour
+    <code>desktop_mouse</code> qui attend des <code>number</code>/<code>integer</code>). Le prompt système est
+    encore ailleurs (<code>Skills.Prompt</code>).</p>
+  <p><b>Impact.</b> Toute évolution d'outil doit être répercutée en trois endroits — ce qui pénalise directement
+    G1, G4, G7, G22 et G24.</p>
+</div>
+
+<h2 id="roadmap">11. Feuille de route proposée</h2>
+<p>Ordre choisi pour maximiser le gain par jour de travail ; chaque lot est utilisable en production.</p>
+<table>
+  <thead><tr><th style="width:80px">Lot</th><th>Contenu</th><th style="width:130px">Écarts couverts</th><th style="width:150px">Critère de validation</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>0</b><br><span class="eff">prérequis</span></td>
+      <td>Registre d'outils unique (nom, schéma JSON typé, skill/agent requis, portée d'autorisation) et
+        constructeur de prompt unique ; suppression des trois sources de vérité actuelles.</td>
+      <td>Dette §10</td>
+      <td>Un outil de test peut être ajouté <b>sans toucher</b> à <code>MainWindow.cs</code> ni dupliquer un schéma.</td>
+    </tr>
+    <tr>
+      <td><b>1</b><br><span class="eff">1 sem.</span></td>
+      <td>Configuration portable <code>ohmyharness.json</code>, règles projet <code>AGENTS.md</code> avec
+        injection dans le prompt et affichage de ce qui est chargé, commandes personnalisées avec arguments.</td>
+      <td>G2, G6, G9</td>
+      <td>Un dépôt contenant <code>AGENTS.md</code> modifie le comportement de l'agent ; le fichier de
+        configuration est validé au démarrage et les secrets n'y figurent jamais.</td>
+    </tr>
+    <tr>
+      <td><b>2</b><br><span class="eff">1 sem.</span></td>
+      <td>Recherche <code>glob</code>/<code>grep</code>, écriture atomique + sauvegardes, refus des ancrages
+        ambigus, formateurs automatiques, lecture d'images.</td>
+      <td>G3, G11, G24, G27</td>
+      <td>Sur ce dépôt : « trouve tous les appels à <code>_release</code> » renvoie le fichier et la ligne
+        attendus ; une écriture interrompue ne laisse jamais un fichier tronqué.</td>
+    </tr>
+    <tr>
+      <td><b>3</b><br><span class="eff">2 sem.</span></td>
+      <td>Patch multi-fichiers avec diff dans le popup d'autorisation, snapshots et retour arrière
+        (« revenir à ce message »).</td>
+      <td>G4, G5</td>
+      <td>Une session de 10 écritures peut être annulée intégralement ; aucun fichier hors périmètre n'est
+        modifié.</td>
+    </tr>
+    <tr>
+      <td><b>4</b><br><span class="eff">2-3 sem.</span></td>
+      <td>Client MCP (stdio et HTTP), exposition des outils distants avec le flux d'approbation existant.</td>
+      <td>G1</td>
+      <td>Un serveur MCP de référence est utilisable de bout en bout, chaque appel passant par une
+        confirmation traçable.</td>
+    </tr>
+    <tr>
+      <td><b>5</b><br><span class="eff">2-3 sem.</span></td>
+      <td>Agents (primaires + sous-agents), outil <code>task</code>, permissions par motif, liste de tâches,
+        file d'attente de messages pendant une génération.</td>
+      <td>G7, G8, G13, G19, G25</td>
+      <td>Un agent « plan » en lecture seule ne peut pas écrire, même après « Tout autoriser » ; un
+        sous-agent explore un dossier sans polluer le contexte principal.</td>
+    </tr>
+    <tr>
+      <td><b>6</b><br><span class="eff">2-3 sem.</span></td>
+      <td>Catalogue de modèles avec coûts, compteur de coût par session, OAuth fournisseurs,
+        reprise/régénération de message, compaction déclenchée à la demande, export/import.</td>
+      <td>G12, G14, G15, G16, G17, G18</td>
+      <td>Le coût d'une session est affiché et cohérent avec la facturation du fournisseur ; une conversation
+        s'exporte puis se réimporte à l'identique.</td>
+    </tr>
+    <tr>
+      <td><b>7</b><br><span class="eff">3-4 sem.</span></td>
+      <td>API HTTP locale authentifiée + mode d'exécution non interactif (CI), puis plugins/hooks et outils
+        utilisateur.</td>
+      <td>G20, G21, G22</td>
+      <td>Un script CI lance une tâche sur un dépôt, récupère un code de sortie et un journal JSON sans
+        interface graphique.</td>
+    </tr>
+    <tr>
+      <td><b>8</b><br><span class="eff">horizon</span></td>
+      <td>Diagnostics LSP, CLI/TUI, thèmes et raccourcis configurables, confinement du terminal,
+        mise à jour automatique.</td>
+      <td>G10, G23, G26, G28</td>
+      <td>Après une édition, les erreurs de compilation du fichier touché apparaissent dans la réponse du
+        modèle sans intervention de l'utilisateur.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>Dépendances.</b> Les lots 4 à 8 supposent le lot 0 (registre d'outils) : sans lui, chaque ajout d'outil
+  doit être écrit trois fois. Le lot 6 (OAuth) exige une gestion de jetons rafraîchissables, donc une évolution
+  du schéma <code>Provider</code>. Le lot 7 (API réseau) doit réutiliser <code>Dispatch()</code> et le
+  mécanisme d'autorisation actuels plutôt que d'ouvrir un second chemin d'exécution parallèle.
+</div>
+
+<h2 id="limites">12. Limites de cette analyse</h2>
+<ul class="tight">
+  <li>Analyse <b>statique</b> : aucun code n'a été exécuté, aucune application lancée pour ce rapport. Un
+    comportement peut différer de la lecture du code.</li>
+  <li>Le dossier <span class="path">desktop/dist</span>, <span class="path">obj</span> et <span class="path">bin</span>
+    ont été exclus des recherches ; ils contiennent des artefacts générés (dont un fichier de licences de
+    297 000 lignes qui faussait tous les comptages).</li>
+  <li>Les fonctionnalités d'opencode sont décrites de mémoire et <b>non vérifiées en ligne</b> (accès navigateur
+    désactivé dans cette session). Aucun identifiant de version n'est cité volontairement : les écarts listés
+    sont des familles fonctionnelles, pas une comparaison à une version précise.</li>
+  <li>Les efforts indiqués sont des ordres de grandeur pour un développeur familier du dépôt, hors tests
+    d'intégration multi-plateformes (Windows et macOS sont tous deux supportés, ce qui double la charge pour
+    le terminal, les permissions système et les entrées natives).</li>
+  <li>Le fichier <span class="path">docs/macos.md</span>, les gabarits GitHub et
+    <span class="path">rapport-diagnostic-outils-ia.md</span> n'ont pas été dépouillés ligne à ligne ; une
+    partie des écarts y est peut-être déjà planifiée ou assumée.</li>
+</ul>
+
+<footer>
+  Rapport généré le 20/09/2026 à partir de la lecture de
+  <code>src/</code>, <code>desktop/</code>, <code>tests/</code> et <code>docs/</code>.
+  Toutes les affirmations sur OhMyHarness renvoient à un fichier du dépôt ; les affirmations sur opencode
+  reposent sur une connaissance générale non revérifiée en ligne.
+</footer>
+
+</div>
+</body>
+</html>

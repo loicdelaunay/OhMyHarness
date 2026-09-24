@@ -188,7 +188,6 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
         var history = await db.Messages.Where(x => x.ChatId == chat.Id && x.State == "complete").OrderBy(x => x.Id).ToListAsync();
         var priorHistory = history.ToList();
         var user = new Message { ChatId = chat.Id, Content = prompt, Attachments = run.Images };
-        if (history.Count == 0) chat.Title = prompt.Length > 0 ? prompt[..Math.Min(50, prompt.Length)] : T("Discussion autour d’une image");
         await ConversationInbox.SubmitAsync(run,user,ct);
         MarkRunSubmitted(run);
         await RefreshInboxAsync();
@@ -257,8 +256,8 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
                 active.Content = update.Text; active.InputTokens = update.InputTokens; active.OutputTokens = update.OutputTokens; active.Seconds = update.Seconds;
                 var tokens = update.OutputTokens ?? ContextWindow.EstimateText(update.Text + update.Reasoning);
                 run.Tracker?.AddSample(update.Seconds, tokens);
-                if (update.Reasoning.Length > 0) assistantUi.UpdateThinking(update.Reasoning, update.Text.Length > 0);
-                assistantUi.UpdateContent(update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…");
+                if (update.Reasoning.Length > 0) assistantUi.UpdateThinking(update.Reasoning, update.Text.Length > 0, streaming: true);
+                assistantUi.UpdateContent(update.Text.Length > 0 ? update.Text : update.Reasoning.Length > 0 ? T("Raisonnement en cours…") : "…", streaming: true);
                 UpdateMetrics(run, update, inputEstimate);
                 if (IsVisible(run)) ScrollToBottom();
             }, ct, (permission, token) => AuthorizeOpenCodePermissionAsync(provider, directory, permission, token), new(run.Chat.ExecutionMode, run.Chat.OrchestrationMode), run.Workflow);
@@ -269,6 +268,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             if (run.Tracker != null) messageTrackers[active.Id] = run.Tracker;
             run.Tracker = null;
             assistantUi.UpdateContent(active.Content);
+            assistantUi.SetDuration(completion.Seconds);
             var reasoning = completion.Message["reasoning_content"]?.GetValue<string>();
             if (!string.IsNullOrEmpty(reasoning)) assistantUi.UpdateThinking(reasoning, true);
             UpdateMetrics(run, new(active.Content, reasoning ?? "", completion.InputTokens, completion.OutputTokens, completion.Seconds), inputEstimate);
@@ -287,6 +287,7 @@ process.on('SIGTERM', async () => { try { await listener.stop(); } catch {} proc
             run.Failed=true;
             SetRunStatus(run, ex is OperationCanceledException ? T("Génération arrêtée. Réponse partielle conservée.") : ex.Message,
                 ex is OperationCanceledException ? StatusKind.Notice : StatusKind.Error);
+            AppLog.Write(ex is OperationCanceledException ? AppLogLevel.Information : AppLogLevel.Error, "opencode.failed", ex, run.Chat.Id);
             if (active != null && assistantUi != null) assistantUi.UpdateContent(active.Content + T("\n[Réponse interrompue]"));
         }
     }

@@ -9,7 +9,7 @@ using Markdig;
 
 namespace OhMyHarness.Core.Hosting;
 
-public sealed partial class HarnessService(string database, Func<string, JsonObject, CancellationToken, Task<JsonNode?>> host, Func<object, Task> emit) : IAsyncDisposable
+public sealed partial class HarnessService(string database, Func<string, JsonObject, CancellationToken, Task<JsonNode?>> host, Func<object, Task> emit, HarnessServiceOptions? hostOptions = null) : IAsyncDisposable
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     static readonly MarkdownPipeline Markdown = new MarkdownPipelineBuilder().UseAdvancedExtensions().DisableHtml().Build();
@@ -24,7 +24,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     static bool B(JsonObject p, string name, bool fallback = false) => p[name]?.GetValue<bool>() ?? fallback;
     static JsonObject Obj(object value) => (JsonSerializer.SerializeToNode(value, Json) as JsonObject)!;
     HarnessDb Db() => new(database);
-    public async Task Initialize() { await using var db = Db(); await db.InitializeAsync(); new CustomSkills(CustomSkills.DefaultRoot).EnsureTemplate(); }
+    public async Task Initialize() { await using var db = Db(); await db.InitializeAsync(); AppLog.Configure(FeatureSettings.Read((await db.States.SingleAsync()).FeaturesJson)); AppLog.Write(AppLogLevel.Information, "host.started"); new CustomSkills(CustomSkills.DefaultRoot).EnsureTemplate(); }
     static object ProviderView(Provider p) => new { p.Id, p.Name, p.Kind, p.CompositeJson, p.BaseUrl, p.Model, p.ContextLimit, p.SupportsImages, p.Username, p.ExecutablePath, p.AutoStart, p.OpenCodeTools, hasKey = p.ProtectedKey.Length > 0 };
     static string Html(string text)
     {
@@ -42,6 +42,10 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
         await using var db = Db();
         switch (method)
         {
+            case "chat.favorite":
+                await db.Chats.Where(c => c.Id == I(p, "id")).ExecuteUpdateAsync(set => set.SetProperty(c => c.IsFavorite, B(p, "favorite")), ct); return true;
+            case "chat.autoname":
+                return await ConversationNaming.RenameAsync(database, I(p, "id"), http, Decrypt, false, ct);
             case "inbox.list":return await Inbox(p,ct);
             case "inbox.add":return await AddInbox(p,ct);
             case "inbox.update":return await UpdateInbox(p,ct);
@@ -167,7 +171,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 state.ThinkingLevel = S(p, "thinkingLevel", state.ThinkingLevel);
                 state.ProviderId = I(p, "providerId", state.ProviderId);
                 state.ProjectId = p["projectId"]?.GetValue<int>() ?? state.ProjectId; state.ChatId = p["chatId"]?.GetValue<int>() ?? state.ChatId;
-                await db.SaveChangesAsync(ct); return true;
+                await db.SaveChangesAsync(ct); AppLog.Configure(FeatureSettings.Read(state.FeaturesJson)); return true;
             case "template.save":
                 var template = I(p, "id") == 0 ? new PromptTemplate() : await db.Templates.SingleAsync(x => x.Id == I(p, "id"), ct);
                 template.Name = S(p, "name"); template.Content = S(p, "content");
@@ -207,6 +211,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
 
     async Task<byte[]> Encrypt(string key, CancellationToken ct)
     {
+        if (hostOptions?.UseNativeKeyVault == true) return KeyVault.Encrypt(key);
         if (OperatingSystem.IsWindows()) return KeyVault.Encrypt(key);
         if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException("Windows and macOS are supported.");
         var encrypted = await host("key.encrypt", Obj(new { text = key }), ct);
@@ -215,6 +220,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     async Task<string> Decrypt(byte[] key, CancellationToken ct)
     {
         if (key.Length == 0) return "";
+        if (Encoding.UTF8.GetString(key).StartsWith("OMH-KEYCHAIN-2:", StringComparison.Ordinal)) return KeyVault.Decrypt(key);
         if (Encoding.UTF8.GetString(key).StartsWith("OMH-MAC-1:", StringComparison.Ordinal))
         {
             if (!OperatingSystem.IsMacOS()) throw new InvalidOperationException("Re-enter this API key on Windows; it was encrypted with the macOS Keychain.");

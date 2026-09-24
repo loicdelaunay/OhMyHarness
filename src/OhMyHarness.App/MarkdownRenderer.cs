@@ -26,8 +26,41 @@ public sealed class MarkdownRenderer
     private SolidColorBrush Brush(byte r, byte g, byte b) => FluentDesign.Adapt(r,g,b);
 
     readonly Func<string, Task>? openFile;
+    sealed class RenderState { public List<string> Keys = []; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Panel, RenderState> states = new();
     MarkdownRenderer(Func<string, Task>? openFile) { this.openFile = openFile; }
-    public static void RenderTo(Panel container, string? markdown, Func<string, Task>? openFile = null) => new MarkdownRenderer(openFile).Render(container, markdown);
+    public static void RenderTo(Panel container, string? markdown, Func<string, Task>? openFile = null)
+    {
+        markdown ??= "";
+        var state = states.GetOrCreateValue(container);
+        var blocks = MarkdownPipelineHelper.Parse(markdown);
+        var keys = blocks.Select(block => markdown.Substring(block.Span.Start, block.Span.Length)).ToList();
+        int shared = 0;
+        while (shared < keys.Count && shared < state.Keys.Count && shared < container.Children.Count && keys[shared] == state.Keys[shared]) shared++;
+        // Build changed blocks off-tree, then replace only those blocks. Already completed
+        // paragraphs keep their visual objects, selection and scroll position during streaming.
+        var replacements = new List<UIElement>();
+        var renderer = new MarkdownRenderer(openFile);
+        foreach (var block in blocks.Skip(shared))
+        {
+            var blockPanel = new StackPanel { Spacing = 4 };
+            if (CanJoinText(block))
+            {
+                var flow = new TextBlock { IsTextSelectionEnabled = true, TextWrapping = TextWrapping.Wrap, Foreground = FluentDesign.Primary, FontSize = 14.5, LineHeight = 22 };
+                renderer.AppendText(block, flow, 0); blockPanel.Children.Add(flow);
+            }
+            else if (renderer.RenderBlock(block) is { } element) blockPanel.Children.Add(element);
+            replacements.Add(blockPanel);
+        }
+        for (int i = 0; i < replacements.Count; i++)
+        {
+            int index = shared + i;
+            if (index < container.Children.Count) container.Children[index] = replacements[i];
+            else container.Children.Add(replacements[i]);
+        }
+        while (container.Children.Count > keys.Count) container.Children.RemoveAt(container.Children.Count - 1);
+        state.Keys = keys;
+    }
     void Render(Panel container, string? markdown)
     {
         container.Children.Clear();

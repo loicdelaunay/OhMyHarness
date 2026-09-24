@@ -17,6 +17,8 @@ public sealed partial class MainWindow
     {
         try
         {
+            if (Environment.GetEnvironmentVariable("OHMYHARNESS_THEME_SMOKE") == "1") { await SmokeThemes(output); return; }
+            if (Environment.GetEnvironmentVariable("OHMYHARNESS_UX_SMOKE") == "1") { await SmokeConversationEnhancements(output); return; }
             static IEnumerable<FrameworkElement> Descendants(DependencyObject? parent)
             {
                 if(parent==null)yield break;

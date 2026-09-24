@@ -6,7 +6,17 @@ static class AppearanceMcpChecks
 {
     public static async Task Run(Action<bool,string> check)
     {
-        check(AppearanceThemes.All.Count == 8 && AppearanceThemes.All.Count(x=>x.Dark)==4, "Huit thèmes, quatre sombres et quatre clairs");
+        check(AppearanceThemes.All.Count == 10 && AppearanceThemes.All.Count(x=>x.Dark)==5, "Dix thèmes, cinq sombres et cinq clairs");
+        foreach (var theme in AppearanceThemes.All)
+        {
+            check(ThemeContrast.Ratio(theme.Text, theme.Surface) >= 4.5 && ThemeContrast.Ratio(theme.Muted, theme.Surface) >= 4.5,
+                $"{theme.Id}: textes principaux et secondaires lisibles");
+            check(ThemeContrast.Ratio(ThemeContrast.On(theme.Accent), theme.Accent) >= 4.5 &&
+                  ThemeContrast.Ratio(ThemeContrast.Selection(theme), "#FFFFFF") >= 4.5 &&
+                  ThemeContrast.Ratio(ThemeContrast.AccentText(theme), theme.Surface) >= 4.5 &&
+                  ThemeContrast.Ratio(ThemeContrast.AccentText(theme), theme.Background) >= 4.5,
+                $"{theme.Id}: contraste des accents et sélections");
+        }
         var settings = FeatureSettings.Read(new FeatureSettings { Theme="ivory", ComposerInfoExpanded=false }.Json());
         check(settings.Theme=="ivory" && !settings.ComposerInfoExpanded, "Thème et panneau replié persistés dans les réglages");
         var brandRoot=Path.Combine(Path.GetTempPath(),"omh-brand-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(brandRoot);
