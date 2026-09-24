@@ -60,6 +60,23 @@ See the [full changelog](CHANGELOG.md) for version-by-version details. Both curr
   </tr>
 </table>
 
+### Terminal interface
+
+The CLI offers the same conversation workflow with its own terminal themes. These images are rendered from its built-in offline demo with synthetic content; no API request was made.
+
+<table>
+  <tr>
+    <td width="50%">
+      <a href="docs/images/readme/cli-neon.png"><img src="docs/images/readme/cli-neon.png" alt="OhMyHarness CLI conversation in Neon Synthwave theme" width="100%"></a><br>
+      <sub>Neon Synthwave — conversation, tool activity and composer.</sub>
+    </td>
+    <td width="50%">
+      <a href="docs/images/readme/cli-crt.png"><img src="docs/images/readme/cli-crt.png" alt="OhMyHarness CLI conversation in CRT Green theme" width="100%"></a><br>
+      <sub>CRT Green — the same workflow in a retro terminal palette.</sub>
+    </td>
+  </tr>
+</table>
+
 <details>
 <summary>See the two-level memory settings</summary>
 
