@@ -16,6 +16,10 @@
 
 **Tired of powerful AI harnesses that need a stack of configuration and external services before the first conversation? What if a portable EXE handled the workspace?**
 
+> **No OhMyHarness account. No telemetry to an OhMyHarness service. No subscription.** Just a standalone app with its workspace beside the EXE. Model requests go to the provider you choose, which may have its own costs.
+>
+> **Why build it this way?** I needed something straightforward enough to use at work, without a stack of extra services. And I thought it would be nice to share it, too. :)
+
 OhMyHarness brings projects, concurrent chats, agents, sources, tools, and settings into one application. The Windows release ships as a self-contained executable. Put it in a writable folder, connect a model provider, and start working. Its SQLite database and application-managed resources live beside the EXE, so you can move the workspace by copying the folder after closing the app.
 
 > **Available in GUI and CLI modes.** Choose the desktop workspace or the keyboard-driven terminal experience. Both use the same .NET agent engine, portable storage, projects, and conversations. [GUI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.8.0) · [CLI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.8.0) · [CLI guide](docs/cli.md)
