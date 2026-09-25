@@ -25,6 +25,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   });
   function rpc(method,parameters={}){const id=String(++index);return new Promise((resolve,reject)=>{replies.set(id,{resolve,reject});write({id,method,parameters});});}
   let requests=0,active=0,peak=0,embeddings=0,visionRequests=0;const requestLog=[];
+  let holdInitialStreams=true;const initialStreams=[];
   const server=http.createServer(async(req,res)=>{
     if(req.url.endsWith('/models')){res.setHeader('Content-Type','application/json');res.end('{"data":[{"id":"test-model"}]}');return;}
     const buffers=[];for await(const chunk of req)buffers.push(chunk);const body=JSON.parse(Buffer.concat(buffers));
@@ -87,7 +88,12 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
     const last=body.messages.at(-1),tool=body.model==='tool-model'&&last.role!=='tool',isSummary=body.messages[0].content.startsWith('Summarize');
     const delta=body.model==='browser-model'&&last.role!=='tool'?{tool_calls:[{index:0,id:'browser-call',type:'function',function:{name:'read_page',arguments:'{"chatId":999999}'}}]}:tool?{tool_calls:[{index:0,id:'test-call',type:'function',function:{name:'run_terminal',arguments:JSON.stringify({command:'echo terminal-ok'})}}]}:{content:isSummary?'Résumé conservant la demande.':`Reply: ${last.content}`};
     res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: '+JSON.stringify({choices:[{delta}]})+'\n\n');
-    setTimeout(()=>{active--;res.end('data: '+JSON.stringify({choices:[],usage:{prompt_tokens:50,completion_tokens:8}})+'\n\ndata: [DONE]\n\n');},250);
+    const finish=()=>{active--;res.end('data: '+JSON.stringify({choices:[],usage:{prompt_tokens:50,completion_tokens:8}})+'\n\ndata: [DONE]\n\n');};
+    // Prove overlap without requiring startup/JIT on a loaded runner to finish within 250 ms.
+    if(holdInitialStreams&&body.model==='test-model'&&last.role==='user'&&['alpha','beta'].includes(last.content)){
+      initialStreams.push(finish);
+      if(initialStreams.length===2){holdInitialStreams=false;for(const complete of initialStreams.splice(0))complete();}
+    }else setTimeout(finish,250);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{child.stdin.end();await new Promise(resolve=>{if(child.exitCode!=null)return resolve();child.once('exit',resolve);setTimeout(()=>child.kill(),5000).unref();});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});});
