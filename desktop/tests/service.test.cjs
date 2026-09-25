@@ -24,7 +24,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
     const pending=replies.get(item.id);if(pending){replies.delete(item.id);item.error?pending.reject(new Error(item.error)):pending.resolve(item.result);}
   });
   function rpc(method,parameters={}){const id=String(++index);return new Promise((resolve,reject)=>{replies.set(id,{resolve,reject});write({id,method,parameters});});}
-  let requests=0,active=0,peak=0,embeddings=0,visionRequests=0;const requestLog=[];
+  let requests=0,active=0,peak=0,embeddings=0,visionRequests=0,releaseQueueStream;const requestLog=[];
   let holdInitialStreams=true;const initialStreams=[];
   const server=http.createServer(async(req,res)=>{
     if(req.url.endsWith('/models')){res.setHeader('Content-Type','application/json');res.end('{"data":[{"id":"test-model"}]}');return;}
@@ -93,7 +93,8 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
     if(holdInitialStreams&&body.model==='test-model'&&last.role==='user'&&['alpha','beta'].includes(last.content)){
       initialStreams.push(finish);
       if(initialStreams.length===2){holdInitialStreams=false;for(const complete of initialStreams.splice(0))complete();}
-    }else setTimeout(finish,250);
+    }else if(body.model==='queue-model'&&last.role==='user'&&last.content==='first')releaseQueueStream=finish;
+    else setTimeout(finish,250);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{child.stdin.end();await new Promise(resolve=>{if(child.exitCode!=null)return resolve();child.once('exit',resolve);setTimeout(()=>child.kill(),5000).unref();});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});});
@@ -190,6 +191,8 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   await rpc('inbox.update',{chatId:queueChat.id,id:editable.id,expectedText:'use English',text:'use French now'});
   await rpc('inbox.update',{chatId:queueChat.id,id:editable.id,expectedText:'use French now',text:'use French now',steer:true});
   assert.equal((await rpc('inbox.list',{chatId:queueChat.id})).length,2);
+  assert.equal(typeof releaseQueueStream,'function','First queued stream stays active until edits finish');
+  releaseQueueStream();
   await queuedRun;
   assert.deepEqual((await rpc('history',{chatId:queueChat.id})).filter(x=>x.role==='user').map(x=>x.content),['first','use French now','next turn']);
   assert.equal((await rpc('inbox.list',{chatId:queueChat.id})).length,0);
