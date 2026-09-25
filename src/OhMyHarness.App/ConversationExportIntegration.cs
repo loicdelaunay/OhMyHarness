@@ -16,7 +16,7 @@ public sealed partial class MainWindow
         var activeRun = ActiveRun;
         await using var exportDb = new HarnessDb();
         var document = await ConversationExport.CreateAsync(exportDb, id, provider?.Id ?? state.ProviderId,
-            activeRun != null, browserAccess.IsOn, browserDomAccess.IsOn, activeRun?.ExportProgress);
+            activeRun != null, BrowserSkillAccess.Enabled(state.EnabledSkills), BrowserSkillAccess.DomEnabled(state.EnabledSkills), activeRun?.ExportProgress);
         if (document.UseClipboard)
         {
             try

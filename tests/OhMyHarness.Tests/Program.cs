@@ -11,6 +11,7 @@ async Task Throws<T>(Func<Task> action, string name) where T : Exception
 string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Serialize(value) + "\r\n\r\n";
 if(args.Contains("--browser-smoke")) { await ChromiumChecks.Run(Check); return; }
 if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
+await BrowserSkillChecks.Run(Check);
 await CompleteDesignChecks.Run(Check);
 if (args.Contains("--complete-design")) { Console.WriteLine($"{passed} checks passed."); return; }
 await ResponseStyleChecks.Run(Check);

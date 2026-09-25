@@ -43,7 +43,7 @@ Launch `artifacts\GUI\OhMyHarness.App.exe`, then **Settings → Providers**. Eac
 
 On Windows WinUI, Settings opens in an independent window: agents continue generating and using tools in the background. Their permission requests remain available in the main window. Save applies changes; Cancel or closing the window discards Settings drafts.
 
-**Settings → Skills** offers source exploration/editing, web search, terminal, mouse control, keyboard control, screenshots, code review, planning and summarization. Exploration and Web are enabled by default. Disabling a skill removes its tools; source editing includes reading. Remote navigation requires “AI browser access”; inspection/interaction also requires “DOM access and AI interaction”. Choices are global and saved in SQLite.
+**Settings → Skills** offers source exploration/editing, web search, terminal, mouse control, keyboard control, screenshots, code review, planning and summarization. Exploration and Web are enabled by default. Disabling a skill removes its tools; source editing includes reading. Remote navigation requires “AI browser access”; inspection/interaction also requires “DOM access and AI interaction”. Both browser switches are saved in the same SQLite skill selection as the other skills and restored on restart; they also appear in the quick skills menu. Choices are global.
 
 Presets include OpenAI (`https://api.openai.com/v1`, `gpt-4.1-mini`) and DeepSeek (`https://api.deepseek.com`, `deepseek-flash`). Image capability and context window are configurable: match the limit published for the selected model. The initial 128,000-token value is a user configuration, not automatic detection.
 

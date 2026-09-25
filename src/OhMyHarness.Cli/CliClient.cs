@@ -10,7 +10,7 @@ public sealed record WorkspaceSnapshot(AppState State, List<Project> Projects, L
 
 public sealed class CliClient : IAsyncDisposable
 {
-    public static readonly HashSet<string> DesktopSkills = ["web", "mouse_control", "keyboard_control", "screenshots", "applications"];
+    public static readonly HashSet<string> DesktopSkills = ["web", BrowserSkillAccess.Access, BrowserSkillAccess.Dom, "mouse_control", "keyboard_control", "screenshots", "applications"];
     public string Database { get; }
     public HarnessService Service { get; }
     public CliClient(CliOptions options, Func<string, JsonObject, CancellationToken, Task<JsonNode?>> host, Func<object, Task> emit)

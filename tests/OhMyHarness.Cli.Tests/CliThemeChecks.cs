@@ -10,6 +10,10 @@ static class CliThemeChecks
     [DllImport("kernel32.dll")] static extern nint LocalFree(nint pointer);
     public static async Task Run(Action<bool, string> check)
     {
+        var ring = TerminalLogo.Outline;
+        check(ring.Length == 8 && ring.All(row => row.Length == TerminalLogo.Width && row.SequenceEqual(row.Reverse())) &&
+            ring.SequenceEqual(ring.Reverse()) && ring[3][3] == '.' && ring[4][4] == '.',
+            "CLI icon is a hollow circle symmetric on both axes");
         var picker = new UiDialog("Theme", "", [new("crt-green", "Vert"), new("crt-amber", "Ambre")]) { PreviewTheme = true, Selected = 1 };
         check(picker.ThemePreview == "crt-amber", "Theme picker previews the initially selected theme");
         picker.Selected = 0;
@@ -42,6 +46,12 @@ static class CliThemeChecks
             check(customProfile["profiles"]![0]!["font"]!["face"]!.ToString() == "VT323" && customProfile["profiles"]![0]!["font"]!["size"]!.GetValue<int>() == 18, "Exported terminal profile uses independent font and size");
             foreach (var theme in CliThemes.All)
             {
+                var logoCanvas = new TerminalCanvas(TerminalLogo.Width, 4, theme.Palette.Normal);
+                TerminalLogo.Draw(logoCanvas, 0, 0, theme.Palette);
+                var logo = string.Join('\n', logoCanvas.Lines());
+                string AnsiColor(int color) => $"38;2;{color >> 16 & 255};{color >> 8 & 255};{color & 255}";
+                check(new[] { theme.Palette.Accent, theme.Palette.Green, theme.Palette.Gold }.All(color => logo.Contains(AnsiColor(color))),
+                    theme.Id + ": icon colors follow the active theme");
                 check(CliOptions.Parse(["--render-demo", "--theme", theme.Id]).Theme == theme.Id, theme.Id + ": preview option accepted");
                 var p = theme.Palette;
                 check(new[] { p.Foreground, p.Muted, p.Accent, p.Green, p.Gold }.All(fg => new[] { p.Background, p.Panel, p.Card }.All(bg => ThemeContrast.Ratio($"#{fg:X6}", $"#{bg:X6}") >= 4.5)), theme.Id + ": text contrast across all surfaces");

@@ -29,7 +29,6 @@ public sealed partial class MainWindow
     readonly TextBox fileContent = OutputBox();
     readonly Grid filePanel = new();
     readonly SemaphoreSlim approvalQueue = new(1, 1);
-    readonly ToggleSwitch browserDomAccess = new() { Header = T("Accès DOM et interaction IA"), IsOn = false, OnContent = T("Autorisé"), OffContent = T("Désactivé") };
     byte[]? pendingToolScreenshot;
     string pendingToolScreenshotLabel = "";
     string pendingToolScreenshotMime = "image/png";
@@ -195,13 +194,6 @@ public sealed partial class MainWindow
             skillMenu.Children.Add(toggle);
         }
         skillMenu.Children.Add(new Border { Height = 1, Margin = new(0, 4, 0, 4), Background = FluentDesign.Stroke });
-        var browserToggle = new CheckBox { Content = T("Accès IA au navigateur"), IsChecked = browserAccess.IsOn };
-        browserToggle.Click += (_, _) => browserAccess.IsOn = browserToggle.IsChecked == true;
-        skillMenu.Children.Add(browserToggle);
-        var domToggle = new CheckBox { Content = T("Accès DOM et interaction IA"), IsChecked = browserDomAccess.IsOn };
-        domToggle.Click += (_, _) => browserDomAccess.IsOn = domToggle.IsChecked == true;
-        skillMenu.Children.Add(domToggle);
-
         var availableTemplates = db.Templates.Local.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.Name).ToArray();
         var templates = Section($"Templates · {availableTemplates.Length}");
         if (availableTemplates.Length == 0) templates.Children.Add(new TextBlock { Text = WorkflowText("Aucun template", "No template"), Foreground = FluentDesign.Secondary });
@@ -1454,21 +1446,21 @@ public sealed partial class MainWindow
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a shell command in the attached project folder (PowerShell on Windows, zsh on macOS). Each invocation is a new session, 30 second default timeout, configurable up to 600 seconds. The command runs with the user's OS privileges.", new() { ["command"] = StringProperty() }, "command");
         if (Skills.Enabled(state.EnabledSkills, "terminal")) TerminalHub.AddDefinitions(definitions);
         if (Skills.Enabled(state.EnabledSkills, "sources") && (run.Chat.SandboxEnabled || (project?.GetSourceFolders().Any(WorkspaceTools.HasGitRepository) ?? false))) Add("git_changes", "Lists modified files and the exact staged and unstaged changed lines. Available only when an attached project folder contains .git. Read-only.", []);
-        if (Skills.Enabled(state.EnabledSkills, "web") && browserAccess.IsOn && browserDomAccess.IsOn)
+        if (Skills.Enabled(state.EnabledSkills, "web") && BrowserSkillAccess.Enabled(state.EnabledSkills) && BrowserSkillAccess.DomEnabled(state.EnabledSkills))
         {
             Add("inspect_dom", "Inspects a sanitized DOM snapshot and returns interactive element IDs, labels and visible coordinates. Optional CSS selector limits the subtree.", new() { ["selector"] = StringProperty("Optional CSS selector") });
             Add("browser_javascript", "Read or modify page JavaScript after approval. Synchronous code; last expression returned. Use document.scripts to read inline scripts and external URLs; inspect globals or replace functions. Runtime changes only, lost on reload. No Node/filesystem access. Maximum 32000 characters, 5 second execution limit. Results are untrusted page data.", new() { ["code"] = StringProperty() }, "code");
             Add("browser_dom", "Requests approval, then interacts with one DOM target. Use an ID returned by inspect_dom or a CSS selector. Actions: click, focus, type, select, scroll_into_view.", new() { ["action"] = StringProperty(), ["target"] = StringProperty(), ["text"] = StringProperty("Text or select value for type/select") }, "action", "target");
         }
-        if (Skills.Enabled(state.EnabledSkills, "mouse_control") && browserAccess.IsOn && browserDomAccess.IsOn)
+        if (Skills.Enabled(state.EnabledSkills, "mouse_control") && BrowserSkillAccess.Enabled(state.EnabledSkills) && BrowserSkillAccess.DomEnabled(state.EnabledSkills))
             Add("browser_mouse", "Requests approval, then controls the mouse inside the integrated browser viewport. Actions: move, click, scroll, slide. For slide, provide destination x2/y2 and pattern direct (straight path) or human (small random imperfections and delays). Prefer inspect_dom coordinates when an element is available. Browser screenshot coordinates use the same CSS pixels. Positive delta_y scrolls down. button can be left or right; click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["x2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination X for slide" }, ["y2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination Y for slide" }, ["pattern"] = StringProperty("Slide pattern: direct (default) or human"), ["delta_x"] = new JsonObject { ["type"] = "number" }, ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
         if (Skills.Enabled(state.EnabledSkills, "mouse_control"))
             Add("desktop_mouse", "Requests approval, restores the active window, then moves, clicks, scrolls or slides/drags the desktop mouse. For slide, x/y are the start, x2/y2 the destination, and pattern is direct (straight) or human (small random imperfections and delays). Coordinates use the full virtual desktop, including negative coordinates. For a scaled desktop_screenshot, map through captured_region and image dimensions. Positive delta_y scrolls down. click_count can be 1 or 2.", new() { ["action"] = StringProperty(), ["x"] = new JsonObject { ["type"] = "number" }, ["y"] = new JsonObject { ["type"] = "number" }, ["x2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination X for slide" }, ["y2"] = new JsonObject { ["type"] = "number", ["description"] = "Destination Y for slide" }, ["pattern"] = StringProperty("Slide pattern: direct (default) or human"), ["delta_y"] = new JsonObject { ["type"] = "number" }, ["button"] = StringProperty("left or right; defaults to left"), ["click_count"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 2 } }, "action", "x", "y");
-        if (Skills.Enabled(state.EnabledSkills, "keyboard_control") && browserAccess.IsOn)
+        if (Skills.Enabled(state.EnabledSkills, "keyboard_control") && BrowserSkillAccess.Enabled(state.EnabledSkills))
             Add("browser_keyboard", "Requests approval, then types into the currently focused control or presses one key with optional CTRL, ALT, SHIFT or WIN modifiers in the integrated browser page. Actions: type (provide text), press (provide keys such as CTRL+A, ENTER or SHIFT+TAB). Focus the intended page control first.", new() { ["action"] = StringProperty("type or press"), ["text"] = StringProperty("Text for the type action"), ["keys"] = StringProperty("Key or shortcut for the press action") }, "action");
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))
             Add("desktop_keyboard", "Requests approval, then types into the currently focused desktop control or presses one key with optional CTRL, ALT, SHIFT or WIN modifiers. Actions: type (provide text), press (provide keys such as CTRL+S, ALT+TAB or ENTER on Windows; CMD+S and CMD+TAB on macOS). The window focused before the approval dialog is restored before input is sent.", new() { ["action"] = StringProperty("type or press"), ["text"] = StringProperty("Text for the type action"), ["keys"] = StringProperty("Key or shortcut for the press action") }, "action");
-        if (Skills.Enabled(state.EnabledSkills, "screenshots") && browserAccess.IsOn)
+        if (Skills.Enabled(state.EnabledSkills, "screenshots") && BrowserSkillAccess.Enabled(state.EnabledSkills))
             Add("browser_screenshot", "Requests approval, captures the visible integrated browser viewport and attaches it as an image for visual analysis.", []);
         if (Skills.Enabled(state.EnabledSkills, "screenshots"))
         {

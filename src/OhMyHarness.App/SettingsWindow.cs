@@ -9,19 +9,6 @@ public sealed partial class MainWindow
     Window? settingsWindow;
     bool editingSettings;
 
-    (ToggleSwitch Browser, ToggleSwitch Dom) AddBrowserSkillSettings(StackPanel panel)
-    {
-        var access = new ToggleSwitch { Header = T("Accès IA au navigateur"), IsOn = browserAccess.IsOn,
-            OnContent = T("Autorisé"), OffContent = T("Désactivé") };
-        var dom = new ToggleSwitch { Header = T("Accès DOM et interaction IA"), IsOn = browserDomAccess.IsOn,
-            OnContent = T("Autorisé"), OffContent = T("Désactivé") };
-        panel.Children.Add(FluentDesign.Setting(access.Header.ToString()!, "", access));
-        access.Header = null;
-        panel.Children.Add(FluentDesign.Setting(dom.Header.ToString()!, "", dom));
-        dom.Header = null;
-        return (access, dom);
-    }
-
     async Task Settings()
     {
         if (editingSettings)

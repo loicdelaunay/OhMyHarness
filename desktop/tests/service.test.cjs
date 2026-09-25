@@ -162,7 +162,10 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   await fs.writeFile(path.join(directory,'hello.swift'),'print("hello")');assert.equal(await rpc('files.read',{projectId:project.id,path:'hello.swift'}),'print("hello")');
   await fs.writeFile(path.join(directory,'.env'),'sensitive');await assert.rejects(rpc('files.read',{projectId:project.id,path:'.env'}));
   assert.ok(events.some(x=>x.event==='stream')&&events.some(x=>x.event==='done'));assert.ok(requests>=6);assert.equal((await rpc('snapshot')).running.length,0);
-  await rpc('browser.access',{enabled:true,dom:true});await rpc('state.save',{enabledSkills:'web'});
+  await rpc('browser.access',{enabled:true,dom:true});
+  const browserState=await rpc('snapshot');
+  assert.ok(browserState.browserAccess&&browserState.domAccess&&browserState.state.enabledSkills.includes('browser_access')&&browserState.state.enabledSkills.includes('browser_dom_access'),'Browser skills persist in shared state');
+  await rpc('state.save',{enabledSkills:'web,browser_access,browser_dom_access'});
   await rpc('provider.save',{...provider,model:'browser-model'});
   await Promise.all([rpc('send',{chatId:chatA.id,providerId:provider.id,text:'browser A'}),rpc('send',{chatId:chatB.id,providerId:provider.id,text:'browser B'})]);
   assert.deepEqual(browserCalls.map(x=>x.chatId).sort((a,b)=>a-b),[chatA.id,chatB.id].sort((a,b)=>a-b),'Host browser routing uses run identity, ignoring a forged chatId');

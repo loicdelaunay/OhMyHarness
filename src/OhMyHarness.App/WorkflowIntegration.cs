@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using OhMyHarness.Core;
 using System.Text.Json.Nodes;
 
@@ -55,38 +56,138 @@ public sealed partial class MainWindow
         async (questions, ct) =>
         {
             var completion = new TaskCompletionSource<AgentAnswer>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var panel = new StackPanel { Spacing = 10 };
-            panel.Children.Add(new TextBlock { Text = WorkflowText("Réponse attendue", "Waiting for your answer"), FontSize = 18 });
+            var panel = new StackPanel { Spacing = 14 };
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            var progress = new TextBlock { FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = FluentDesign.Primary, VerticalAlignment = VerticalAlignment.Center };
+            header.Children.Add(progress);
+            var collapse = new Button { Content = "⌄", Padding = new(8, 2, 8, 2), MinWidth = 32,
+                Background = FluentDesign.Resource("TransparentBrush"), BorderThickness = new(0) };
+            ToolTipService.SetToolTip(collapse, WorkflowText("Réduire ou développer les questions", "Collapse or expand questions"));
+            Grid.SetColumn(collapse, 1); header.Children.Add(collapse);
+            panel.Children.Add(header);
+            var body = new StackPanel { Spacing = 14 };
+            panel.Children.Add(body);
             var readers = new List<Func<IReadOnlyList<string>>>();
-            foreach (var question in questions)
+            var customAnswersValid = new List<Func<bool>>();
+            var pages = new List<StackPanel>();
+            for (var questionIndex = 0; questionIndex < questions.Count; questionIndex++)
             {
-                panel.Children.Add(new TextBlock { Text = question.Question, TextWrapping = TextWrapping.Wrap });
-                var choices = new List<(ToggleSwitch Toggle, string Label)>();
+                var question = questions[questionIndex];
+                var page = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
+                page.Children.Add(new TextBlock { Text = question.Question, TextWrapping = TextWrapping.Wrap,
+                    FontSize = 16, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = FluentDesign.Primary });
+                page.Children.Add(new TextBlock { Text = question.Multiple
+                        ? WorkflowText("Sélectionnez une ou plusieurs réponses", "Select one or more answers")
+                        : WorkflowText("Sélectionnez une réponse", "Select an answer"),
+                    FontSize = 13, Foreground = FluentDesign.Secondary });
+                var options = new StackPanel { Spacing = 8, Margin = new(0, 8, 0, 0) };
+                page.Children.Add(new ScrollViewer { Content = options, MaxHeight = 420,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+                var choices = new List<(ToggleButton Toggle, string Label)>();
+                var groupName = "workflow-question-" + Guid.NewGuid().ToString("N");
+
+                Border Choice(string label, string description, ToggleButton toggle)
+                {
+                    var copy = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
+                    copy.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap,
+                        FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = FluentDesign.Primary });
+                    if (!string.IsNullOrWhiteSpace(description))
+                        copy.Children.Add(new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap,
+                            FontSize = 14, Foreground = FluentDesign.Secondary });
+                    toggle.Content = copy;
+                    toggle.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    toggle.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+                    toggle.MinHeight = 62;
+                    toggle.Padding = new(12, 11, 12, 11);
+                    toggle.Background = FluentDesign.Resource("TransparentBrush");
+                    toggle.BorderThickness = new(0);
+                    var row = new Border { Child = toggle, Background = FluentDesign.Card,
+                        BorderBrush = FluentDesign.Stroke, BorderThickness = new(1), CornerRadius = new(8) };
+                    var hovered = false;
+                    void Refresh() {
+                        row.Background = toggle.IsChecked == true ? FluentDesign.Resource("ControlSelectedBrush")
+                            : hovered ? FluentDesign.Resource("ControlHoverBrush") : FluentDesign.Card;
+                        row.BorderBrush = toggle.IsChecked == true ? FluentDesign.Resource("AccentFillColorDefaultBrush") : FluentDesign.Stroke;
+                    }
+                    toggle.Checked += (_, _) => Refresh();
+                    toggle.Unchecked += (_, _) => Refresh();
+                    row.PointerEntered += (_, _) => { hovered = true; Refresh(); };
+                    row.PointerExited += (_, _) => { hovered = false; Refresh(); };
+                    return row;
+                }
                 foreach (var option in question.Options)
                 {
-                    var toggle = new ToggleSwitch { Header = option.Label, OffContent = option.Description, OnContent = option.Description };
-                    toggle.Toggled += (_, _) => { if (toggle.IsOn && !question.Multiple) foreach (var other in choices) if (other.Toggle != toggle) other.Toggle.IsOn = false; };
-                    choices.Add((toggle, option.Label)); panel.Children.Add(toggle);
+                    ToggleButton toggle = question.Multiple ? new CheckBox() : new RadioButton { GroupName = groupName };
+                    choices.Add((toggle, option.Label));
+                    options.Children.Add(Choice(option.Label, option.Description, toggle));
                 }
-                var free = new TextBox { PlaceholderText = WorkflowText("Votre réponse…", "Your answer…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000 };
-                if (question.Custom) panel.Children.Add(free);
+                var free = new TextBox { PlaceholderText = WorkflowText("Tapez votre réponse…", "Type your answer…"),
+                    AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000,
+                    MinHeight = 62, MaxHeight = 130, Visibility = Visibility.Collapsed };
+                ToggleButton? custom = null;
+                if (question.Custom)
+                {
+                    custom = question.Multiple ? new CheckBox() : new RadioButton { GroupName = groupName };
+                    options.Children.Add(Choice(WorkflowText("Tapez votre propre réponse", "Write your own answer"),
+                        WorkflowText("Tapez votre réponse…", "Type your answer…"), custom));
+                    options.Children.Add(free);
+                    custom.Checked += (_, _) => { free.Visibility = Visibility.Visible; free.Focus(FocusState.Programmatic); };
+                    custom.Unchecked += (_, _) => free.Visibility = Visibility.Collapsed;
+                    if (question.Options.Count == 0) { custom.IsChecked = true; free.Visibility = Visibility.Visible; }
+                }
+                customAnswersValid.Add(() => custom?.IsChecked != true || !string.IsNullOrWhiteSpace(free.Text));
                 readers.Add(() => {
-                    var values = choices.Where(x => x.Toggle.IsOn).Select(x => x.Label).ToList();
-                    if (question.Custom && !string.IsNullOrWhiteSpace(free.Text)) { if (!question.Multiple) values.Clear(); values.Add(free.Text.Trim()); }
+                    var values = choices.Where(x => x.Toggle.IsChecked == true).Select(x => x.Label).ToList();
+                    if (custom?.IsChecked == true && !string.IsNullOrWhiteSpace(free.Text)) values.Add(free.Text.Trim());
                     return values;
                 });
+                body.Children.Add(page); pages.Add(page);
             }
-            var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
-            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            var send = new Button { Content = WorkflowText("Répondre et reprendre", "Answer and resume") };
-            var cancel = new Button { Content = WorkflowText("Annuler la question", "Dismiss question") };
+            var currentPage = 0;
+            void ShowPage(int index)
+            {
+                currentPage = index;
+                progress.Text = WorkflowText("Question", "Question") + $" {index + 1} / {questions.Count}";
+                for (var i = 0; i < pages.Count; i++) pages[i].Visibility = i == index ? Visibility.Visible : Visibility.Collapsed;
+            }
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = FluentDesign.Resource("ToolMessageErrorStrokeBrush") };
+            var buttons = new Grid { ColumnSpacing = 8 };
+            buttons.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+            buttons.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            buttons.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+            var cancel = new Button { Content = WorkflowText("Annuler", "Cancel") };
+            var back = new Button { Content = WorkflowText("Précédente", "Previous") };
+            var send = new Button { Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
+            void UpdateButtons()
+            {
+                back.Visibility = currentPage == 0 ? Visibility.Collapsed : Visibility.Visible;
+                send.Content = currentPage == questions.Count - 1
+                    ? WorkflowText("Répondre et reprendre", "Answer and resume") : WorkflowText("Suivante", "Next");
+            }
+            ShowPage(0); UpdateButtons();
+            collapse.Click += (_, _) => { body.Visibility = body.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+                collapse.Content = body.Visibility == Visibility.Visible ? "⌄" : "›"; };
+            back.Click += (_, _) => { error.Text = ""; ShowPage(currentPage - 1); UpdateButtons(); };
             send.Click += (_, _) => {
+                if (!customAnswersValid[currentPage]())
+                { error.Text = WorkflowText("Saisissez votre réponse personnalisée.", "Enter your custom answer."); return; }
+                try { WorkflowTools.ValidateAnswer([questions[currentPage]], new AgentAnswer(false, [readers[currentPage]()])); }
+                catch (ArgumentException) { error.Text = WorkflowText("Sélectionnez une réponse ou saisissez votre texte.", "Select an answer or enter your text."); return; }
+                error.Text = "";
+                if (currentPage < questions.Count - 1) { ShowPage(currentPage + 1); UpdateButtons(); return; }
                 var answer = new AgentAnswer(false, readers.Select(x => x()).ToList());
-                try { WorkflowTools.ValidateAnswer(questions, answer); completion.TrySetResult(answer); } catch (ArgumentException ex) { error.Text = ex.Message; }
+                try { WorkflowTools.ValidateAnswer(questions, answer); completion.TrySetResult(answer); }
+                catch (ArgumentException ex) { error.Text = ex.Message; }
             };
             cancel.Click += (_, _) => completion.TrySetResult(new(true, []));
-            buttons.Children.Add(send); buttons.Children.Add(cancel); panel.Children.Add(error); panel.Children.Add(buttons);
-            var card = new Border { Child = panel, Padding = new(18), CornerRadius = new(12), BorderThickness = new(1), BorderBrush = FluentDesign.Resource("AccentFillColorDefaultBrush") };
+            buttons.Children.Add(cancel); Grid.SetColumn(back, 1); buttons.Children.Add(back);
+            Grid.SetColumn(send, 2); buttons.Children.Add(send);
+            body.Children.Add(error); body.Children.Add(buttons);
+            var card = new Border { Child = panel, Padding = new(16), CornerRadius = new(16), BorderThickness = new(1),
+                Background = FluentDesign.Resource("AssistantMessageFillBrush"), BorderBrush = FluentDesign.Stroke };
             run.Messages.Children.Add(card); ScrollRunToBottom(run);
             SetRunStatus(run, WorkflowText("Réponse attendue dans la conversation", "Waiting for your answer in the conversation"), StatusKind.Notice);
             try

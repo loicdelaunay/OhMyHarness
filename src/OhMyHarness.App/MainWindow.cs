@@ -73,7 +73,6 @@ public sealed partial class MainWindow : Window
     StackPanel messages = CreateMessagePanel();
     readonly ScrollViewer scroll = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     readonly TextBox composer = new() { PlaceholderText = T("Posez une question, explorez vos sources…"), AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 85, MaxHeight = 190 };
-    readonly ToggleSwitch browserAccess = new() { Header = T("Accès IA au navigateur"), IsOn = false, OnContent = T("Autorisé"), OffContent = T("Désactivé") };
     readonly Button send = new() { Content = T("Envoyer  ↑"), Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
     readonly Button stop = new() { Content = T("Arrêter"), IsEnabled = false };
     readonly List<Attachment> pendingImages = [];
@@ -724,8 +723,6 @@ public sealed partial class MainWindow : Window
         FluentDesign.IconButton(stop, "\uE71A", T("Arrêter"), false);
         ToolTipService.SetToolTip(send, T("Envoyer  ↑")); ToolTipService.SetToolTip(stop, T("Arrêter"));
         RefreshToolLanguage();
-        browserAccess.Header = T("Accès IA au navigateur");
-        browserAccess.OnContent = T("Autorisé"); browserAccess.OffContent = T("Désactivé");
         UpdateSourceLabel();
         title.Text = chat?.Title ?? T("Nouvelle conversation");
         ToolTipService.SetToolTip(title, title.Text);
@@ -1559,7 +1556,6 @@ public sealed partial class MainWindow : Window
                 + "\n" + CustomSkills.DefaultRoot + "\n"
                 + WorkflowText("Skills du projet : <dossier source>/.omh-ai/skills. Activez Auto-création de skills pour autoriser l’IA à les créer.",
                     "Project skills: <source folder>/.omh-ai/skills. Enable Automatic skill creation to let the AI create them."), 12) });
-        var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
         foreach (var skill in await Task.Run(() => Skills.Available(project?.GetSourceFolders(), project?.Id ?? 0).ToList()))
         {
@@ -1677,8 +1673,6 @@ public sealed partial class MainWindow : Window
         state.ShowReasoningDetails = showReasoning.IsChecked == true;
         foreach (var reference in reasoningViews)
             if (reference.TryGetTarget(out var view)) view.RefreshReasoningPreference();
-        browserAccess.IsOn = browserSkillToggles.Browser.IsOn;
-        browserDomAccess.IsOn = browserSkillToggles.Dom.IsOn;
         state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
         state.PermissionMode = permissionMode.SelectedIndex switch
         {
@@ -1742,7 +1736,6 @@ public sealed partial class MainWindow : Window
         general.Children.Add(FluentDesign.Setting(T("Langue de l’application"), "", language));
         var skillPanel = new StackPanel { Spacing = 8 };
         skillPanel.Children.Add(Label(T("Les skills ajoutent des instructions spécialisées. Les accès aux sources et au web peuvent être désactivés indépendamment."), 13));
-        var browserSkillToggles = AddBrowserSkillSettings(skillPanel);
         var skillToggles = new Dictionary<string, ToggleSwitch>();
         foreach (var skill in Skills.Available(project?.GetSourceFolders(), project?.Id ?? 0))
         {
@@ -1772,8 +1765,6 @@ public sealed partial class MainWindow : Window
         };
         if (await ShowDialogAsync(dialog) != ContentDialogResult.Primary) return;
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
-        browserAccess.IsOn = browserSkillToggles.Browser.IsOn;
-        browserDomAccess.IsOn = browserSkillToggles.Dom.IsOn;
         state.EnabledSkills = string.Join(',', skillToggles.Where(x => x.Value.IsOn).Select(x => x.Key));
         SaveTemplateDrafts(templateEditor.Drafts);
         target.BaseUrl = url.Text.Trim().TrimEnd('/'); target.Model = model.Text.Trim(); target.ContextLimit = (int)limit.Value; target.SupportsImages = vision.IsChecked == true;
@@ -1993,7 +1984,7 @@ public sealed partial class MainWindow : Window
                 catch (UnauthorizedAccessException) when (!run.Chat.SandboxEnabled) { return await WriteWithApprovalAsync(editPath, newText, oldText, ct, project); }
 
             case "browse":
-                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir 'Réglages > Skills' et activer 'Accès IA au navigateur'.");
                 var url = argsObj["url"]?.GetValue<string>();
                 if (string.IsNullOrWhiteSpace(url))
@@ -2001,7 +1992,7 @@ public sealed partial class MainWindow : Window
                 return await NavigateAsync(url, ct);
 
             case "read_page":
-                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé. Veuillez ouvrir 'Réglages > Skills' et activer 'Accès IA au navigateur'.");
                 return await ReadPage(ct);
 
@@ -2030,7 +2021,7 @@ public sealed partial class MainWindow : Window
                     ct, run.Provider, argsObj["window_id"]?.GetValue<string>());
 
             case "browser_screenshot":
-                if (!Skills.Enabled(state.EnabledSkills, "screenshots") || !browserAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "screenshots") || !BrowserSkillAccess.Enabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé ou le skill 'screenshots' est inactif.");
                 return await CaptureBrowserScreenshotAsync(ct, run.Provider);
 
@@ -2049,7 +2040,7 @@ public sealed partial class MainWindow : Window
                     argsObj["pattern"]?.GetValue<string>());
 
             case "browser_mouse":
-                if (!Skills.Enabled(state.EnabledSkills, "mouse_control") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "mouse_control") || !BrowserSkillAccess.Enabled(state.EnabledSkills) || !BrowserSkillAccess.DomEnabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé ou le skill 'mouse_control' est inactif.");
                 return await ControlBrowserMouseAsync(
                     argsObj["action"]?.GetValue<string>() ?? "click",
@@ -2076,7 +2067,7 @@ public sealed partial class MainWindow : Window
                     ct);
 
             case "browser_keyboard":
-                if (!Skills.Enabled(state.EnabledSkills, "keyboard_control") || !browserAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "keyboard_control") || !BrowserSkillAccess.Enabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur n'est pas autorisé ou le skill 'keyboard_control' est inactif.");
                 return await ControlBrowserKeyboardAsync(
                     argsObj["action"]?.GetValue<string>() ?? "type",
@@ -2085,17 +2076,17 @@ public sealed partial class MainWindow : Window
                     ct);
 
             case "inspect_dom":
-                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills) || !BrowserSkillAccess.DomEnabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé.");
                 return await InspectDomAsync(argsObj["selector"]?.GetValue<string>(), ct);
 
             case "browser_javascript":
-                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills) || !BrowserSkillAccess.DomEnabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé.");
                 return await EvaluateBrowserJavaScriptAsync(argsObj["code"]?.GetValue<string>() ?? "", ct);
 
             case "browser_dom":
-                if (!Skills.Enabled(state.EnabledSkills, "web") || !browserAccess.IsOn || !browserDomAccess.IsOn)
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills) || !BrowserSkillAccess.DomEnabled(state.EnabledSkills))
                     return T("Erreur : l'accès IA au navigateur / DOM n'est pas autorisé.");
                 return await InteractWithDomAsync(
                     argsObj["action"]?.GetValue<string>() ?? "",
@@ -2322,7 +2313,8 @@ public sealed partial class MainWindow : Window
         var sourceFolders = project.GetSourceFolders();
         var hasSources = sourceFolders.Count > 0 && SourceTools.CanRead(run.Options.EnabledSkills);
         var canWriteSources = sourceFolders.Count > 0 && Skills.Enabled(run.Options.EnabledSkills, "write_sources");
-        var hasBrowser = browserAccess.IsOn && Skills.Enabled(run.Options.EnabledSkills, "web");
+        var hasBrowser = BrowserSkillAccess.Enabled(run.Options.EnabledSkills) && Skills.Enabled(run.Options.EnabledSkills, "web")
+            && FeatureSettings.Read(run.Options.FeaturesJson).BrowserMode == "embedded";
         var systemPrompt = Skills.Prompt(run.Options.EnabledSkills, run.Options.Language, hasSources, hasBrowser, canWriteSources) +
             "\nAdditional tools may request one-time user approval for local previews, files outside the project and terminal commands. Never claim approval before the tool returns success. A denial is final for that action; explain it and do not retry to bypass it.";
         run.Workflow = CreateWorkflow(run);

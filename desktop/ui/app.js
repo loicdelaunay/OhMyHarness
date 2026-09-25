@@ -222,7 +222,7 @@ $('plus').onclick=()=>{
     const orchestration=field(menu,L('Orchestration sous-agents','Subagent orchestration'),'select');for(const [value,label] of [['disabled','Disable'],['auto','Auto'],['forced','Forced']])orchestration.append(option(value,label));orchestration.value=selectedChat.orchestrationMode||'disabled';if(snapshot.providers.find(x=>x.id===providerId)?.kind==='composite'){orchestration.value='forced';orchestration.disabled=true;}
     for(const input of [mode,orchestration])input.onchange=()=>guard(async()=>{await call('chat.modes',{id:selectedChat.id,executionMode:mode.value,orchestrationMode:orchestration.value});await refresh();status(L('Appliqué au prochain envoi','Applied to next message'));});
   }
-  const skillDetails=el('details');skillDetails.append(el('summary','Skills'));for(const skill of snapshot.skills){const label=el('label');const check=el('input');check.type='checkbox';check.checked=snapshot.state.enabledSkills.split(',').includes(skill.id);check.onchange=()=>guard(async()=>{const enabled=new Set(snapshot.state.enabledSkills.split(','));check.checked?enabled.add(skill.id):enabled.delete(skill.id);await call('state.save',{enabledSkills:[...enabled].join(',')});await refresh();});label.append(check,document.createTextNode(' '+L(skill.frenchName,skill.englishName)));skillDetails.append(label);}addBrowserSkillControls(skillDetails,true);menu.append(skillDetails);
+  const skillDetails=el('details');skillDetails.append(el('summary','Skills'));for(const skill of snapshot.skills){const label=el('label');const check=el('input');check.type='checkbox';check.checked=snapshot.state.enabledSkills.split(',').includes(skill.id);check.onchange=()=>guard(async()=>{const enabled=new Set(snapshot.state.enabledSkills.split(','));check.checked?enabled.add(skill.id):enabled.delete(skill.id);await call('state.save',{enabledSkills:[...enabled].join(',')});await refresh();});label.append(check,document.createTextNode(' '+L(skill.frenchName,skill.englishName)));skillDetails.append(label);}menu.append(skillDetails);
   const mcpDetails=el('details');mcpDetails.append(el('summary','MCP'));
   for(const server of snapshot.mcpServers||[]){const label=el('label'),check=el('input');check.type='checkbox';check.checked=server.enabled;check.onchange=()=>guard(async()=>{await call('mcp.toggle',{id:server.id,enabled:check.checked});await refresh();});label.append(check,document.createTextNode(' '+server.name));mcpDetails.append(label);}
   button(mcpDetails,L('Configurer MCP…','Configure MCP…'),async()=>{settingsTab='mcp';await showSettings();});menu.append(mcpDetails);
@@ -323,14 +323,6 @@ document.addEventListener('click',e=>{const a=e.target.closest('a[href]');if(a){
 
 function field(form,label,type,value){const container=el('label',label),input=el(type==='textarea'?'textarea':type==='select'?'select':'input');if(type!=='textarea'&&type!=='select')input.type=type;if(type==='checkbox')input.checked=!!value;else input.value=value??'';container.append(input);form.append(container);return input;}
 function button(parent,label,fn){const b=el('button',label);b.type='button';b.onclick=()=>guard(fn);parent.append(b);return b;}
-function addBrowserSkillControls(area,immediate){
-  const browser=field(area,L('Accès IA au navigateur','AI browser access'),'checkbox',snapshot.browserAccess);
-  const dom=field(area,L('Accès DOM et interaction IA','AI DOM access and interaction'),'checkbox',snapshot.domAccess);
-  browser.dataset.browserSkill='access';dom.dataset.browserSkill='dom';
-  if(!immediate)for(const input of [browser,dom]){const label=input.parentElement,card=el('section',null,'skill-card');label.before(card);card.append(label);}
-  if(immediate)for(const input of [browser,dom])input.onchange=()=>guard(async()=>{await call('browser.access',{enabled:browser.checked,dom:dom.checked});await refresh();});
-  return {browser,dom};
-}
 async function showSettings(){await refresh();renderSettings();showDialog('settings');}
 $('settings-open').onclick=()=>guard(showSettings);document.querySelectorAll('[data-settings]').forEach(b=>b.onclick=()=>{settingsTab=b.dataset.settings;renderSettings();});
 function renderSettings(){
@@ -353,9 +345,8 @@ function renderSettings(){
     area.append(el('p',snapshot.database,'muted'));button(area,L('Vérifier les autorisations système','Check system permissions'),async()=>{const result=await api.host('system.permissions');area.append(el('pre',JSON.stringify(result,null,2)));});
   }else if(settingsTab==='skills'){
     area.append(el('p',L('Skills personnalisés : copiez un dossier contenant SKILL.md ici, puis rouvrez les réglages. Le modèle exemple-revue est fourni.','Custom skills: copy a folder containing SKILL.md here, then reopen settings. The exemple-revue template is included.')+' '+snapshot.skillsDirectory,'muted'));
-    const browserSkills=addBrowserSkillControls(area,false);
     let ragSave=()=>snapshot.state.featuresJson,visionSave=()=>({});for(const skill of snapshot.skills){const card=el('section',null,'skill-card');area.append(card);const label=field(card,L(skill.frenchName,skill.englishName),'checkbox',snapshot.state.enabledSkills.split(',').includes(skill.id));label.dataset.skill=skill.id;card.append(el('p',L(skill.frenchDescription,skill.englishDescription),'muted'));if(skill.id==='rag'||skill.id==='vision_bridge'){const settings=el('div',null,'card');card.append(settings);if(skill.id==='rag'){settings.dataset.ragSettings='';ragSave=renderFeatureSettings(settings,true);}else{settings.dataset.visionSettings='';visionSave=renderVisionSettings(settings);}settings.hidden=!label.checked;label.onchange=()=>settings.hidden=!label.checked;}}
-    button(area,L('Enregistrer','Save'),async()=>{await call('browser.access',{enabled:browserSkills.browser.checked,dom:browserSkills.dom.checked});await call('state.save',{featuresJson:JSON.stringify({...JSON.parse(ragSave()),...visionSave()}),enabledSkills:[...area.querySelectorAll('[data-skill]:checked')].map(x=>x.dataset.skill).join(',')});await refresh();status(L('Skills enregistrés','Skills saved'));});
+    button(area,L('Enregistrer','Save'),async()=>{await call('state.save',{featuresJson:JSON.stringify({...JSON.parse(ragSave()),...visionSave()}),enabledSkills:[...area.querySelectorAll('[data-skill]:checked')].map(x=>x.dataset.skill).join(',')});await refresh();status(L('Skills enregistrés','Skills saved'));});
   }else if(settingsTab==='mcp'){
     button(area,L('Éditer MCP.json','Edit MCP.json'),mcpJsonEditor);
     if(snapshot.mcpConfigError)area.append(el('p',snapshot.mcpConfigError,'error'));

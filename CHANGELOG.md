@@ -1,10 +1,18 @@
 # Changelog
 
+## 1.11.0 — 2026-09-25
+
+- Redesigned the GUI question skill as a focused choice card with clear option descriptions, a dedicated custom-answer choice, collapsible content and step-by-step navigation when several questions are asked.
+
+## 1.10.1 — 2026-09-25
+
+- Browser and DOM access now use the same saved skill selection as other built-in skills. Their choices survive application restarts and stay in sync between Settings, the quick menu and the legacy desktop host.
+
 ## 1.10.0 — 2026-09-25
 
 - Added the opt-in **Complete design / Conception complète** skill to both GUI and CLI. It guides projects from focused questions and ideas through technology and visual choices, a living checklist, optional subagent collaboration, implementation, tests and visual verification.
 - The workflow adapts to the request and available tools, respects Plan/Execution modes and permissions, and explicitly reports checks that could not be performed.
-- The CLI header now shows a compact terminal rendering of the application icon and uses the configured application name.
+- The CLI header now shows a symmetrical circular icon in the selected theme's colors and uses the configured application name.
 
 ## 1.9.0 — 2026-09-25
 

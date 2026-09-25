@@ -104,8 +104,8 @@ public sealed partial class TerminalUi
     void Header(TerminalCanvas canvas, CliTheme appearance, int left, int width)
     {
         var p = appearance.Palette;
-        TerminalLogo.Draw(canvas, left, 1, p.Background);
-        string title = BrandingAssets.DisplayName(FeatureSettings.Read(workspace?.State.FeaturesJson ?? "{}").ApplicationName) + " CLI 1.10.0";
+        TerminalLogo.Draw(canvas, left, 1, p);
+        string title = BrandingAssets.DisplayName(FeatureSettings.Read(workspace?.State.FeaturesJson ?? "{}").ApplicationName) + " CLI 1.11.0";
         int textLeft = left + TerminalLogo.Width + 2, textWidth = width - TerminalLogo.Width - 2;
         canvas.Write(textLeft, 1, title, p.Highlight, textWidth);
         int brandLeft = textLeft + TerminalText.Width(title) + 3;

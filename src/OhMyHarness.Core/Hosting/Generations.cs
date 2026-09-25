@@ -46,7 +46,9 @@ public sealed partial class HarnessService
             await NotifyInbox(chat.Id);
             await emit(new { @event = "message", chatId = chat.Id, title = run.Chat.Title, message = MessageView(user) });
             var definitions = Definitions(run);
-            var system = Skills.Prompt(options.EnabledSkills, options.Language, project.GetSourceFolders().Count > 0, browserAccess, Skills.Enabled(options.EnabledSkills, "write_sources"));
+            var system = Skills.Prompt(options.EnabledSkills, options.Language, project.GetSourceFolders().Count > 0,
+                BrowserSkillAccess.Enabled(options.EnabledSkills) && FeatureSettings.Read(options.FeaturesJson).BrowserMode == "embedded",
+                Skills.Enabled(options.EnabledSkills, "write_sources"));
             run.Workflow = CreateWorkflow(run);
             var agent = CreateAgentRuntime(run, secret);
             system += await agent.InitializeAsync(ct);

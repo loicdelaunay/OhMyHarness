@@ -108,6 +108,7 @@ The built-in skills and their tool implementations are written in **.NET / C# an
 | **Memory · Shared** | Reuse project, general and user knowledge across conversations. |
 | **Bypass image AI** | Ask a dedicated vision model to describe images or identify components and coordinates. |
 | **Web research** | Read browser pages, inspect DOM/JavaScript and interact with page behavior. |
+| **AI browser access / DOM access** | Persist the embedded browser's AI access and interaction choices with the other skills. |
 | **Application management** | List open application windows and their position and size. |
 | **Mouse control** | Click, scroll or drag using screen, window or browser coordinates. |
 | **Keyboard control** | Send text and key combinations to the supported desktop/browser host. |

@@ -17,7 +17,6 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     readonly ConcurrentDictionary<int, ConversationSession> runs = new();
     readonly SemaphoreSlim permissions = new(1, 1), tools = new(1, 1), startup = new(1, 1);
     readonly List<Process> servers = [];
-    bool browserAccess, domAccess;
     readonly AsyncLocal<Project?> permissionProject = new();
     static string S(JsonObject p, string name, string fallback = "") => p[name]?.GetValue<string>() ?? fallback;
     static int I(JsonObject p, string name, int fallback = 0) => p[name]?.GetValue<int>() ?? fallback;
@@ -58,6 +57,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             case "question.answer": return AnswerQuestion(p);
             case "snapshot":
                 var mcpConfigError = await SyncMcpFile(ct);
+                var snapshotState = await db.States.SingleAsync(ct);
                 var snapshotProjects = await db.Projects.AsNoTracking().ToListAsync(ct);
                 var snapshotSkills = Skills.Available().Concat(snapshotProjects.SelectMany(item =>
                     new CustomSkills(CustomSkills.DefaultRoot, item.GetSourceFolders(), item.Id).Definitions()
@@ -67,17 +67,19 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                     chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled, x.ResourcePathsJson, x.TodoDismissed }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
                     mcpServers = (await db.McpServers.AsNoTracking().ToListAsync(ct)).Select(McpView),
-                    state = await db.States.SingleAsync(ct), templates = await db.Templates.ToListAsync(ct),
+                    state = snapshotState, templates = await db.Templates.ToListAsync(ct),
                     permissions = await db.PermissionGrants.ToListAsync(ct), skills = snapshotSkills.Select(skill => OperatingSystem.IsMacOS() ? skill with
                     { FrenchDescription = skill.FrenchDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh"), EnglishDescription = skill.EnglishDescription.Replace("Windows", "macOS").Replace("PowerShell", "zsh") } : skill), running = runs.Keys,
-                    questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }), browserAccess, domAccess, skillsDirectory = CustomSkills.DefaultRoot };
+                    questions = questions.Select(x => new { id = x.Key, chatId = x.Value.ChatId, questions = x.Value.Questions }),
+                    browserAccess = BrowserSkillAccess.Enabled(snapshotState.EnabledSkills), domAccess = BrowserSkillAccess.DomEnabled(snapshotState.EnabledSkills), skillsDirectory = CustomSkills.DefaultRoot };
             case "subagents": return await db.Subagents.AsNoTracking().Where(x=>x.ChatId==I(p,"chatId")).OrderBy(x=>x.CreatedUtc).ToListAsync(ct);
             case "history":
                 return (await db.Messages.AsNoTracking().Include(x => x.Attachments).Where(x => x.ChatId == I(p, "chatId")).OrderBy(x => x.Id).ToListAsync(ct)).Select(MessageView);
             case "chat.export":
                 runs.TryGetValue(I(p, "chatId"), out var exportingRun);
+                var exportSkills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
                 return await ConversationExport.CreateAsync(db, I(p, "chatId"), I(p, "providerId"), exportingRun != null,
-                    browserAccess, domAccess, exportingRun?.ExportProgress);
+                    BrowserSkillAccess.Enabled(exportSkills), BrowserSkillAccess.DomEnabled(exportSkills), exportingRun?.ExportProgress);
             case "project.save":
                 var project = I(p, "id") == 0 ? new Project() : await db.Projects.SingleAsync(x => x.Id == I(p, "id"), ct);
                 project.Name = S(p, "name", "Projet").Trim();
@@ -181,7 +183,11 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 db.Templates.Remove(await db.Templates.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
             case "permission.revoke":
                 db.PermissionGrants.Remove(await db.PermissionGrants.SingleAsync(x => x.Id == I(p, "id"), ct)); await db.SaveChangesAsync(ct); return true;
-            case "browser.access": browserAccess = B(p, "enabled"); domAccess = B(p, "dom"); return true;
+            case "browser.access":
+                var browserState = await db.States.SingleAsync(ct);
+                browserState.EnabledSkills = BrowserSkillAccess.Set(browserState.EnabledSkills, B(p, "enabled"), B(p, "dom"));
+                await db.SaveChangesAsync(ct);
+                return true;
             case "files.list": case "files.read": case "git": case "git.files": case "git.diff": case "git.preview": case "terminal":
                 var workspace = await db.Projects.SingleAsync(x => x.Id == I(p, "projectId"), ct);
                 if (I(p, "chatId") != 0) workspace = ProjectResources.Effective(await db.Chats.SingleAsync(x => x.Id == I(p, "chatId") && x.ProjectId == workspace.Id, ct), workspace);

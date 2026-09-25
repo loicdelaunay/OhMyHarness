@@ -11,6 +11,8 @@
 
 ## Releases GitHub
 
+- Ne modifier **GitHub** (push du code, documentation publiée, workflows/pipeline, tags, releases ou leurs assets) **que sur demande explicite de l’utilisateur**, par exemple « mets à jour le GitHub » ou « crée une release ». Respecter la portée de sa demande : un push demandé seul n’implique pas la création d’une release.
+- Une modification locale, une nouvelle version, un changelog ou une publication dans `artifacts/GUI` et `artifacts/CLI` n’autorisent pas à eux seuls une mise à jour de GitHub. Préparer les fichiers locaux nécessaires sans les publier tant que l’utilisateur ne le demande pas.
 - Lors de la publication d’une version sur GitHub, distribuer systématiquement **la GUI et le CLI**, à la même version. Un push du code ou une release CLI seule ne suffit pas.
 - Utiliser les tags `vX.Y.Z` pour la GUI et `cli-vX.Y.Z` pour le CLI, avec des archives Windows x64 `OhMyHarness-vX.Y.Z-win-x64.zip` et `OhMyHarness-CLI-vX.Y.Z-win-x64.zip`. Conserver ces noms compatibles avec la mise à jour automatique.
 - Joindre un fichier `SHA256SUMS.txt` à chaque release et vérifier les assets publiés. Préparer les deux releases en brouillon avant de les rendre publiques ; mettre à jour les deux liens de téléchargement du README.

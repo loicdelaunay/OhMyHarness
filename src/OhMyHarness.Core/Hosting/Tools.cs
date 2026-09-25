@@ -53,6 +53,8 @@ public sealed partial class HarnessService
     JsonArray Definitions(ConversationSession run)
     {
         var skills = run.Options.EnabledSkills;
+        var browserAccess = BrowserSkillAccess.Enabled(skills);
+        var domAccess = BrowserSkillAccess.DomEnabled(skills);
         var source = run.Project.GetSourceFolders().Count > 0;
         var definitions = ChatEngine.ToolDefinitions(source && SourceTools.CanRead(skills), browserAccess && Skills.Enabled(skills, "web"), source && Skills.Enabled(skills, "write_sources"));
         SourceTools.AddDefinitions(definitions, source, skills);
@@ -105,6 +107,8 @@ public sealed partial class HarnessService
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
         await using var db = Db();
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
+        var browserAccess = BrowserSkillAccess.Enabled(skills);
+        var domAccess = BrowserSkillAccess.DomEnabled(skills);
         if (VisionBridge.Handles(name)) return new(await VisionFor(run).CallAsync(name, p, ct));
         if (PythonTools.Handles(name)) return new(await PythonTools.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
             var allowed = await Approve(scope, title, detail, token);

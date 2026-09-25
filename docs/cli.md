@@ -2,7 +2,7 @@
 
 The same agent engine in a terminal workspace. The CLI is a separate .NET 10 project, <code>src/OhMyHarness.Cli</code>, referencing <code>OhMyHarness.Core</code>. Its full-screen interface uses truecolor ANSI rendering, adapts to terminal width, and supports Windows and macOS builds.
 
-The header shows a compact terminal rendering of the OhMyHarness icon and the configured application name. The icon is drawn with Unicode half blocks and ANSI colors, so it remains visible without a terminal image protocol or an external image file. On Windows, `omh.exe` also carries the application icon in Explorer.
+The header shows a symmetrical circular icon and the configured application name. The icon is drawn with Unicode half blocks and colors from the active CLI theme, so it remains visible without a terminal image protocol or an external image file. On Windows, `omh.exe` also carries the application icon in Explorer.
 
 The interaction takes inspiration from the command palette and automation mode of [OpenCode](https://opencode.ai/v2/docs/cli) and the terminal agent workflow of [Antigravity CLI](https://www.antigravity.google/product/antigravity-cli). This is an OhMyHarness client with its own shared engine.
 
