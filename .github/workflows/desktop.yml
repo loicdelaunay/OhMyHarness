@@ -39,12 +39,27 @@ jobs:
       - if: runner.os == 'Windows'
         run: dotnet build src/OhMyHarness.App -f net10.0-windows10.0.19041.0 -c Release
       - run: dotnet run --project tests/OhMyHarness.Tests -c Release
+      - run: dotnet run --project tests/OhMyHarness.Cli.Tests -c Release
       - run: npm ci
         working-directory: desktop
       - run: npm test
         working-directory: desktop
-      - run: dotnet publish src/OhMyHarness.App -f net10.0-desktop -p:OhMyHarnessDesktopOnly=true -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -o artifacts/uno/${{ matrix.rid }}
+      - name: Publish GUI
+        run: dotnet publish src/OhMyHarness.App -f net10.0-desktop -p:OhMyHarnessDesktopOnly=true -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/GUI
+      - name: Publish CLI
+        run: dotnet publish src/OhMyHarness.Cli -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/CLI
+      - name: Package clean portable downloads
+        shell: pwsh
+        run: ./build/package-release.ps1 -Runtime ${{ matrix.rid }}
       - uses: actions/upload-artifact@v4
         with:
           name: OhMyHarness-${{ matrix.rid }}
-          path: artifacts/uno/
+          path: artifacts/TEMP/release-packages/GUI/*
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OhMyHarness-CLI-${{ matrix.rid }}
+          path: artifacts/TEMP/release-packages/CLI/*
+          if-no-files-found: error
+          compression-level: 0

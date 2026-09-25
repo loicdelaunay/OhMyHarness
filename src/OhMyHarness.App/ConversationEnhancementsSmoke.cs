@@ -33,6 +33,11 @@ public sealed partial class MainWindow
         if (!ReferenceEquals(first, assistant.BodyContainer.Children[0]) || ReferenceEquals(oldLast, assistant.BodyContainer.Children[^1])) throw new Exception("Resuming did not preserve stable blocks and flush the latest text.");
         assistant.SetDuration(73.2);
         if (!assistant.Duration.Text.Contains("1 min")) throw new Exception("Duration missing from response footer.");
+        if (assistant.Duration.Visibility != Visibility.Collapsed) throw new Exception("Response duration should be hidden until hover.");
+        assistant.SetHovered(true);
+        if (assistant.Duration.Visibility != Visibility.Visible) throw new Exception("Response duration did not appear on hover.");
+        assistant.SetHovered(false);
+        if (assistant.Duration.Visibility != Visibility.Collapsed) throw new Exception("Response duration remained visible after hover.");
         var preferences = BuildConversationPreferences(); var settings = FeatureSettings.Read(state.FeaturesJson); preferences.Save(settings);
         if (!preferences.Validate() || settings.LogRetentionDays != 7) throw new Exception("Conversation preferences defaults invalid.");
         await Task.Delay(200); await Capture(root, Path.Combine(output, "conversation-enhancements.png"));

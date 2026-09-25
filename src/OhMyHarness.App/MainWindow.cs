@@ -889,12 +889,18 @@ public sealed partial class MainWindow : Window
         public Func<string, Task>? OpenFile { get; init; }
         public TextBlock Duration { get; init; } = null!;
         public Func<bool> CanPaint { get; init; } = () => true;
+        bool isHovered;
         string? pendingText;
         (string Text, bool Complete)? pendingThinking;
         public void SetDuration(double seconds)
         {
             Duration.Text = seconds > 0 ? (UiText.Language == "en" ? "Duration: " : "Durée : ") + (seconds >= 60 ? $"{(int)(seconds / 60)} min {seconds % 60:0.#} s" : $"{seconds:0.#} s") : "";
-            Duration.Visibility = seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            Duration.Visibility = isHovered && seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        public void SetHovered(bool hovered)
+        {
+            isHovered = hovered;
+            Duration.Visibility = hovered && Duration.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         public void Flush()
         {
@@ -1027,6 +1033,13 @@ public sealed partial class MainWindow : Window
         var container = FluentDesign.MessageSurface(stack, "assistant");
         ui.Container = container;
         AddMessageCopyAction(EnsureMessageActionMenu(container), () => ui.CurrentText);
+        container.PointerEntered += (_, _) => ui.SetHovered(true);
+        container.PointerExited += (_, e) =>
+        {
+            var point = e.GetCurrentPoint(container).Position;
+            if (point.X >= 0 && point.Y >= 0 && point.X <= container.ActualWidth && point.Y <= container.ActualHeight) return;
+            ui.SetHovered(false);
+        };
         (target ?? messages).Children.Add(container);
 
         ui.UpdateContent(initialText);
