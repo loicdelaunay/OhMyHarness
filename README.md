@@ -32,7 +32,9 @@ The chat model itself is **not** bundled: cloud providers need network access an
 
 ## New in the current downloads
 
-**New in 1.13.0:** The opt-in Asset generator lets the AI draw SVG shapes, colors, text and layers in a live GUI canvas, capture its artwork for visual checks, and export SVG, PNG, WebP, JPEG or PDF from GUI or CLI. [Asset generator guide](docs/asset-generator.md).
+**New in 1.14.0:** The integrated Web pane now has independent tabs per conversation, also controllable by the AI browser skill. Asset generator adds pixel art, center and grid guides, timed animation frames, and animated SVG, GIF and PNG-sequence exports in GUI and CLI. [Asset generator guide](docs/asset-generator.md).
+
+**Also new in 1.13.0:** The opt-in Asset generator lets the AI draw SVG shapes, colors, text and layers in a live GUI canvas, capture its artwork for visual checks, and export SVG, PNG, WebP, JPEG or PDF from GUI or CLI.
 
 **Also new in 1.12.0:** Web research can now fetch pages and call APIs directly through the built-in .NET HTTP client in both GUI and CLI. Configure timeout, response limits, redirects, cookies, decompression, user agent and proxy without opening a browser. Requests follow application permissions. See the [HTTP tools guide](docs/web-http.md).
 
@@ -112,7 +114,7 @@ The built-in skills and their tool implementations are written in **.NET / C# an
 | **Memory · Conversation** | Search and save facts scoped to the current conversation. |
 | **Memory · Shared** | Reuse project, general and user knowledge across conversations. |
 | **Bypass image AI** | Ask a dedicated vision model to describe images or identify components and coordinates. |
-| **Asset generator** | Draw vector assets on an editable layered canvas, inspect a canvas capture, and export SVG, PNG, WebP, JPEG or PDF. See [Asset generator](docs/asset-generator.md). |
+| **Asset generator** | Draw vector or pixel-art assets on an editable layered canvas, align with guides, animate timed frames, and export SVG, animated SVG, GIF, PNG sequences or static images. See [Asset generator](docs/asset-generator.md). |
 | **Web research** | Fetch pages/APIs directly with a configurable .NET HTTP client, without a browser. Optional browser/DOM skills add rendered-page reading and interaction. See [HTTP tools](docs/web-http.md). |
 | **AI browser access / DOM access** | Persist the embedded browser's AI access and interaction choices with the other skills. |
 | **Application management** | List open application windows and their position and size. |

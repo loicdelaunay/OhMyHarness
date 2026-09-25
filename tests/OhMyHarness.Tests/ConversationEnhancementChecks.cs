@@ -48,6 +48,17 @@ static class ConversationEnhancementChecks
             check(!chat.IsFavorite && await db.Messages.AnyAsync(m => m.ChatId == chat.Id), "Favoris : migration conserve l’historique et initialise sans favori");
             chat.IsFavorite = true; await db.SaveChangesAsync();
             check(!db.Database.HasPendingModelChanges(), "Favoris : snapshot EF concorde avec le modèle");
+            await migrator.MigrateAsync("20260924173755_ConversationFavorites");
+            await db.Database.MigrateAsync();
+            db.ChangeTracker.Clear();
+            chat = await db.Chats.SingleAsync(c => c.Id == chat.Id);
+            check(!chat.IsArchived && chat.IsFavorite && await db.Messages.AnyAsync(m => m.ChatId == chat.Id),
+                "Archive : migration conserve les favoris et messages, conversations existantes actives");
+            chat.IsArchived = true; await db.SaveChangesAsync();
+            await using (var reopened = new HarnessDb(database))
+                check(await reopened.Chats.AnyAsync(c => c.Id == chat.Id && c.IsArchived), "Archive : état conservé après réouverture");
+            chat.IsArchived = false; await db.SaveChangesAsync();
+            check(!db.Database.HasPendingModelChanges(), "Archive : snapshot EF concorde avec le modèle");
             var provider = await db.Providers.FirstAsync();
             provider.BaseUrl = "https://naming.example/v1";
             var state = await db.States.SingleAsync();

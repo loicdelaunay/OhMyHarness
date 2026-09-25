@@ -118,15 +118,16 @@ public sealed partial class MainWindow
             for(int i=0;i<VisualTreeHelper.GetChildrenCount(node);i++)if(Find(VisualTreeHelper.GetChild(node,i)) is {} child)return child;
             return null;
         }
-        foreach(var row in chats.Items.OfType<Chat>())
+        foreach(var list in new[]{chats,archivedChats})
+        foreach(var row in list.Items.OfType<Chat>())
         {
-            if(chats.ContainerFromItem(row) is not ListViewItem container || Find(container) is not {} panel)continue;
+            if(list.ContainerFromItem(row) is not ListViewItem container || Find(container) is not {} panel)continue;
             panel.Children.Clear();
             foreach(var child in subagentViews.Values.Where(x=>x.ChatId==row.Id && x.Status=="running"))
             {
                 var button=new Button {Content=ChildCard(child, true),Margin=new Thickness(0),FontSize=11,HorizontalAlignment=HorizontalAlignment.Stretch,HorizontalContentAlignment=HorizontalAlignment.Stretch,Padding=new Thickness(8),CornerRadius=new(6),BorderThickness=new(0),Background=selectedSubagent==child.Id ? FluentDesign.Card : new SolidColorBrush(Microsoft.UI.Colors.Transparent)};
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, child.Name + ", " + ChildActivity(child));
-                button.Click+=async(_,e)=>{if(chat?.Id!=row.Id){var previousLoading=loading;loading=true;chats.SelectedItem=row;loading=previousLoading;await SelectChat();}OpenSubagent(child.Id);};panel.Children.Add(button);
+                button.Click+=async(_,e)=>{if(chat?.Id!=row.Id){var previousLoading=loading;loading=true;list.SelectedItem=row;loading=previousLoading;await SelectChat();}OpenSubagent(child.Id);};panel.Children.Add(button);
             }
             if (panel.Parent is Border group) group.Visibility = panel.Children.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         }

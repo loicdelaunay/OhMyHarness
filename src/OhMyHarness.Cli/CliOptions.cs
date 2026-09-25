@@ -2,6 +2,7 @@ namespace OhMyHarness.Cli;
 
 public sealed class CliOptions
 {
+    public const string CurrentVersion = OhMyHarness.Core.GitHubUpdates.CurrentVersion;
     public string? Directory { get; set; }
     public string? Database { get; set; }
     public string Prompt { get; set; } = "";
@@ -51,8 +52,8 @@ public sealed class CliOptions
         static int Positive(string text) => int.TryParse(text, out int value) && value > 0 ? value : throw new ArgumentException("Expected a positive numeric ID.");
     }
 
-    public const string HelpText = """
-    OhMyHarness CLI 1.13.0
+    public static readonly string HelpText = $"""
+    OhMyHarness CLI {CurrentVersion}
     Your portable AI workspace, in the terminal.
 
       omh [project-folder]                       Interactive terminal interface

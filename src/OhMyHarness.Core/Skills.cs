@@ -69,8 +69,8 @@ public static class Skills
             if (hasBrowser)
             {
                 prompt += "\n" + (isFr
-                    ? "Le navigateur web intégré est autorisé. Tu as accès aux outils 'browse' (pour ouvrir une URL HTTPS et lire sa page) et 'read_page' (pour relire la page actuelle). Utilise le navigateur dès que des informations en ligne ou récentes sont nécessaires. Cite les URLs consultées et distingue les faits des déductions."
-                    : "The integrated web browser is enabled. You have access to 'browse' (to open an HTTPS URL and read its page) and 'read_page' (to re-read the current page). Use the browser when current information is needed. Cite the URLs actually consulted and distinguish facts from inferences.");
+                    ? "Le navigateur web intégré est autorisé. Utilise 'browser_tabs' pour lister les onglets de cette conversation, 'browser_tab_new' pour ouvrir un onglet, 'browser_tab_select' pour choisir l'onglet courant et 'browser_tab_close' pour le fermer. 'browse' ouvre une URL dans l'onglet courant et 'read_page' relit sa page. Cite les URLs consultées et distingue les faits des déductions."
+                    : "The integrated web browser is enabled. Use 'browser_tabs' to list this conversation's tabs, 'browser_tab_new' to open a tab, 'browser_tab_select' to set the current tab, and 'browser_tab_close' to close it. 'browse' navigates in the current tab and 'read_page' rereads it. Cite consulted URLs and distinguish facts from inferences.");
             }
             else
             {

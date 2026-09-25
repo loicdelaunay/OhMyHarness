@@ -105,7 +105,7 @@ public sealed partial class TerminalUi
     {
         var p = appearance.Palette;
         TerminalLogo.Draw(canvas, left, 1, p);
-        string title = BrandingAssets.DisplayName(FeatureSettings.Read(workspace?.State.FeaturesJson ?? "{}").ApplicationName) + " CLI 1.13.0";
+        string title = BrandingAssets.DisplayName(FeatureSettings.Read(workspace?.State.FeaturesJson ?? "{}").ApplicationName) + " CLI " + CliOptions.CurrentVersion;
         int textLeft = left + TerminalLogo.Width + 2, textWidth = width - TerminalLogo.Width - 2;
         canvas.Write(textLeft, 1, title, p.Highlight, textWidth);
         int brandLeft = textLeft + TerminalText.Width(title) + 3;

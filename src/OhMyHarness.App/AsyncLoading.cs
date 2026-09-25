@@ -123,7 +123,7 @@ public sealed partial class MainWindow
         var revision = ++conversationLoadRevision;
         selectedSubagent = null; childPanel = null;
         SaveConversationDraft();
-        var selected = chats.SelectedItem as Chat;
+        var selected = (chats.SelectedItem ?? archivedChats.SelectedItem) as Chat;
         chat = selected; state.ChatId = selected?.Id;
         project = projects.SelectedItem is Project owner && (selected == null || owner.Id == selected.ProjectId)
             ? selected == null ? owner : ProjectResources.Effective(selected, owner)

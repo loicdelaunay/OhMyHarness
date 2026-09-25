@@ -1,6 +1,7 @@
 using OhMyHarness.Core;
 using SkiaSharp;
 using System.Text;
+using System.IO.Compression;
 using System.Text.Json.Nodes;
 using System.Xml.Linq;
 
@@ -50,6 +51,30 @@ static class AssetChecks
             using(var image=SKBitmap.Decode(AssetRenderer.Export(path,"png")))check(image.GetPixel(50,50).Red==255 && image.GetPixel(50,50).Blue==255,"Arbitrary SVG curve paths render");
             foreach(string format in new[]{"svg","png","webp","jpeg","pdf"})
             {var file=await store.ExportAsync(doc,format,false,"#FFFFFF",1,default);check(File.Exists(file)&&new FileInfo(file).Length>10,"Export saved safely: "+format);}
+            var sprite=await store.CreateAsync("Pixel animation",32,32,"none",4,default);
+            sprite=await store.UpdateAsync(sprite.Id,sprite.Revision,d=>AssetTools.Edit(d,new JsonArray(
+                new JsonObject{["action"]="pixel_rect",["layer_id"]="layer-1",["x"]=1,["y"]=2,["width"]=2,["height"]=2,["color"]="#FF0000"},
+                new JsonObject{["action"]="frame_add",["frame_id"]="step-1",["duration_ms"]=80},
+                new JsonObject{["action"]="frame_add",["frame_id"]="step-2",["source_frame_id"]="step-1",["duration_ms"]=140},
+                new JsonObject{["action"]="pixel",["frame_id"]="step-2",["layer_id"]="layer-1",["x"]=1,["y"]=2,["color"]="#0000FF"})),default);
+            check(sprite.PixelSize==4&&sprite.Frames.Count==2&&sprite.Frames[1].Layers[0].Pixels.Count==4,"Pixel grid and editable animation frames persist");
+            using(var first=SKBitmap.Decode(AssetRenderer.Preview(sprite,64,false,0)))
+            using(var second=SKBitmap.Decode(AssetRenderer.Preview(sprite,64,false,1)))
+                check(first.GetPixel(5,9).Red==255&&second.GetPixel(5,9).Blue==255,"Frame preview renders hard-edged pixel changes");
+            var guided=JsonNode.Parse(AssetGuides.Describe(sprite,"step-1"))!;
+            check(guided["center"]!["x"]!.GetValue<double>()==16&&guided["bounds"]![0]!["width"]!.GetValue<int>()==8,"Numeric guides expose pixel bounding box and center");
+            var withGuides=AssetRenderer.Preview(sprite,64,true,0,true,true);
+            check(!withGuides.SequenceEqual(AssetRenderer.Preview(sprite,64,true,0)),"Alignment guides and grid appear only in preview");
+            using(var clearGuide=SKBitmap.Decode(AssetRenderer.Preview(sprite,64,false,0,true)))check(clearGuide.GetPixel(0,0).Alpha==0,"Guide capture keeps transparent canvas transparent");
+            var animatedSvg=XDocument.Parse(Encoding.UTF8.GetString(AssetRenderer.Export(sprite,"svg-animated")));
+            check(animatedSvg.Descendants(ns+"animate").Count()==2&&animatedSvg.Descendants(ns+"g").Any(x=>(string?)x.Attribute("id")=="frame-2"),"Animated SVG contains timed frame groups");
+            var gif=AssetRenderer.Export(sprite,"gif");
+            using(var codec=SKCodec.Create(new MemoryStream(gif)))check(Encoding.ASCII.GetString(gif,0,6)=="GIF89a"&&codec.FrameCount==2,"GIF decodes as a two-frame animation");
+            var sequence=AssetRenderer.Export(sprite,"frames");
+            using(var zip=new ZipArchive(new MemoryStream(sequence),ZipArchiveMode.Read))check(zip.Entries.Count==3&&zip.GetEntry("frames.json")!=null&&zip.GetEntry("frame-002.png")!=null,"PNG sequence export includes frame files and timing manifest");
+            await Throws<ArgumentException>(()=>Task.Run(()=>AssetRenderer.Export(new(){Width=33,Height=32,PixelSize=4},"png")),"Pixel size must divide canvas");
+            await Throws<ArgumentException>(()=>Task.Run(()=>AssetRenderer.Export(sprite,"gif",scale:2)),"GIF rejects unsupported scaling");
+            await Throws<ArgumentException>(()=>Task.Run(()=>AssetRenderer.Export(new(){Width=4096,Height=4096,Frames=[new(){Id="a",Layers=[new()]},new(){Id="b",Layers=[new()]},new(){Id="c",Layers=[new()]},new(){Id="d",Layers=[new()]}]},"frames",scale:2)),"Frame sequence rejects excessive total pixels");
             using var run=new ConversationSession(new(){Id=1,ExecutionMode="execute"},new(),new(){SupportsImages=true},new(){EnabledSkills=AssetTools.SkillId},"",[],db);
             string enabled=AssetTools.SkillId;bool allowed=true;int asks=0;
             Task<AssetTools.Result> Tool(string name,JsonObject args)=>AssetTools.CallAsync(run,name,args,_=>Task.FromResult(enabled),(_,_,_,_)=>{asks++;return Task.FromResult(allowed);},default);
@@ -63,7 +88,7 @@ static class AssetChecks
             await Throws<UnauthorizedAccessException>(()=>Tool("asset_create",new(){["name"]="blocked"}),"Plan mode blocks canvas writes");
             check((await Tool("asset_inspect",new(){["asset_id"]=doc.Id})).Text.Contains("Test"),"Plan mode permits asset inspection");
             run.Chat.SandboxEnabled=true;await Throws<UnauthorizedAccessException>(()=>Tool("asset_inspect",new(){["asset_id"]=doc.Id}),"Offline sandbox cannot access host assets");
-            var tools=new JsonArray();AssetTools.AddDefinitions(tools,AssetTools.SkillId);check(tools.Count==5,"Asset skill exposes five shared GUI/CLI tools");
+            var tools=new JsonArray();AssetTools.AddDefinitions(tools,AssetTools.SkillId);check(tools.Count==6,"Asset skill exposes six shared GUI/CLI tools");
             var none=new JsonArray();AssetTools.AddDefinitions(none,"");check(none.Count==0,"Disabled skill hides all asset definitions");
         }
         finally {Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();Directory.Delete(root,true);}

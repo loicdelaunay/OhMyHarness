@@ -27,13 +27,17 @@ public sealed partial class MainWindow : Window
     readonly Border browserPanel = new() { Visibility = Visibility.Collapsed, Background = FluentDesign.Resource("LayerFillColorDefaultBrush"), CornerRadius = new(12), Margin = new(0, 12, 12, 12) };
     readonly TextBox address = new() { PlaceholderText = "https://…", HorizontalAlignment = HorizontalAlignment.Stretch };
     readonly ComboBox projects = new() { HorizontalAlignment = HorizontalAlignment.Stretch };
-    readonly ListView chats = new() { SelectionMode = ListViewSelectionMode.Single };
+    readonly ListView chats = new() { SelectionMode = ListViewSelectionMode.Extended };
+    readonly ListView archivedChats = new() { SelectionMode = ListViewSelectionMode.Extended, MaxHeight = 240 };
+    readonly Expander archiveExpander = new() { HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    readonly TextBlock archiveHeading = Label("Archive", 12);
     readonly TextBox chatSearch = new() { Height = 36, CornerRadius = new CornerRadius(8), VerticalContentAlignment = VerticalAlignment.Center };
     ListViewItem? hoveredConversationContainer;
     readonly TextBlock chatCount = Label("0", 11);
     readonly TextBlock chatEmpty = Label("Aucune conversation", 13);
     List<Chat> allProjectChats = [];
     readonly ObservableCollection<Chat> visibleProjectChats = [];
+    readonly ObservableCollection<Chat> visibleArchivedChats = [];
     readonly ComboBox providers = new() { MinWidth = 110, MaxWidth = 145 };
     readonly TextBlock modelLabel = Label(T("Configurez votre fournisseur"), 12);
     readonly TextBlock title = new() { Text = T("Nouvelle conversation"), Tag = "Nouvelle conversation", FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Brush(230, 235, 245), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -122,7 +126,7 @@ public sealed partial class MainWindow : Window
         ObserveTextZoom(root);
         root.Loaded += async (_, _) => await Guard(InitializeAsync);
         root.SizeChanged += (_, _) => ResizeLayout();
-        Closed += (_, _) => { conversationLoad?.Cancel(); statusPulseTimer.Stop(); settingsWindow?.Close(); foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); foreach (var id in conversationBrowsers.Keys.ToArray()) CloseConversationBrowser(id); terminals.Dispose(); StopOpenCodeProcesses(); http.Dispose(); };
+        Closed += (_, _) => { conversationLoad?.Cancel(); statusPulseTimer.Stop(); settingsWindow?.Close(); foreach (var run in conversationRuns.Values) run.Cancellation.Cancel(); foreach (var id in conversationBrowsers.Keys.Select(key => key.ChatId).Distinct().ToArray()) CloseConversationBrowser(id); terminals.Dispose(); StopOpenCodeProcesses(); http.Dispose(); };
     }
     void BuildSidebar()
     {
@@ -177,7 +181,22 @@ public sealed partial class MainWindow : Window
         chatHeader.Children.Add(chatHeading); chatHeader.Children.Add(searchBox);
         Grid.SetRow(chatHeader, 3); panel.Children.Add(chatHeader);
         var conversationArea = new Grid();
+        conversationArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        conversationArea.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         conversationArea.Children.Add(chats);
+        archiveExpander.Header = archiveHeading;
+        archiveExpander.Content = archivedChats;
+        archiveExpander.Margin = new Thickness(0, 8, 0, 0);
+        Grid.SetRow(archiveExpander, 1); conversationArea.Children.Add(archiveExpander);
+        void SizeConversationLists()
+        {
+            var available = conversationArea.ActualHeight;
+            if (available <= 0) return;
+            archivedChats.MaxHeight = Math.Min(240, Math.Max(80, available * 0.45));
+            chats.MaxHeight = Math.Max(100, available - archiveExpander.ActualHeight - 8);
+        }
+        conversationArea.SizeChanged += (_, _) => SizeConversationLists();
+        archiveExpander.SizeChanged += (_, _) => SizeConversationLists();
         chatEmpty.Foreground = FluentDesign.Secondary;
         chatEmpty.TextAlignment = TextAlignment.Center;
         chatEmpty.HorizontalAlignment = HorizontalAlignment.Center;
@@ -186,6 +205,7 @@ public sealed partial class MainWindow : Window
         conversationArea.Children.Add(chatEmpty);
         Grid.SetRow(conversationArea, 4); panel.Children.Add(conversationArea);
         chats.ItemsSource = visibleProjectChats;
+        archivedChats.ItemsSource = visibleArchivedChats;
         chats.ItemContainerStyle = new Style(typeof(ListViewItem));
         chats.ItemContainerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
         chats.ItemContainerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
@@ -218,7 +238,9 @@ public sealed partial class MainWindow : Window
                 </Border>
             </DataTemplate>
             """);
-        chats.ContainerContentChanging += (_, e) =>
+        archivedChats.ItemContainerStyle = chats.ItemContainerStyle;
+        archivedChats.ItemTemplate = chats.ItemTemplate;
+        void WireConversationContainer(ListView list) => list.ContainerContentChanging += (_, e) =>
         {
             if (e.ItemContainer is ListViewItem container)
             {
@@ -247,6 +269,8 @@ public sealed partial class MainWindow : Window
             if (!e.InRecycleQueue) DispatcherQueue.TryEnqueue(RefreshConversationProgress);
 #endif
         };
+        WireConversationContainer(chats);
+        WireConversationContainer(archivedChats);
         var foot = new StackPanel { Spacing = 12 };
         var settingsButton = Action(T("Réglages"), Settings, true);
         FluentDesign.IconButton(settingsButton, "\uE713", T("Réglages"));
@@ -256,32 +280,13 @@ public sealed partial class MainWindow : Window
         foot.Children.Add(settingsButton);
         Grid.SetRow(foot, 5); panel.Children.Add(foot);
         shell.Pane = panel;
-        idleOnly.AddRange([projects, chats, providers, modelSelector, refreshModelsBtn, thinkingSelector]);
+        idleOnly.AddRange([projects, chats, archivedChats, providers, modelSelector, refreshModelsBtn, thinkingSelector]);
         projects.SelectionChanged += async (_, _) => { if (!loading) await Guard(SelectProject); };
         chatSearch.TextChanged += (_, _) => { if (!loading) ApplyChatSearch(chat?.Id, scrollToFirst: true); };
-        chats.SelectionChanged += async (_, _) => { if (!loading) { RefreshConversationProgress(); await Guard(SelectChat); } };
-        chats.RightTapped += async (s, e) =>
-        {
-            var targetChat = GetChatFromOriginalSource(e.OriginalSource);
-            if (targetChat == null) return;
-            chats.SelectedItem = targetChat;
-
-            var menu = new MenuFlyout();
-            var renameItem = new MenuFlyoutItem { Text = T("Renommer") };
-            renameItem.Click += async (_, _) => await Guard(() => RenameChatAsync(targetChat));
-            var deleteItem = new MenuFlyoutItem { Text = T("Supprimer…"), IsEnabled = !conversationRuns.ContainsKey(targetChat.Id) };
-            deleteItem.Click += async (_, _) => await Guard(() => DeleteChatAsync(targetChat));
-
-            menu.Items.Add(renameItem);
-            var autoName = new MenuFlyoutItem { Text = WorkflowText("Nommer avec l’IA", "Name with AI"), Icon = new FontIcon { Glyph = "\uE8D4" } };
-            autoName.Click += async (_, _) => await Guard(() => AutoNameAsync(targetChat.Id));
-            menu.Items.Add(autoName);
-            var favoriteItem = new MenuFlyoutItem { Text = WorkflowText(targetChat.IsFavorite ? "Retirer des favoris" : "Ajouter aux favoris", targetChat.IsFavorite ? "Remove favorite" : "Add favorite"), Icon = new FontIcon { Glyph = "\uE734" } };
-            favoriteItem.Click += async (_, _) => await Guard(() => ToggleFavoriteAsync(targetChat));
-            menu.Items.Add(favoriteItem);
-            menu.Items.Add(deleteItem);
-            menu.ShowAt(chats, e.GetPosition(chats));
-        };
+        chats.SelectionChanged += async (_, _) => await Guard(() => ConversationSelectionChangedAsync(chats));
+        archivedChats.SelectionChanged += async (_, _) => await Guard(() => ConversationSelectionChangedAsync(archivedChats));
+        chats.RightTapped += (_, e) => OpenConversationMenu(chats, e);
+        archivedChats.RightTapped += (_, e) => OpenConversationMenu(archivedChats, e);
         providers.SelectionChanged += async (_, _) =>
         {
             if (loading) return;
@@ -892,12 +897,14 @@ public sealed partial class MainWindow : Window
         public void SetDuration(double seconds)
         {
             Duration.Text = seconds > 0 ? (UiText.Language == "en" ? "Duration: " : "Durée : ") + (seconds >= 60 ? $"{(int)(seconds / 60)} min {seconds % 60:0.#} s" : $"{seconds:0.#} s") : "";
-            Duration.Visibility = isHovered && seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            // Keep the footer in layout after completion; hover must not resize the message.
+            Duration.Visibility = seconds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            Duration.Opacity = isHovered && seconds > 0 ? 1 : 0;
         }
         public void SetHovered(bool hovered)
         {
             isHovered = hovered;
-            Duration.Visibility = hovered && Duration.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            Duration.Opacity = hovered && Duration.Text.Length > 0 ? 1 : 0;
         }
         public void Flush()
         {
@@ -1451,14 +1458,32 @@ public sealed partial class MainWindow : Window
         await db.SaveChangesAsync();
         await SelectProject();
     }
-    async Task DeleteChatAsync(Chat target)
+    async Task ArchiveChatsAsync(IReadOnlyList<Chat> targets, bool archive)
     {
-        if (!await Confirm(T("Supprimer cette conversation et ses images ?"))) return;
-        if (conversationRuns.ContainsKey(target.Id)) throw new InvalidOperationException(T("Arrêtez cette conversation avant de la supprimer."));
-        await terminals.RemoveChatAsync(target.Id);
-        CloseConversationBrowser(target.Id);
-        db.Chats.Remove(target);
-        if (state.ChatId == target.Id) state.ChatId = null;
+        foreach (var target in targets) target.IsArchived = archive;
+        await db.SaveChangesAsync();
+        ApplyChatSearch(chat?.Id);
+    }
+    Task DeleteChatAsync(Chat target) => DeleteChatsAsync([target]);
+    async Task DeleteChatsAsync(IReadOnlyList<Chat> targets)
+    {
+        if (targets.Count == 0) return;
+        if (targets.Any(target => conversationRuns.ContainsKey(target.Id)))
+            throw new InvalidOperationException(T("Arrêtez les conversations en cours avant de les supprimer."));
+        var question = targets.Count == 1
+            ? WorkflowText("Supprimer cette conversation et ses images ?", "Delete this conversation and its images?")
+            : WorkflowText($"Supprimer {targets.Count} conversations et leurs images ?", $"Delete {targets.Count} conversations and their images?");
+        if (!await Confirm(question)) return;
+        foreach (var target in targets)
+        {
+            await terminals.RemoveChatAsync(target.Id);
+            CloseConversationBrowser(target.Id);
+            conversationDrafts.Remove(target.Id);
+            conversationHistory.Remove(target.Id);
+            conversationStatuses.Remove(target.Id);
+            if (state.ChatId == target.Id) state.ChatId = null;
+        }
+        db.Chats.RemoveRange(targets);
         await db.SaveChangesAsync();
         await SelectProject();
     }
@@ -1667,7 +1692,7 @@ public sealed partial class MainWindow : Window
         AppLog.Configure(savedFeatures);
         AppLog.Write(AppLogLevel.Information, "settings.saved");
         if(FeatureSettings.Read(state.FeaturesJson).BrowserMode != previousBrowserMode)
-        { foreach(var id in conversationBrowsers.Keys.ToArray())CloseConversationBrowser(id); ShowBrowserNotice(); }
+        { foreach(var id in conversationBrowsers.Keys.Select(key => key.ChatId).Distinct().ToArray())CloseConversationBrowser(id); ShowBrowserNotice(); }
         state.Language = language.SelectedIndex == 1 ? "en" : "fr";
         state.AutoContinue = autoContinue.IsOn;
         state.ShowReasoningDetails = showReasoning.IsChecked == true;
@@ -1784,17 +1809,17 @@ public sealed partial class MainWindow : Window
     {
         if (FeatureSettings.Read(state.FeaturesJson).BrowserMode != "embedded") throw new InvalidOperationException("Utilisez Chrome DevTools MCP ou activez WebView2 dans les réglages.");
         var owner = CurrentBrowser;
-        try { await (owner.Initialization ??= InitializeConversationBrowser(owner)).WaitAsync(TimeSpan.FromSeconds(30)); browserHost.Children.Remove(browserNotice); }
+        try { await (owner.Initialization ??= InitializeConversationBrowser(owner)).WaitAsync(TimeSpan.FromSeconds(30)); SyncBrowserPresentation(); }
         catch (Exception ex)
         {
-            CloseConversationBrowser(owner.Id);
+            CloseBrowserTab(owner.Id, owner.TabId);
             ShowBrowserNotice("Navigateur indisponible. Les autres outils restent disponibles. / Browser unavailable; other tools remain available.");
             throw new IOException("Navigateur intégré indisponible. Vérifiez le runtime Edge WebView2 sous Windows ou WebKit sous macOS, ainsi que les règles de sécurité de votre poste. / Embedded browser unavailable; check the WebView runtime and device security policy.",ex);
         }
     }
     async Task InitializeConversationBrowser(ConversationBrowser owner)
     {
-        using var scope = BrowserScope(owner.Id);
+        using var scope = BrowserScope(owner.Id, owner.TabId);
         if (owner.Ready) return;
 #if WINDOWS
         var environment = await CoreWebView2Environment.CreateWithOptionsAsync(null, Path.Combine(HarnessDb.DataDirectory, "WebView2", "chat-" + owner.Id), null);
@@ -1826,19 +1851,19 @@ public sealed partial class MainWindow : Window
 #endif
         {
             owner.Ready = false;
-            DispatcherQueue.TryEnqueue(() => { CloseConversationBrowser(owner.Id); if(chat?.Id==owner.Id)ShowBrowserNotice("Le processus du navigateur s’est arrêté. Utilisez → pour réessayer, ou choisissez Chrome MCP dans les réglages. / Browser process stopped."); });
+            DispatcherQueue.TryEnqueue(() => { CloseBrowserTab(owner.Id, owner.TabId); if(chat?.Id==owner.Id)ShowBrowserNotice("Le processus du navigateur s’est arrêté. Utilisez → pour réessayer, ou choisissez Chrome MCP dans les réglages. / Browser process stopped."); });
         };
         owner.View.CoreWebView2.NavigationStarting += (_, e) =>
         {
-            using var eventScope = BrowserScope(owner.Id);
+            using var eventScope = BrowserScope(owner.Id, owner.TabId);
             if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.IsFile)
             {
                 e.Cancel = true;
-                DispatcherQueue.TryEnqueue(async () => { using var callbackScope = BrowserScope(owner.Id); await Guard(async () => { await OpenLocalPreviewAsync(uri.LocalPath, CancellationToken.None); }); });
+                DispatcherQueue.TryEnqueue(async () => { using var callbackScope = BrowserScope(owner.Id, owner.TabId); await Guard(async () => { await OpenLocalPreviewAsync(uri.LocalPath, CancellationToken.None); }); });
             }
             else if (uri == null || uri.Scheme is not ("https" or "http" or "about")) e.Cancel = true;
         };
-        owner.View.CoreWebView2.NewWindowRequested += (_, e) => { e.Handled = true; DispatcherQueue.TryEnqueue(async () => { using var callbackScope = BrowserScope(owner.Id); await Guard(async () => { await NavigateAsync(e.Uri, CancellationToken.None); }); }); };
+        owner.View.CoreWebView2.NewWindowRequested += (_, e) => { e.Handled = true; var target = e.Uri; DispatcherQueue.TryEnqueue(async () => { await Guard(async () => { var opened = NewBrowserTab(owner.Id); using var callbackScope = BrowserScope(owner.Id, opened.TabId); await NavigateAsync(target, CancellationToken.None); }); }); };
 #if WINDOWS
         ConfigureLocalPreview();
 #endif
@@ -1854,7 +1879,8 @@ public sealed partial class MainWindow : Window
             {
                 try { owner.Address = LocalPreview.ResolveResource(owner.PreviewFolder, displayed.AbsolutePath); } catch { }
             }
-            if (chat?.Id == owner.Id) address.Text = owner.Address;
+            if (chat?.Id == owner.Id && SelectedBrowserTab(owner.Id) == owner.TabId) address.Text = owner.Address;
+            SyncWebTabs();
         };
         owner.Ready = true;
     }
@@ -2007,6 +2033,34 @@ public sealed partial class MainWindow : Window
                 if (string.IsNullOrWhiteSpace(url))
                     return T("Erreur : une URL est requise pour naviguer.");
                 return await NavigateAsync(url, ct);
+
+            case "browser_tabs":
+            case "browser_tab_new":
+            case "browser_tab_select":
+            case "browser_tab_close":
+                if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills) || FeatureSettings.Read(state.FeaturesJson).BrowserMode != "embedded")
+                    return T("Outil navigateur non autorisé.");
+                var tabChatId = run.Chat.Id;
+                if (name == "browser_tab_new")
+                {
+                    var opened = NewBrowserTab(tabChatId);
+                    var tabUrl = argsObj["url"]?.GetValue<string>();
+                    if (!string.IsNullOrWhiteSpace(tabUrl))
+                    {
+                        using var openedScope = BrowserScope(tabChatId, opened.TabId);
+                        await NavigateAsync(tabUrl, ct);
+                    }
+                }
+                else if (name is "browser_tab_select" or "browser_tab_close")
+                {
+                    var tabId = argsObj["tab_id"]?.GetValue<string>() ?? "";
+                    if (!conversationBrowsers.ContainsKey((tabChatId, tabId))) return T("Onglet Web introuvable.");
+                    if (name == "browser_tab_select") SelectBrowserTab(tabChatId, tabId);
+                    else CloseBrowserTab(tabChatId, tabId);
+                }
+                else if (!conversationBrowsers.Keys.Any(key => key.ChatId == tabChatId)) NewBrowserTab(tabChatId);
+                return JsonSerializer.Serialize(new { selected_tab_id = SelectedBrowserTab(tabChatId), tabs = conversationBrowsers.Values
+                    .Where(item => item.Id == tabChatId).Select(item => new { tab_id = item.TabId, title = BrowserTabTitle(item), url = item.Address, selected = item.TabId == SelectedBrowserTab(tabChatId) }) });
 
             case "read_page":
                 if (!Skills.Enabled(state.EnabledSkills, "web") || !BrowserSkillAccess.Enabled(state.EnabledSkills))

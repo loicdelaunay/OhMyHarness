@@ -9,7 +9,7 @@ public static class AgentPolicy
     public static bool ReadOnly(string mode) => Mode(mode) == "plan";
     // An allow-list is deliberate: new tools, MCP and arbitrary shell commands cannot silently bypass Plan.
     public static bool Allowed(string mode, string tool) => !ReadOnly(mode) || tool is
-        "asset_inspect" or "asset_capture" or "memory_search" or "memory_read" or
+        "asset_inspect" or "asset_capture" or "asset_guides" or "browser_tabs" or "memory_search" or "memory_read" or
         "list_images" or "analyze_image" or "rag_search" or "rag_sources" or "rag_read" or "list_sources" or "read_source" or "glob_sources" or "grep_sources" or "git_changes" or
         "read_page" or "inspect_dom" or "python_info" or "keyboard_keys" or "desktop_applications" or "desktop_screens" or "desktop_screenshot" or "browser_screenshot" or
         "load_skill" or "read_skill_resource" or "skill_locations" or "delegate_tasks" or "todowrite" or "question" or "list_terminals" or "read_terminal" or "wait_terminal";

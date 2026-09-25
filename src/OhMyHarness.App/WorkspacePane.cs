@@ -236,13 +236,26 @@ public sealed partial class MainWindow
         ToolTipService.SetToolTip(actions.Children[0], T("Agrandir / restaurer le panneau"));
         Grid.SetColumn(actions, 1); toolbar.Children.Add(actions); container.Children.Add(toolbar);
         var web = new Grid { RowSpacing = 8 };
-        web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
+        web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = GridLength.Auto }); web.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) });
         var nav = new Grid { ColumnSpacing = 4 }; nav.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) }); nav.ColumnDefinitions.Add(new() { Width = GridLength.Auto }); nav.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         nav.Children.Add(address);
         var go = Action("→", async () => { await NavigateAsync(address.Text, CancellationToken.None); }); Grid.SetColumn(go, 1); nav.Children.Add(go);
         var local = Action("📂", PickPreviewAsync, true); Grid.SetColumn(local, 2); nav.Children.Add(local); ToolTipService.SetToolTip(local, T("Ouvrir un fichier local"));
         address.KeyDown += async (_, e) => { if (e.Key == Windows.System.VirtualKey.Enter) { e.Handled = true; await Guard(async () => { await NavigateAsync(address.Text, CancellationToken.None); }); } };
-        Grid.SetRow(nav, 0); web.Children.Add(nav); Grid.SetRow(browserHost, 1); web.Children.Add(browserHost);
+        Grid.SetRow(nav, 0); web.Children.Add(nav);
+        webTabs.Height = 44;
+        webTabs.AddTabButtonClick += (_, _) => { NewBrowserTab(chat?.Id ?? 0); };
+        webTabs.SelectionChanged += (_, _) =>
+        {
+            if (populatingWebTabs || webTabs.SelectedItem is not TabViewItem item || item.Tag is not string tabId) return;
+            SelectBrowserTab(chat?.Id ?? 0, tabId);
+        };
+        webTabs.TabCloseRequested += (_, e) =>
+        {
+            if (e.Tab.Tag is string tabId) CloseBrowserTab(chat?.Id ?? 0, tabId);
+        };
+        Grid.SetRow(webTabs, 1); web.Children.Add(webTabs);
+        Grid.SetRow(browserHost, 2); web.Children.Add(browserHost);
         idleOnly.Add(address); idleOnly.Add(go);
         toolTabs.AddTab("Web", web);
 
@@ -331,7 +344,10 @@ public sealed partial class MainWindow
         // their own revision so a new conversation need not wait for an old tool.
         switch (toolTabs.SelectedIndex)
         {
-            case 0: if (!conversationBrowsers.TryGetValue(chat?.Id ?? 0, out var shown) || !shown.Ready) ShowBrowserNotice(); break;
+            case 0:
+                var browserChatId = chat?.Id ?? 0;
+                if (!conversationBrowsers.TryGetValue((browserChatId, SelectedBrowserTab(browserChatId)), out var shown) || !shown.Ready) ShowBrowserNotice();
+                break;
             case 1:
                 RefreshTerminals();
                 break;
@@ -549,7 +565,7 @@ public sealed partial class MainWindow
         core.FrameNavigationStarting += (_, e) => { if (Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri) && uri.IsFile) e.Cancel = true; };
         core.WebResourceRequested += async (_, e) =>
         {
-            using var scope = BrowserScope(owner.Id);
+            using var scope = BrowserScope(owner.Id, owner.TabId);
             using var deferral = e.GetDeferral();
             try
             {
@@ -1443,6 +1459,13 @@ public sealed partial class MainWindow
         if (Skills.Enabled(state.EnabledSkills, "keyboard_control"))
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
+        if (Skills.Enabled(state.EnabledSkills, "web") && BrowserSkillAccess.Enabled(state.EnabledSkills) && FeatureSettings.Read(state.FeaturesJson).BrowserMode == "embedded")
+        {
+            Add("browser_tabs", "Lists all browser tabs in this conversation, with their IDs, URLs and selected state. Read-only.", []);
+            Add("browser_tab_new", "Opens a new browser tab in this conversation and selects it. Optional HTTPS URL to navigate immediately.", new() { ["url"] = StringProperty("Optional HTTP(S) URL") });
+            Add("browser_tab_select", "Selects an existing browser tab by its ID so subsequent browse, read_page, DOM and screenshot tools use that tab.", new() { ["tab_id"] = StringProperty("Tab ID from browser_tabs") }, "tab_id");
+            Add("browser_tab_close", "Closes one browser tab by ID. If it is the last tab, a blank tab replaces it.", new() { ["tab_id"] = StringProperty("Tab ID from browser_tabs") }, "tab_id");
+        }
         RagTools.AddDefinitions(definitions, project.GetSourceFolders().Count > 0, state.EnabledSkills);
         AssetTools.AddDefinitions(definitions, state.EnabledSkills);
         VisionBridge.AddDefinitions(definitions, state.EnabledSkills);

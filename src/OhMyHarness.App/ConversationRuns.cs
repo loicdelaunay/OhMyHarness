@@ -76,8 +76,11 @@ public sealed partial class MainWindow
     {
         if (FindConversationElement<Border>(container, "conversation-card") is not { } card) return;
         var hover = ReferenceEquals(hoveredConversationContainer, container);
-        card.Background = hover ? FluentDesign.Resource("ConversationHoverFillBrush") : FluentDesign.Card;
-        card.BorderBrush = hover ? FluentDesign.Resource("ConversationHoverStrokeBrush") : FluentDesign.Stroke;
+        var selected = container.Content is Chat selectedChat &&
+            (selectedChat.IsArchived ? archivedChats : chats).SelectedItems.Contains(selectedChat);
+        card.Background = hover || selected ? FluentDesign.Resource("ConversationHoverFillBrush") : FluentDesign.Card;
+        card.BorderBrush = selected ? FluentDesign.Resource("AccentFillColorDefaultBrush") :
+            hover ? FluentDesign.Resource("ConversationHoverStrokeBrush") : FluentDesign.Stroke;
         if (FindConversationElement<Button>(container, "conversation-favorite") is { } favorite && container.Content is Chat item)
         {
             favorite.Opacity = item.IsFavorite || hover ? 1 : 0;
@@ -91,12 +94,13 @@ public sealed partial class MainWindow
     void RefreshConversationProgress()
     {
         RefreshSubagentSidebar();
-        foreach (var item in chats.Items.OfType<Chat>())
+        foreach (var list in new[] { chats, archivedChats })
+        foreach (var item in list.Items.OfType<Chat>())
         {
-            if (chats.ContainerFromItem(item) is not ListViewItem container) continue;
+            if (list.ContainerFromItem(item) is not ListViewItem container) continue;
             RefreshConversationCard(container);
             if (FindConversationElement<Border>(container, "conversation-selection") is { } selection)
-                selection.Visibility = (chats.SelectedItem as Chat)?.Id == item.Id ? Visibility.Visible : Visibility.Collapsed;
+                selection.Visibility = list.SelectedItems.Contains(item) ? Visibility.Visible : Visibility.Collapsed;
             if (FindConversationElement<ProgressBar>(container, "conversation-progress") is { } bar)
             {
                 bar.Visibility = conversationRuns.ContainsKey(item.Id) ? Visibility.Visible : Visibility.Collapsed;

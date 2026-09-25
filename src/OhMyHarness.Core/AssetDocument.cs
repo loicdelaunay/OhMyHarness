@@ -13,8 +13,10 @@ public sealed class AssetDocument
     public int Width { get; set; } = 512;
     public int Height { get; set; } = 512;
     public string Background { get; set; } = "none";
+    public int PixelSize { get; set; } = 1;
     public int Revision { get; set; }
     public List<AssetLayer> Layers { get; set; } = [new()];
+    public List<AssetFrame> Frames { get; set; } = [];
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public AssetDocument Clone() => JsonSerializer.Deserialize<AssetDocument>(JsonSerializer.Serialize(this, Json), Json)!;
     public void Validate()
@@ -22,12 +24,19 @@ public sealed class AssetDocument
         AssetWorkspace.ValidId(Id);
         if (Name.Length is < 1 or > 120 || Width is < 1 or > 4096 || Height is < 1 or > 4096 || (long)Width * Height > 16777216) throw new ArgumentException("Canvas: name 1–120 characters, dimensions 1–4096 pixels.");
         _ = AssetRenderer.Color(Background);
-        if (Layers.Count > 64 || Layers.Select(l => l.Id).Distinct().Count() != Layers.Count || Layers.Sum(l => l.Shapes.Count) > 2000) throw new ArgumentException("Maximum 64 uniquely named layers and 2000 shapes.");
-        foreach (var layer in Layers)
+        if (PixelSize is < 1 or > 64 || Width % PixelSize != 0 || Height % PixelSize != 0) throw new ArgumentException("Pixel size must divide canvas width and height (1–64).");
+        if (Frames.Count > 32 || Frames.Select(f => f.Id).Distinct().Count() != Frames.Count) throw new ArgumentException("Maximum 32 uniquely named frames.");
+        foreach (var frame in Frames) { AssetWorkspace.ValidId(frame.Id); if (frame.DurationMs is < 20 or > 10000) throw new ArgumentException("Frame duration: 20–10000 ms."); }
+        var scenes = new List<List<AssetLayer>> { Layers }; scenes.AddRange(Frames.Select(f => f.Layers));
+        if (scenes.Any(scene => scene.Count > 64 || scene.Select(l => l.Id).Distinct().Count() != scene.Count) || scenes.Sum(scene => scene.Sum(l => l.Shapes.Count)) > 5000 || scenes.Sum(scene => scene.Sum(l => l.Pixels.Count)) > 20000)
+            throw new ArgumentException("Maximum 64 layers per frame, 5000 shapes and 20000 pixels total.");
+        foreach (var layer in scenes.SelectMany(scene => scene))
         {
             AssetWorkspace.ValidId(layer.Id);
-            if (layer.Name.Length > 120 || !double.IsFinite(layer.Opacity) || layer.Opacity is < 0 or > 1 || layer.Shapes.Select(s => s.Id).Distinct().Count() != layer.Shapes.Count) throw new ArgumentException("Invalid layer name, opacity or duplicate shape IDs.");
+            if (layer.Name.Length > 120 || !double.IsFinite(layer.Opacity) || layer.Opacity is < 0 or > 1 || layer.Shapes.Select(s => s.Id).Distinct().Count() != layer.Shapes.Count || layer.Pixels.Select(p => (p.X,p.Y)).Distinct().Count() != layer.Pixels.Count) throw new ArgumentException("Invalid layer name, opacity or duplicate shape/pixel IDs.");
             foreach (var shape in layer.Shapes) shape.Validate();
+            foreach (var pixel in layer.Pixels)
+            { if (pixel.X < 0 || pixel.Y < 0 || pixel.X >= Width / PixelSize || pixel.Y >= Height / PixelSize) throw new ArgumentException("Pixel outside canvas."); _ = AssetRenderer.Color(pixel.Color); }
         }
         if (JsonSerializer.SerializeToUtf8Bytes(this, Json).Length > 2_000_000) throw new ArgumentException("Asset document exceeds 2 MB.");
     }
@@ -39,6 +48,19 @@ public sealed class AssetLayer
     public bool Visible { get; set; } = true;
     public double Opacity { get; set; } = 1;
     public List<AssetShape> Shapes { get; set; } = [];
+    public List<AssetPixel> Pixels { get; set; } = [];
+}
+public sealed class AssetPixel
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public string Color { get; set; } = "#4CC9F0";
+}
+public sealed class AssetFrame
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    public int DurationMs { get; set; } = 120;
+    public List<AssetLayer> Layers { get; set; } = [];
 }
 public sealed class AssetShape
 {
@@ -113,6 +135,11 @@ public static class AssetRenderer
         {
             using var layerPaint = new SKPaint { Color = SKColors.White.WithAlpha((byte)Math.Round(255 * layer.Opacity)) };
             canvas.SaveLayer(layerPaint);
+            foreach (var pixel in layer.Pixels)
+            {
+                using var paint = new SKPaint { Color = Color(pixel.Color), IsAntialias = false };
+                canvas.DrawRect(pixel.X * doc.PixelSize, pixel.Y * doc.PixelSize, doc.PixelSize, doc.PixelSize, paint);
+            }
             foreach (var s in layer.Shapes)
             {
                 canvas.Save(); canvas.RotateDegrees(s.Rotation, s.X, s.Y);
@@ -152,6 +179,12 @@ public static class AssetRenderer
         {
             var group = new XElement(ns + "g", new XAttribute("id", l.Id), new XAttribute("data-name", l.Name), new XAttribute("opacity", N(l.Opacity)));
             if (!l.Visible) group.SetAttributeValue("display", "none");
+            foreach (var pixel in l.Pixels)
+            {
+                var p = new XElement(ns + "rect", new XAttribute("x", pixel.X * doc.PixelSize), new XAttribute("y", pixel.Y * doc.PixelSize),
+                    new XAttribute("width", doc.PixelSize), new XAttribute("height", doc.PixelSize));
+                SetColor(p, "fill", pixel.Color); group.Add(p);
+            }
             foreach (var s in l.Shapes)
             {
                 var e = new XElement(ns + s.Type, new XAttribute("id", l.Id + "--" + s.Id));
@@ -177,7 +210,9 @@ public static class AssetRenderer
     public static byte[] Export(AssetDocument doc, string format, bool transparent = false, string? background = null, float scale = 1)
     {
         doc.Validate(); if (background != null) _ = Color(background);
-        if (format is not ("svg" or "png" or "webp" or "jpeg" or "pdf")) throw new ArgumentException("Formats: svg, png, webp, jpeg, pdf.");
+        if (format is "svg-animated" or "gif" or "frames") return AssetAnimation.Export(doc, format, transparent, background, scale);
+        if (doc.Frames.Count > 0) doc = AssetAnimation.FrameScene(doc, 0);
+        if (format is not ("svg" or "png" or "webp" or "jpeg" or "pdf")) throw new ArgumentException("Formats: svg, png, webp, jpeg, pdf, svg-animated, gif, frames.");
         if (!float.IsFinite(scale) || scale <= 0 || scale > 4) throw new ArgumentException("Scale: >0 to 4.");
         int w = Math.Max(1, (int)Math.Ceiling(doc.Width * scale)), h = Math.Max(1, (int)Math.Ceiling(doc.Height * scale));
         if ((long)w*h > 16777216 || w > 8192 || h > 8192) throw new ArgumentException("Export limited to 16 megapixels and 8192 pixels per side.");
@@ -196,17 +231,33 @@ public static class AssetRenderer
         if (data == null) throw new IOException("Image encoding failed.");
         return data.ToArray();
     }
-    public static byte[] Preview(AssetDocument doc, int maxSize = 1400, bool checkerboard = false)
+    public static byte[] Preview(AssetDocument doc, int maxSize = 1400, bool checkerboard = false, int frameIndex = 0, bool guides = false, bool pixelGrid = false)
     {
+        if (doc.Frames.Count > 0) doc = AssetAnimation.FrameScene(doc, frameIndex);
         var png = Export(doc, "png", scale: Math.Min(1, maxSize/(float)Math.Max(doc.Width,doc.Height)));
-        if (!checkerboard) return png;
+        if (!checkerboard && !guides && !pixelGrid) return png;
         using var image = SKImage.FromEncodedData(png);
         using var surface = SKSurface.Create(new SKImageInfo(image.Width,image.Height));
-        surface.Canvas.Clear(new SKColor(210,213,219));
-        using var tile = new SKPaint { Color = new SKColor(236,238,242) };
-        for(int y=0;y<image.Height;y+=16) for(int x=0;x<image.Width;x+=16)
-            if ((x/16+y/16)%2==0) surface.Canvas.DrawRect(x,y,16,16,tile);
+        surface.Canvas.Clear(checkerboard ? new SKColor(210,213,219) : SKColors.Transparent);
+        if (checkerboard)
+        {
+            using var tile = new SKPaint { Color = new SKColor(236,238,242) };
+            for(int y=0;y<image.Height;y+=16) for(int x=0;x<image.Width;x+=16)
+                if ((x/16+y/16)%2==0) surface.Canvas.DrawRect(x,y,16,16,tile);
+        }
         surface.Canvas.DrawImage(image,0,0);
+        if (guides || (pixelGrid && doc.PixelSize > 1))
+        {
+            float sx = image.Width / (float)doc.Width, sy = image.Height / (float)doc.Height;
+            using var guide = new SKPaint { Color = new SKColor(76, 201, 240, 180), StrokeWidth = 1, IsAntialias = false };
+            if (pixelGrid && doc.PixelSize > 1 && doc.PixelSize * sx >= 5 && doc.PixelSize * sy >= 5)
+            {
+                guide.Color = new SKColor(128, 128, 128, 70);
+                for (int x = doc.PixelSize; x < doc.Width; x += doc.PixelSize) surface.Canvas.DrawLine(x*sx,0,x*sx,image.Height,guide);
+                for (int y = doc.PixelSize; y < doc.Height; y += doc.PixelSize) surface.Canvas.DrawLine(0,y*sy,image.Width,y*sy,guide);
+            }
+            if (guides) { guide.Color = new SKColor(76, 201, 240, 200); surface.Canvas.DrawLine(image.Width/2f,0,image.Width/2f,image.Height,guide); surface.Canvas.DrawLine(0,image.Height/2f,image.Width,image.Height/2f,guide); }
+        }
         using var snapshot = surface.Snapshot(); using var data = snapshot.Encode(SKEncodedImageFormat.Png,100); return data.ToArray();
     }
 }

@@ -48,8 +48,29 @@ public sealed partial class MainWindow
         chats.SelectedItem=allProjectChats.Single(c=>c.Id==owner.Id);await SelectChat();
         if(selectedAsset?.Id!=id||selectedAsset.Revision!=3)throw new Exception("Asset was not restored on conversation switch.");
         await store.UpdateAsync(id,3,d=>d.Layers[1].Visible=true,default);await RefreshAssetsAsync(id);
+        var pixel=await Tool("asset_create",new(){["name"]="Animated pixel sprite",["width"]=64,["height"]=64,["pixel_size"]=8});
+        var pixelId=pixel["asset_id"]!.GetValue<string>();
+        await Tool("asset_edit",new(){["asset_id"]=pixelId,["expected_revision"]=1,["operations"]=new JsonArray(
+            new JsonObject{["action"]="pixel_rect",["layer_id"]="layer-1",["x"]=2,["y"]=2,["width"]=3,["height"]=3,["color"]="#4CC9F0"},
+            new JsonObject{["action"]="frame_add",["frame_id"]="first",["duration_ms"]=80},
+            new JsonObject{["action"]="frame_add",["frame_id"]="second",["source_frame_id"]="first",["duration_ms"]=140},
+            new JsonObject{["action"]="pixel",["frame_id"]="second",["layer_id"]="layer-1",["x"]=2,["y"]=2,["color"]="#FF0044"})});
+        if(selectedAsset?.Id!=pixelId||assetFramePicker.Items.Count!=3||assetImage.Source==null)throw new Exception("Pixel art animation did not appear in the GUI.");
+        assetFramePicker.SelectedIndex=2;await Task.Delay(200);
+        if(selectedAssetFrame!=1||assetGrid.IsChecked==true)throw new Exception("Animation frame selection failed.");
+        var exported=await Tool("asset_export",new(){["asset_id"]=pixelId,["format"]="gif"});
+        if(!File.Exists(exported["path"]!.GetValue<string>()))throw new Exception("Animated GIF export failed in GUI runtime.");
+        CloseConversationBrowser(owner.Id);
+        var firstTab=NewBrowserTab(owner.Id);var secondTab=NewBrowserTab(owner.Id);
+        if(conversationBrowsers.Keys.Count(k=>k.ChatId==owner.Id)!=2||SelectedBrowserTab(owner.Id)!=secondTab.TabId)throw new Exception("Web tabs did not open independently.");
+        await ShowToolAsync(0);await Task.Delay(100);await Capture(root,Path.Combine(output,"web-tabs.png"));
+        SelectBrowserTab(owner.Id,firstTab.TabId);CloseBrowserTab(owner.Id,firstTab.TabId);
+        if(SelectedBrowserTab(owner.Id)!=secondTab.TabId)throw new Exception("Closing a Web tab lost the remaining tab.");
+        CloseConversationBrowser(owner.Id);
+        if(conversationBrowsers.Keys.Any(k=>k.ChatId==owner.Id))throw new Exception("Web tabs leaked after conversation close.");
+        await ShowToolAsync(4);
         foreach(var theme in new[]{"fluent-dark","fluent-light"})
         {FluentDesign.SetTheme(theme);await Task.Delay(100);await Capture(root,Path.Combine(output,"asset-studio-"+theme+".png"));}
-        File.WriteAllText(Path.Combine(output,"smoke-ok.txt"),"Asset tools create/edit/capture/export, live preview, auto-focus, layer refresh and conversation isolation/restoration passed.");
+        File.WriteAllText(Path.Combine(output,"smoke-ok.txt"),"Asset tools, pixel frames and GIF, live preview, auto-focus, layer refresh, conversation isolation, and Web tabs passed.");
     }
 }

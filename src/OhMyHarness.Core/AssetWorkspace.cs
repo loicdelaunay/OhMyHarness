@@ -56,9 +56,11 @@ public sealed class AssetWorkspace
         try { await File.WriteAllBytesAsync(temp, bytes, ct); ct.ThrowIfCancellationRequested(); File.Move(temp, path, overwrite); }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }
-    public async Task<AssetDocument> CreateAsync(string name, int width, int height, string background, CancellationToken ct)
+    public Task<AssetDocument> CreateAsync(string name, int width, int height, string background, CancellationToken ct)
+        => CreateAsync(name, width, height, background, 1, ct);
+    public async Task<AssetDocument> CreateAsync(string name, int width, int height, string background, int pixelSize, CancellationToken ct)
     {
-        var doc = new AssetDocument { Name = name, Width = width, Height = height, Background = background, Revision = 1 }; doc.Validate();
+        var doc = new AssetDocument { Name = name, Width = width, Height = height, Background = background, PixelSize = pixelSize, Revision = 1 }; doc.Validate();
         using var guard = await LockAsync(ct);
         if (Directory.EnumerateFiles(Root, "*.json").Take(100).Count() >= 100) throw new IOException("Maximum 100 assets per conversation.");
         await WriteAtomic(FilePath(doc.Id), JsonSerializer.SerializeToUtf8Bytes(doc, AssetDocument.Json), false, ct); return doc;
@@ -75,7 +77,8 @@ public sealed class AssetWorkspace
     {
         ValidId(doc.Id);
         var bytes = await Task.Run(() => AssetRenderer.Export(doc, format, transparent, background, scale), ct);
-        var path = Path.Combine(Root, "exports", $"{doc.Id}-r{doc.Revision}-{Guid.NewGuid().ToString("N")[..8]}.{format}");
+        var extension = format switch { "svg-animated" => "svg", "frames" => "zip", _ => format };
+        var path = Path.Combine(Root, "exports", $"{doc.Id}-r{doc.Revision}-{Guid.NewGuid().ToString("N")[..8]}.{extension}");
         await WriteAtomic(path, bytes, false, ct); return path;
     }
 }

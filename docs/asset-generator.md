@@ -14,7 +14,17 @@ For example:
 - Coordinates start at the canvas's top-left. Rectangles and ellipses use their top-left corner; circles use their center; lines use their start; text uses its baseline. Paths and polygon points use absolute canvas coordinates. Rotation is around the shape's `x`/`y` point.
 - Use the GUI palette to inspect colors and set or remove the canvas background. Export options are available under **Export**.
 
-The AI updates a structured vector scene, rather than executing SVG scripts or loading remote SVG resources. Changes become visible when each tool call succeeds. This is an AI drawing workspace; it is not a freehand mouse editor or a general SVG importer.
+The AI updates a structured drawing scene, rather than executing SVG scripts or loading remote SVG resources. Changes become visible when each tool call succeeds. This is an AI drawing workspace; it is not a freehand mouse editor or a general SVG importer.
+
+## Pixel art, guides and animation
+
+Set `pixel_size` when creating a canvas to draw in logical cells. For example, a 64 × 64 canvas with `pixel_size: 8` has an 8 × 8 pixel-art grid. Width and height must be divisible by the pixel size. `asset_edit` accepts `pixel`, `erase_pixel`, `pixel_rect` and `pixel_line`; their `x`/`y` coordinates are logical cell coordinates, while vector shapes still use canvas coordinates. `color` accepts the full RGB palette with optional alpha. Pixel cells render without antialiasing.
+
+`asset_guides` returns the exact canvas center, thirds, and the bounds and center offsets of visible shapes and painted pixel regions. Text, SVG paths and rotated shapes have approximate bounds; capture the canvas to verify them visually. Set `guides: true` or `grid: true` in `asset_capture`, or use the **Repères / Grille** controls in the GUI, to overlay visual guides. These overlays never appear in exported files.
+
+Use `frame_add` to copy the base scene or another frame, then target edits with `frame_id`. `frame_duration` sets each frame's duration from 20 to 10,000 ms; `frame_delete` removes one. The GUI includes frame selection, playback and timing controls. Animated exports use the frames in order and loop. With no frames, animation exports contain one still frame.
+
+Export `svg-animated` for a self-contained SVG with discrete timed frames, `gif` for a looping GIF, or `frames` for a ZIP of numbered PNG files and `frames.json` timing metadata. The existing `svg`, `png`, `webp`, `jpeg` and `pdf` formats export the first animation frame when frames exist. GIF is limited to 1024 pixels per side, 4 million pixels across all frames and scale 1; PNG sequences are limited to 64 million pixels total. Use animated SVG for larger artwork.
 
 ## Tools
 
@@ -22,9 +32,10 @@ The AI updates a structured vector scene, rather than executing SVG scripts or l
 | --- | --- |
 | `asset_create` | Create a named canvas with dimensions and an optional background. Returns `asset_id`, `revision`, and the initial `layer-1`. |
 | `asset_inspect` | Read the scene and current revision, or list this conversation's drawings when no ID is supplied. |
+| `asset_guides` | Read exact center and alignment coordinates, with visible shape and pixel-region bounds. |
 | `asset_edit` | Apply an atomic batch of layer, shape, ordering or canvas operations. Requires `expected_revision` to protect edits made by the user or another operation. |
 | `asset_capture` | Return a PNG image of the artwork, its original dimensions and capture scale. No desktop screenshot is taken. |
-| `asset_export` | Save SVG, PNG, WebP, JPEG or PDF and return the absolute output path. |
+| `asset_export` | Save SVG, PNG, WebP, JPEG, PDF, animated SVG, GIF or a PNG-frame ZIP and return the absolute output path. |
 
 Example edit after creating a canvas at revision 1:
 
@@ -47,7 +58,7 @@ Example edit after creating a canvas at revision 1:
 }
 ```
 
-Supported operations are `canvas`, `layer`, `delete_layer`, `move_layer`, `shape`, `delete_shape` and `move_shape`. A `shape` upsert replaces the complete shape; omitted fields return to defaults. Move indices are zero-based, from back to front. Re-inspect the scene if an edit reports a revision conflict.
+Supported operations are `canvas`, `layer`, `delete_layer`, `move_layer`, `shape`, `delete_shape`, `move_shape`, `pixel`, `erase_pixel`, `pixel_rect`, `pixel_line`, `frame_add`, `frame_delete` and `frame_duration`. A `shape` upsert replaces the complete shape; omitted fields return to defaults. Move indices are zero-based, from back to front. Re-inspect the scene if an edit reports a revision conflict.
 
 ## Capture and export
 
@@ -59,6 +70,6 @@ Drawings are persisted beside the database under `assets/chat-<id>`, with export
 
 ## Availability and limits
 
-The skill is opt-in and follows application permissions. Plan mode allows inspection and capture only. It is unavailable in sandbox mode, in subagents, and through the OpenCode-native adapter. The live canvas is implemented in the Uno GUI.
+The skill is opt-in and follows application permissions. Plan mode allows inspection, guides and capture only. It is unavailable in sandbox mode, in subagents, and through the OpenCode-native adapter. The live canvas is implemented in the Uno GUI.
 
-Canvases are limited to 4096 × 4096, with up to 64 layers, 2,000 shapes and a 2 MB serialized scene. Each edit accepts up to 100 operations. Raster exports are limited to 16 megapixels and 8192 pixels per side. Captures are limited to a 2048-pixel longest side and 8 MB. These limits bound memory use while the UI remains responsive.
+Canvases are limited to 4096 × 4096, with up to 64 layers per frame, 32 frames, 5,000 shapes, 20,000 painted cells and a 2 MB serialized scene. Each edit accepts up to 100 operations. Raster exports are limited to 16 megapixels and 8192 pixels per side. Captures are limited to a 2048-pixel longest side and 8 MB. These limits bound memory use while the UI remains responsive.

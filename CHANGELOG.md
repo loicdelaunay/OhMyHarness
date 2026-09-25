@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.15.0 — 2026-09-25
+
+- Select a range of conversations with Shift+click (or add individual conversations with Ctrl+click), then right-click the selection to archive or delete them together. The selection count appears in the project sidebar.
+- Each project now has a persistent **Archive** subgroup. Archived conversations remain readable and can be restored or deleted; existing conversations remain active after the database migration.
+
+## 1.14.0 — 2026-09-25
+
+- The integrated Web tool now supports separate tabs per conversation. Open, select and close tabs in the GUI or through the browser skill; links that request a new window open a new tab. A failed WebView closes only its tab.
+- Asset generator now draws hard-edged pixel art on a configurable logical grid. Numeric alignment guides and optional center/grid overlays help position elements without adding guides to exported artwork.
+- Build frame-by-frame animations with individual frame durations and live preview. Export an animated SVG, looping GIF or a ZIP of numbered PNG frames with a timing manifest, in addition to the existing static formats. GUI and CLI share the same asset tools.
+
 ## 1.13.0 — 2026-09-25
 
 - Added the opt-in **Asset generator / Générateur d’assets** skill: the AI can create vector canvases, draw shapes, curves and text, arrange layers, inspect its artwork with canvas-only image captures, and refine it incrementally.

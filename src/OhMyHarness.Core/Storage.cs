@@ -30,6 +30,7 @@ public sealed class Project
 public sealed class Chat
 {
     public bool IsFavorite { get; set; }
+    public bool IsArchived { get; set; }
     public int Id { get; set; }
     public int ProjectId { get; set; }
     public string Title { get; set; } = "Nouvelle conversation";
