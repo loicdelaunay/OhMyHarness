@@ -1912,6 +1912,23 @@ public sealed partial class MainWindow : Window
         permissionProject.Value = run.Project;
         await FocusLatestToolAsync(run, name, argsObj);
         if (VisionBridge.Handles(name)) return await VisionFor(run).CallAsync(name, argsObj, ct);
+        if (AssetTools.Handles(name))
+        {
+            var output = await AssetTools.CallAsync(run, name, argsObj, _ => Task.FromResult(RunSkills(run)),
+                (scope, title, details, token) => RequestAccessAsync(scope, title, details, "Assets", token), ct);
+            if (IsVisible(run) && output.Document != null)
+            {
+                // A preview failure must not report a successful persisted edit as failed.
+                try
+                {
+                    await ShowToolAsync(4);
+                    await RefreshAssetsAsync(output.Document.Id);
+                }
+                catch (Exception ex) { ShowStatus(WorkflowText("Aperçu de l’asset indisponible : ", "Asset preview unavailable: ") + ex.Message); }
+            }
+            if (output.Image != null) SetPendingMcpImage(output.Image);
+            return output.Text;
+        }
         if (PythonTools.Handles(name)) return await PythonTools.CallAsync(run, name, argsObj, () => state.EnabledSkills,
             (scope, title, detail, token) => RequestAccessAsync(scope, title, detail, "Script Python", token), ct);
         if (RagTools.Handles(name)) return await RagTools.CallAsync(run, name, argsObj, (secret, _) => Task.FromResult(KeyVault.Decrypt(secret)),

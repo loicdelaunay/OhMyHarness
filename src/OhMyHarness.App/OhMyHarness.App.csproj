@@ -9,8 +9,8 @@
     <ApplicationTitle>OhMyHarness</ApplicationTitle>
     <ApplicationId>com.ohmyharness.app</ApplicationId>
     <DefaultLanguage>en-US</DefaultLanguage>
-    <ApplicationDisplayVersion>1.12.0</ApplicationDisplayVersion>
-    <ApplicationVersion>18</ApplicationVersion>
+    <ApplicationDisplayVersion>1.13.0</ApplicationDisplayVersion>
+    <ApplicationVersion>19</ApplicationVersion>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
     <PublishTrimmed>false</PublishTrimmed>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>

@@ -12,6 +12,8 @@ string Event(object value) => "data: " + System.Text.Json.JsonSerializer.Seriali
 if(args.Contains("--browser-smoke")) { await ChromiumChecks.Run(Check); return; }
 if(args.Contains("--chrome-smoke")) { await ChromeMcpChecks.Run(Check); return; }
 await BrowserSkillChecks.Run(Check);
+await AssetChecks.Run(Check);
+if(args.Contains("--assets")){Console.WriteLine($"{passed} asset checks passed.");return;}
 await WebHttpChecks.Run(Check);
 if (args.Contains("--web-http")) { Console.WriteLine($"{passed} checks passed."); return; }
 await CompleteDesignChecks.Run(Check);

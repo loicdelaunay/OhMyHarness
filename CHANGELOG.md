@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0 — 2026-09-25
+
+- Added the opt-in **Asset generator / Générateur d’assets** skill: the AI can create vector canvases, draw shapes, curves and text, arrange layers, inspect its artwork with canvas-only image captures, and refine it incrementally.
+- The GUI's **Tools > Assets** panel displays successful drawing updates live, with a color palette, layer visibility and ordering, and export controls. Drawings remain editable and are saved separately for each conversation. The CLI shares the same drawing, capture and export tools.
+- Export SVG, PNG, WebP, JPEG or vector PDF, with selectable backgrounds and raster scale. Transparent backgrounds are supported by SVG, PNG and WebP; JPEG requires an opaque background. Drawing operations respect skill permissions and protect concurrent edits with revision checks.
+
 ## 1.12.0 — 2026-09-25
 
 - Web research now fetches HTTP(S) pages and APIs directly with an asynchronous .NET client in GUI and CLI, without opening a browser. Supports GET, HEAD, POST, PUT, PATCH, DELETE and OPTIONS, custom headers and UTF-8 request bodies.

@@ -63,13 +63,13 @@ try
         state.EnabledSkills = "sources,write_sources,terminal,web,mouse_control,screenshots";
         state.PermissionMode = "allow"; await db.SaveChangesAsync();
     }
-    async Task<(int Code, string Output, string Errors)> Run(bool execute = false, bool json = false)
+    async Task<(int Code, string Output, string Errors)> Run(bool execute = false, bool json = false, bool allow = false)
     {
         using var output = new StringWriter(); using var errors = new StringWriter();
         Console.SetOut(output); Console.SetError(errors);
         try
         {
-            int code = await Headless.RunAsync(new() { Run = true, Execute = execute, Json = json, Database = database, Directory = sources, Prompt = "Test the CLI" }).WaitAsync(TimeSpan.FromSeconds(20));
+            int code = await Headless.RunAsync(new() { Run = true, Execute = execute, Allow=allow, Json = json, Database = database, Directory = sources, Prompt = "Test the CLI" }).WaitAsync(TimeSpan.FromSeconds(20));
             return (code, output.ToString(), errors.ToString());
         }
         finally { Console.SetOut(originalOut); Console.SetError(originalError); }
@@ -124,6 +124,23 @@ try
     var events = json.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)!).ToList();
     Check(events.Any(e => e["event"]!.GetValue<string>() == "stream") && events.Last()["event"]!.GetValue<string>() == "done" && !json.Output.Contains('\x1b'), "JSON automation output is valid NDJSON without ANSI rendering");
     Check(events.Last()["durationSeconds"]!.GetValue<double>() >= 0, "JSON completion reports elapsed duration");
+    await using(var assetDb=new HarnessDb(database))
+    {var settings=await assetDb.States.SingleAsync();settings.EnabledSkills+=","+AssetTools.SkillId;foreach(var p in await assetDb.Providers.ToListAsync())p.SupportsImages=true;await assetDb.SaveChangesAsync();}
+    step=0;resumed=null;string assetId="";
+    api.Respond=(body,_)=>
+    {
+        int round=Interlocked.Increment(ref step);
+        if(round==1)return FakeApi.Tool("asset_create",new{name="CLI asset",width=64,height=64});
+        if(round==2)
+        {assetId=JsonNode.Parse(body["messages"]!.AsArray().Last(m=>m?["role"]?.GetValue<string>()=="tool")!["content"]!.GetValue<string>())!["asset_id"]!.GetValue<string>();return FakeApi.Tool("asset_edit",new{asset_id=assetId,expected_revision=1,operations=new[]{new{action="shape",layer_id="layer-1",shape=new{id="red",type="rect",fill="#FF0000",width=64,height=64}}}});}
+        if(round==3)return FakeApi.Tool("asset_capture",new{asset_id=assetId});
+        if(round==4){resumed=body;return FakeApi.Tool("asset_export",new{asset_id=assetId,format="png",transparent=true});}
+        return FakeApi.Text("Asset complete");
+    };
+    var assetRun=await Run(execute:true,allow:true);
+    Check(assetRun.Code==0 && assetRun.Output.Contains("Asset complete"),"CLI runs complete asset create/edit/capture/export sequence");
+    Check(resumed!.ToJsonString().Contains("data:image/png;base64,"),"Asset capture reaches the vision model through CLI history");
+    Check(Directory.EnumerateFiles(Path.Combine(root,"assets"),"*.png",SearchOption.AllDirectories).Any(),"CLI exports asset PNG beside the portable database");
     api.Respond = (_, _) => FakeApi.Tool("question", new { questions = new[] { new { question = "Choose an option", options = new[] { new { label = "A", description = "First" }, new { label = "B", description = "Second" } }, custom = false } } });
     var question = await Run(json: true);
     Check(question.Code == 3 && question.Output.Contains("\"event\":\"question\""), "Headless questions return an explicit needs-input code instead of hanging");

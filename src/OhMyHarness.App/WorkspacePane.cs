@@ -315,13 +315,14 @@ public sealed partial class MainWindow
             }
         });
         toolTabs.AddTab(T("Fichiers"), filePanel);
+        toolTabs.AddTab("Assets", BuildAssetsPane());
         toolTabs.SelectionChanged += async (_, _) => { SyncBrowserPresentation(); if (browserVisible) await Guard(ActivateToolAsync); };
         Grid.SetRow(toolTabs, 1); container.Children.Add(toolTabs);
         browserPanel.Child = container; Grid.SetColumn(browserPanel, 1); workspace.Children.Add(browserPanel);
     }
     void RefreshToolLanguage()
     {
-        if (toolTabs.Count == 4) toolTabs.SetTitle(3, T("Fichiers"));
+        if (toolTabs.Count >= 4) toolTabs.SetTitle(3, T("Fichiers"));
     }
     async Task ActivateToolAsync()
     {
@@ -336,6 +337,7 @@ public sealed partial class MainWindow
                 break;
             case 2: await RefreshGitAsync(CancellationToken.None); break;
             case 3: await LoadFilesAsync(fileDirectory); break;
+            case 4: await RefreshAssetsAsync(); break;
         }
     }
     async Task ShowToolAsync(int index)
@@ -351,6 +353,7 @@ public sealed partial class MainWindow
     }
     void ResetWorkspaceTools()
     {
+        ResetAssetPreview();
         lastGitPreview = null;
         gitLoading.Visibility = filesLoading.Visibility = Visibility.Collapsed;
         fileRevision++;
@@ -1441,6 +1444,7 @@ public sealed partial class MainWindow
             Add("keyboard_keys", "Lists all supported keyboard keys, aliases and shortcut examples for desktop_keyboard and browser_keyboard. Call this to discover valid input. Standalone ALT, CTRL, SHIFT and WIN are supported. Read-only; does not inject input.", []);
         if (Skills.Enabled(state.EnabledSkills, "web")) Add("open_local_file", "Requests user approval, then previews a local file and reads its page. Use a project-relative or absolute path. Never bypass a refusal.", new() { ["path"] = StringProperty() }, "path");
         RagTools.AddDefinitions(definitions, project.GetSourceFolders().Count > 0, state.EnabledSkills);
+        AssetTools.AddDefinitions(definitions, state.EnabledSkills);
         VisionBridge.AddDefinitions(definitions, state.EnabledSkills);
         PythonTools.AddDefinitions(definitions, state.EnabledSkills);
         if (Skills.Enabled(state.EnabledSkills, "terminal")) Add("run_terminal", "Requests user approval before executing a shell command in the attached project folder (PowerShell on Windows, zsh on macOS). Each invocation is a new session, 30 second default timeout, configurable up to 600 seconds. The command runs with the user's OS privileges.", new() { ["command"] = StringProperty() }, "command");

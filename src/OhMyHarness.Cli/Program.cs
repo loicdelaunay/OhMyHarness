@@ -6,7 +6,7 @@ try
 {
     var options = CliOptions.Parse(args);
     if (options.Help) { Console.WriteLine(CliOptions.HelpText); return 0; }
-    if (options.Version) { Console.WriteLine("OhMyHarness CLI 1.12.0"); return 0; }
+    if (options.Version) { Console.WriteLine("OhMyHarness CLI 1.13.0"); return 0; }
     if (options.RenderDemo)
     {
         Console.Write(TerminalUi.DemoFrame(options.Theme));

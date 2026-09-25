@@ -215,7 +215,7 @@ public sealed partial class MainWindow
                 RefreshGenerationControls();
             }
         }
-        if (revision == conversationLoadRevision && browserVisible && toolTabs.SelectedIndex is 2 or 3)
+        if (revision == conversationLoadRevision && browserVisible && toolTabs.SelectedIndex is 2 or 3 or 4)
             await ActivateToolAsync();
     }
 

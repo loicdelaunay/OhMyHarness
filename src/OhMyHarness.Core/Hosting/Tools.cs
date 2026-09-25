@@ -57,6 +57,7 @@ public sealed partial class HarnessService
         var domAccess = BrowserSkillAccess.DomEnabled(skills);
         var source = run.Project.GetSourceFolders().Count > 0;
         var definitions = ChatEngine.ToolDefinitions(source && SourceTools.CanRead(skills), browserAccess && Skills.Enabled(skills, "web"), source && Skills.Enabled(skills, "write_sources"));
+        AssetTools.AddDefinitions(definitions, skills);
         SourceTools.AddDefinitions(definitions, source, skills);
         void Add(string name, string description, params (string Name, string Type)[] properties)
         {
@@ -109,6 +110,12 @@ public sealed partial class HarnessService
         var skills = await db.States.Select(x => x.EnabledSkills).SingleAsync(ct);
         var browserAccess = BrowserSkillAccess.Enabled(skills);
         var domAccess = BrowserSkillAccess.DomEnabled(skills);
+        if (AssetTools.Handles(name))
+        {
+            var output = await AssetTools.CallAsync(run, name, p, async token => await db.States.Select(x => x.EnabledSkills).SingleAsync(token), Approve, ct);
+            if (output.Document != null) await emit(new { @event = "asset-updated", chatId = run.Chat.Id, document = output.Document });
+            return new(output.Text, output.Image);
+        }
         if (VisionBridge.Handles(name)) return new(await VisionFor(run).CallAsync(name, p, ct));
         if (PythonTools.Handles(name)) return new(await PythonTools.CallAsync(run, name, p, () => skills, async (scope, title, detail, token) => {
             var allowed = await Approve(scope, title, detail, token);
