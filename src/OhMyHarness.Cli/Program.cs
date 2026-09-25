@@ -6,14 +6,14 @@ try
 {
     var options = CliOptions.Parse(args);
     if (options.Help) { Console.WriteLine(CliOptions.HelpText); return 0; }
-    if (options.Version) { Console.WriteLine("OhMyHarness CLI 1.8.1"); return 0; }
+    if (options.Version) { Console.WriteLine("OhMyHarness CLI 1.9.0"); return 0; }
     if (options.RenderDemo)
     {
         Console.Write(TerminalUi.DemoFrame(options.Theme));
         return 0;
     }
-    if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
-        throw new PlatformNotSupportedException("This build supports Windows and macOS.");
+    if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
+        throw new PlatformNotSupportedException("This build supports Windows, macOS and Linux.");
     if (options.Run) return await Headless.RunAsync(options);
     if (Console.IsInputRedirected || Console.IsOutputRedirected)
         throw new ArgumentException("Interactive mode needs a terminal. Use: omh run \"prompt\" [--json]");

@@ -257,10 +257,11 @@ public static class KeyVault
 {
     public static byte[] Encrypt(string key) => OperatingSystem.IsWindows()
         ? ProtectedData.Protect(Encoding.UTF8.GetBytes(key), null, DataProtectionScope.CurrentUser)
-        : MacKeychain.Store(key);
+        : OperatingSystem.IsMacOS() ? MacKeychain.Store(key) : LinuxKeyVault.Encrypt(key);
     public static string Decrypt(byte[] key)
     {
         if (key.Length == 0) return "";
+        if (Encoding.UTF8.GetString(key).StartsWith(LinuxKeyVault.Prefix, StringComparison.Ordinal)) return LinuxKeyVault.Decrypt(key);
         if (Encoding.UTF8.GetString(key).StartsWith(MacKeychain.Prefix, StringComparison.Ordinal)) return MacKeychain.Read(key);
         if (OperatingSystem.IsWindows()) return Encoding.UTF8.GetString(ProtectedData.Unprotect(key, null, DataProtectionScope.CurrentUser));
         throw new InvalidOperationException("Ressaisissez cette clé sur ce système : son ancien coffre n’est pas disponible. / Re-enter this key on this OS.");

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0 — 2026-09-25
+
+- Added a self-contained Linux x64 build for Fedora 44 in both GUI and CLI, with checksummed release archives. The Uno GUI uses X11; desktop-control tools require platform implementations and are unavailable on Linux.
+- Added Linux bundled Python and portable key encryption so Fedora provider connections work without a separately installed Python or .NET runtime. The per-installation encryption key stays beside the database and must be kept private with the portable folder.
+
 ## 1.8.1 — 2026-09-25
 
 - GUI and CLI downloads now cover Windows x64, macOS Intel and Apple Silicon, with checksums and clean portable archives. macOS builds are unsigned; native interactions still need manual validation.

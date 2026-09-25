@@ -62,7 +62,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
                 var snapshotSkills = Skills.Available().Concat(snapshotProjects.SelectMany(item =>
                     new CustomSkills(CustomSkills.DefaultRoot, item.GetSourceFolders(), item.Id).Definitions()
                         .Where(skill => skill.Id.StartsWith("project:", StringComparison.Ordinal)))).ToList();
-                return new { platform = OperatingSystem.IsMacOS() ? "macOS" : "Windows", shell = PlatformSupport.ShellName, database, mcpConfigError, appearanceThemes = AppearanceThemes.All,
+                return new { platform = OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux" : "Windows", shell = PlatformSupport.ShellName, database, mcpConfigError, appearanceThemes = AppearanceThemes.All,
                     projects = snapshotProjects.Select(x => new { x.Id, x.Name, x.SourceFolder, x.PermissionProfileJson }),
                     chats = await db.Chats.AsNoTracking().Select(x => new { x.Id, x.ProjectId, x.Title, x.ExecutionMode, x.OrchestrationMode, x.SandboxEnabled, x.ResourcePathsJson, x.TodoDismissed }).ToListAsync(ct),
                     providers = (await db.Providers.AsNoTracking().ToListAsync(ct)).Select(ProviderView),
@@ -213,7 +213,8 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
     {
         if (hostOptions?.UseNativeKeyVault == true) return KeyVault.Encrypt(key);
         if (OperatingSystem.IsWindows()) return KeyVault.Encrypt(key);
-        if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException("Windows and macOS are supported.");
+        if (OperatingSystem.IsLinux()) return KeyVault.Encrypt(key);
+        if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException("Windows, macOS and Linux are supported.");
         var encrypted = await host("key.encrypt", Obj(new { text = key }), ct);
         return Encoding.UTF8.GetBytes("OMH-MAC-1:" + encrypted!.GetValue<string>());
     }
@@ -226,7 +227,7 @@ public sealed partial class HarnessService(string database, Func<string, JsonObj
             if (!OperatingSystem.IsMacOS()) throw new InvalidOperationException("Re-enter this API key on Windows; it was encrypted with the macOS Keychain.");
             return (await host("key.decrypt", Obj(new { data = Encoding.UTF8.GetString(key)[10..] }), ct))!.GetValue<string>();
         }
-        if (OperatingSystem.IsWindows()) return KeyVault.Decrypt(key);
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux()) return KeyVault.Decrypt(key);
         throw new InvalidOperationException("Ressaisissez cette clé API sur Mac : elle est protégée par Windows DPAPI.");
     }
     public void CancelAll() { foreach (var run in runs.Values) run.Cancellation.Cancel(); }

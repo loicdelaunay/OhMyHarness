@@ -63,3 +63,55 @@ jobs:
           path: artifacts/TEMP/release-packages/CLI/*
           if-no-files-found: error
           compression-level: 0
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install Fedora build and GUI runtime packages
+        run: dnf install -y git git-lfs dotnet-sdk-10.0 nodejs npm tar gzip fontconfig libXrandr libXi mesa-libGL dbus-daemon gtk3 webkit2gtk4.1 xorg-x11-server-Xvfb
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Verify Fedora versions
+        run: |
+          cat /etc/fedora-release
+          dotnet --version
+          node --version
+      - run: dotnet build src/OhMyHarness.App -f net10.0-desktop -c Release
+      - run: dotnet run --project tests/OhMyHarness.Tests -c Release
+      - run: dotnet run --project tests/OhMyHarness.Cli.Tests -c Release
+      - run: npm ci
+        working-directory: desktop
+      - run: npm test
+        working-directory: desktop
+      - name: Publish GUI
+        run: dotnet publish src/OhMyHarness.App -f net10.0-desktop -p:OhMyHarnessDesktopOnly=true -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/GUI
+      - name: Publish CLI
+        run: dotnet publish src/OhMyHarness.Cli -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/CLI
+      - name: Smoke-test Fedora executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./artifacts/CLI/omh --version | grep '1.9.0'
+          smoke_dir="$(mktemp -d)"
+          trap 'kill "$xvfb_pid" 2>/dev/null || true; rm -rf "$smoke_dir"' EXIT
+          Xvfb :99 -screen 0 1280x800x24 > "$smoke_dir/xvfb.log" 2>&1 &
+          xvfb_pid=$!
+          sleep 2
+          DISPLAY=:99 OHMYHARNESS_UI_SMOKE="$smoke_dir" OHMYHARNESS_UX_SMOKE=1 timeout 60s ./artifacts/GUI/OhMyHarness.App
+          test -f "$smoke_dir/smoke-ok.txt"
+          cat "$smoke_dir/smoke-ok.txt"
+      - name: Package clean Fedora downloads
+        run: bash ./build/package-fedora.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OhMyHarness-linux-x64
+          path: artifacts/TEMP/release-packages/GUI/*
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OhMyHarness-CLI-linux-x64
+          path: artifacts/TEMP/release-packages/CLI/*
+          if-no-files-found: error
+          compression-level: 0

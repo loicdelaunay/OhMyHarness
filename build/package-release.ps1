@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('win-x64', 'osx-x64', 'osx-arm64')][string]$Runtime
+    [Parameter(Mandatory)][ValidateSet('win-x64', 'osx-x64', 'osx-arm64', 'linux-x64')][string]$Runtime
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -24,7 +24,9 @@ foreach ($channel in @('GUI', 'CLI')) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $stage $exe)
         Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination $stage
         $start = if ($channel -eq 'CLI') { "Run ./$exe from a terminal, then /connect to configure your provider." } else { "Run ./$exe and open Settings > Providers." }
-        $platformNote = if ($windows) { 'Windows x64. No separate .NET or Python installation is required.' } else {
+        $platformNote = if ($Runtime -eq 'linux-x64') {
+            'Linux x64 (tested on Fedora 44). Use an X11 desktop for the GUI; WebKitGTK and GTK3 are needed for the browser. No separate .NET or Python installation is required. Desktop control tools are not available.'
+        } elseif ($windows) { 'Windows x64. No separate .NET or Python installation is required.' } else {
             'macOS build: unsigned and not notarized. Native GUI interactions still need manual validation on a real Mac. Extract with tar -xzf to preserve executable permissions. No separate .NET or Python installation is required.'
         }
         @"

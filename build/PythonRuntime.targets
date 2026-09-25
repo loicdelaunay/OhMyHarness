@@ -13,6 +13,8 @@
     <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'osx-x64'">49f0d97f506b855eed60b74a8ac138595c5b39799a6aa5e0d7ca8abe1019a4d4</PythonRuntimeHash>
     <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'osx-arm64'">aarch64-apple-darwin</PythonRuntimeTarget>
     <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'osx-arm64'">b9054a9d3d54f4cb5573d44907fddb29874b08909bde73f29f2868cf872223ee</PythonRuntimeHash>
+    <PythonRuntimeTarget Condition="'$(PythonRuntimeRid)' == 'linux-x64'">x86_64-unknown-linux-gnu</PythonRuntimeTarget>
+    <PythonRuntimeHash Condition="'$(PythonRuntimeRid)' == 'linux-x64'">0651dd7157d3debf769e15a52c1de9de7fbcdc36ba72faf79fde3c44f14d9461</PythonRuntimeHash>
     <PythonRuntimeCache>$(MSBuildThisFileDirectory)..\artifacts\python-cache\</PythonRuntimeCache>
     <PythonRuntimeArchive>$(PythonRuntimeCache)$(PythonRuntimeVersion)-$(PythonRuntimeRelease)-$(PythonRuntimeRid).tar.gz</PythonRuntimeArchive>
     <PythonRuntimeManifest>$(IntermediateOutputPath)python-runtime.json</PythonRuntimeManifest>
@@ -22,7 +24,7 @@
     <EmbeddedResource Include="$(PythonRuntimeManifest)" LogicalName="OhMyHarness.Python.manifest.json" />
   </ItemGroup>
   <Target Name="PrepareBundledPython" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
-    <Error Condition="'$(PythonRuntimeTarget)' == ''" Text="No bundled Python for $(PythonRuntimeRid). Supported: win-x64, win-arm64, osx-x64, osx-arm64." />
+    <Error Condition="'$(PythonRuntimeTarget)' == ''" Text="No bundled Python for $(PythonRuntimeRid). Supported: win-x64, win-arm64, osx-x64, osx-arm64, linux-x64." />
     <MakeDir Directories="$(PythonRuntimeCache);$(IntermediateOutputPath)" />
     <DownloadFile Condition="!Exists('$(PythonRuntimeArchive)')" SourceUrl="https://github.com/astral-sh/python-build-standalone/releases/download/$(PythonRuntimeRelease)/cpython-$(PythonRuntimeVersion)%2B$(PythonRuntimeRelease)-$(PythonRuntimeTarget)-install_only.tar.gz" DestinationFolder="$(PythonRuntimeCache)" DestinationFileName="$(PythonRuntimeVersion)-$(PythonRuntimeRelease)-$(PythonRuntimeRid).tar.gz" />
     <GetFileHash Files="$(PythonRuntimeArchive)" Algorithm="SHA256"><Output TaskParameter="Hash" PropertyName="ActualPythonHash" /></GetFileHash>

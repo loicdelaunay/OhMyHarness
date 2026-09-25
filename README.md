@@ -7,8 +7,8 @@
 <p align="center"><strong>Your AI workspace in one portable EXE — GUI or CLI.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.8.1">Download GUI</a>
-  · <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.8.1">Download CLI</a>
+  <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.9.0">Download GUI</a>
+  · <a href="https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.9.0">Download CLI</a>
   · <a href="#quick-start">Quick start</a>
   · <a href="#build-from-source">Build from source</a>
   · <a href="docs/guide.md">User guide</a>
@@ -20,21 +20,21 @@
 >
 > **Why build it this way?** I needed something straightforward enough to use at work, without a stack of extra services. And I thought it would be nice to share it, too. :)
 
-OhMyHarness brings projects, concurrent chats, agents, sources, tools, and settings into one application. The Windows release ships as a self-contained executable. Put it in a writable folder, connect a model provider, and start working. Its SQLite database and application-managed resources live beside the EXE, so you can move the workspace by copying the folder after closing the app.
+OhMyHarness brings projects, concurrent chats, agents, sources, tools, and settings into one application. The Windows, macOS and Linux downloads ship as self-contained executables. Put one in a writable folder, connect a model provider, and start working. Its SQLite database and application-managed resources live beside the executable, so you can move the workspace by copying the folder after closing the app.
 
-> **Available in GUI and CLI modes.** Choose the desktop workspace or the keyboard-driven terminal experience. Both use the same .NET agent engine, portable storage, projects, and conversations. [GUI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.8.1) · [CLI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.8.1) · [CLI guide](docs/cli.md)
+> **Available in GUI and CLI modes.** Choose the desktop workspace or the keyboard-driven terminal experience. Both use the same .NET agent engine, portable storage, projects, and conversations. [GUI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.9.0) · [CLI download](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.9.0) · [CLI guide](docs/cli.md)
 
 **Make it yours:** customize the desktop **theme, displayed application name, and logo/icon** in Settings. Keep the custom image beside the executable with a relative path to retain it when moving the folder. The CLI has its own color themes, including green/amber CRT and neon styles, with live previews; terminal fonts and CRT effects use an optional host-terminal profile.
 
-Version **1.8.1**, available as both GUI and CLI downloads, includes an independent CLI font/size picker with bundled **VT323**, **Share Tech Mono** and **Space Mono**, plus **GitHub update checks** for both interfaces. GUI Settings → General and CLI `/update` can download a verified compatible release and restart while preserving portable data. See the [font and update guide](docs/cli.md#cli-themes-fonts-and-crt); these features are included in both current downloads where applicable.
+Version **1.9.0**, available as both GUI and CLI downloads, includes an independent CLI font/size picker with bundled **VT323**, **Share Tech Mono** and **Space Mono**, plus **GitHub update checks** for both interfaces. GUI Settings → General and CLI `/update` can download a verified compatible release and restart while preserving portable data. See the [font and update guide](docs/cli.md#cli-themes-fonts-and-crt); these features are included in both current downloads where applicable.
 
 The chat model itself is **not** bundled: cloud providers need network access and, depending on the service, an API key. Git, Docker/Podman, OpenCode, and Chrome MCP are optional integrations with their own prerequisites. The core app does not require a separate OhMyHarness server.
 
 ## New in the current downloads
 
-**Since 1.8.0:** GUI and CLI packages for Windows x64 and both Mac architectures, restored Intel Mac local RAG, reliable bundled-model retrieval, a fix for locked SQLite files during sandbox creation, and GUI response duration shown only on hover. macOS archives use .tar.gz to preserve executable permissions; see the [Mac guide](docs/macos.md).
+**Since 1.8.0:** GUI and CLI packages for Windows x64, both Mac architectures and Fedora Linux x64, restored Intel Mac local RAG, reliable bundled-model retrieval, a fix for locked SQLite files during sandbox creation, and GUI response duration shown only on hover. Unix archives use `.tar.gz` to preserve executable permissions; see the [Mac guide](docs/macos.md) and [Fedora guide](docs/fedora.md).
 
-Since the [GUI v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0), the source has gained the following updates. **GUI v1.8.1 and CLI v1.8.1** now package the same shared engine and current features in separate downloads for Windows x64, macOS Intel and Apple Silicon.
+Since the [GUI v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.0.0), the source has gained the following updates. **GUI v1.9.0 and CLI v1.9.0** now package the same shared engine and current features in separate downloads for Windows x64, macOS Intel and Apple Silicon, and Fedora Linux x64.
 
 - **Response styles:** DEFAULT, SHORT, PRAGMATIC, DETAILED and FUN, shared between GUI General settings and CLI `/settings`.
 - **CLI editing:** selection, word navigation, copy/cut/paste and undo/redo; ordinary Backspace deletes one character.
@@ -45,7 +45,7 @@ Since the [GUI v1.0.0 release](https://github.com/loicdelaunay/OhMyHarness/relea
 - **Stronger project support:** asynchronous discovery of nested project instructions, vision descriptions with custom guidance and component coordinates, and configurable portable logs.
 - **Fresh portable workspaces:** launching the executable in a new folder creates fresh data instead of importing previous AppData conversations.
 
-See the [full changelog](CHANGELOG.md) for version-by-version details. Both current downloads include their applicable changes through v1.8.1.
+See the [full changelog](CHANGELOG.md) for version-by-version details. Both current downloads include their applicable changes through v1.9.0.
 
 ## Take a look
 
@@ -133,20 +133,20 @@ Plan mode blocks modifying tools at the application boundary. The optional sandb
 
 ## Quick start
 
-1. Download the [Windows x64 GUI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.8.1), or choose the [CLI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.8.1) for a terminal workspace.
-2. Extract the archive into a **writable folder** and run <code>OhMyHarness.App.exe</code>. Keep the included <code>skills/</code> folder beside it.
+1. Download the [GUI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/v1.9.0), or choose the [CLI release](https://github.com/loicdelaunay/OhMyHarness/releases/tag/cli-v1.9.0) for a terminal workspace. Select the archive for your OS and CPU.
+2. Extract the archive into a **writable folder** and run <code>OhMyHarness.App.exe</code> on Windows or <code>./OhMyHarness.App</code> on macOS/Linux. The app creates its skills folder beside the executable.
 3. Open **Settings → Providers**. Add a provider and its API key or endpoint. **Test connection** detects, selects, and saves its models; you can change that selection later.
 4. Create a project, attach the source folders you want to share with its chats, and start a conversation.
 
-For the CLI, put `omh.exe` in a writable folder, launch it from your project directory, and enter `/connect`. Type `/` to discover commands; use ↑/↓ and Tab to complete them. No .NET installation is required for the published Windows executable.
+For the CLI, put `omh.exe` (Windows) or `omh` (macOS/Linux) in a writable folder, launch it from your project directory, and enter `/connect`. Type `/` to discover commands; use ↑/↓ and Tab to complete them. No .NET installation is required for the published executables.
 
-The integrated browser uses the system Web engine: Edge WebView2 on Windows and WebKit on macOS. Git, container sandboxing, OpenCode, and Chrome MCP only need installation when you enable those integrations. Scheduled tasks run while OhMyHarness is open; they do not wake a sleeping computer.
+The integrated browser uses the system Web engine: Edge WebView2 on Windows, WebKit on macOS and WebKitGTK on Linux. Fedora GUI needs X11 and GTK3/WebKitGTK; see the [Fedora guide](docs/fedora.md). Git, container sandboxing, OpenCode, and Chrome MCP only need installation when you enable those integrations. Scheduled tasks run while OhMyHarness is open; they do not wake a sleeping computer.
 
 ## Portable data and privacy
 
 OhMyHarness stores <code>database.sqlite</code>, <code>skills/</code>, <code>MCP.json</code>, browser profiles, and other application-managed resources beside the executable. In a fresh folder, it creates a new database with the required schema and starter settings, without importing old conversations from AppData. EF Core applies database migrations on startup. Do not place the app in a read-only directory such as <code>Program Files</code>. Close all instances before copying the folder to another machine.
 
-API keys use Windows DPAPI or the macOS Keychain. They are tied to the OS account, so moving the folder to another user or operating system requires entering the keys again. The rest of SQLite is **not encrypted**. Only content used for a request is sent to its selected model provider; attaching a source folder does not upload the whole folder automatically.
+API keys use Windows DPAPI, the macOS Keychain or, on Linux, AES-GCM with an owner-only `.linux-key` file beside SQLite. On Linux, keep the entire portable folder private and copy the key with the database; anyone who can read both can recover the API keys. Windows/macOS keys are tied to the OS account and need re-entry when moving accounts or systems. The rest of SQLite is **not encrypted**. Only content used for a request is sent to its selected model provider; attaching a source folder does not upload the whole folder automatically.
 
 The bundled RAG embedding model runs locally and supports French and English. Its model file is part of the app release. Source clones use **Git LFS** to retrieve that file.
 

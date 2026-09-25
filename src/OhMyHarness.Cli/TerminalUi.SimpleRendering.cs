@@ -105,7 +105,7 @@ public sealed partial class TerminalUi
     {
         var p = appearance.Palette;
         canvas.Write(left, 1, "◈", new(p.Accent, p.Background, true));
-        canvas.Write(left + 4, 1, "OhMyHarness CLI 1.8.1", p.Highlight, width - 4);
+        canvas.Write(left + 4, 1, "OhMyHarness CLI 1.9.0", p.Highlight, width - 4);
         if (appearance.Crt) canvas.Write(left + 29, 1, appearance.Brand, p.Dim, width - 29);
         var thinking = workspace?.State.ThinkingLevel ?? "auto";
         canvas.Write(left + 4, 2, (CurrentProvider == null ? L("Aucun fournisseur · /connect", "No provider · /connect") : CurrentProvider.Name + " · " + CurrentProvider.Model) + " (" + thinking + ")", p.Dim, width - 4);

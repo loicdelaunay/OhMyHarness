@@ -441,6 +441,18 @@ try
         Check((await relocated.States.SingleAsync()).Language == "en" && (await relocated.Templates.SingleAsync()).Content == "Mon template personnalisé",
             "Copie cohérente de l’ancienne base SQLite vers database.sqlite");
     }
+    if (OperatingSystem.IsLinux())
+    {
+        var protectedKey = KeyVault.Encrypt("fedora-test-key");
+        var keyPath = Path.Combine(PortableStorage.Root, ".linux-key");
+        Check(KeyVault.Decrypt(protectedKey) == "fedora-test-key" &&
+              !System.Text.Encoding.UTF8.GetString(protectedKey).Contains("fedora-test-key") &&
+              File.Exists(keyPath) &&
+              (File.GetUnixFileMode(keyPath) & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.OtherRead | UnixFileMode.OtherWrite)) == 0,
+            "Linux provider key is encrypted with an owner-only installation key");
+        var corrupted = (byte[])protectedKey.Clone(); corrupted[^4] = (byte)(corrupted[^4] == 'A' ? 'B' : 'A');
+        await Throws<Exception>(() => Task.FromResult(KeyVault.Decrypt(corrupted)), "Tampered Linux provider key is rejected");
+    }
     if (OperatingSystem.IsWindows())
     {
         var encrypted = KeyVault.Encrypt("clé-test");

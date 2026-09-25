@@ -15,7 +15,7 @@ public static class PythonRuntime
     {
         using var stream = Resource("manifest.json");
         var info = JsonSerializer.Deserialize<Manifest>(stream) ?? throw new IOException("Python manifest missing.");
-        var rid = (OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "unsupported") + "-" + RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+        var rid = (OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : OperatingSystem.IsLinux() ? "linux" : "unsupported") + "-" + RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
         if (info.Rid != rid) throw new PlatformNotSupportedException($"Python embarqué pour {info.Rid}, processus {rid}.");
         return info;
     }
