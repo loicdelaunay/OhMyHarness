@@ -15,7 +15,7 @@ public sealed partial class TerminalUi
         queueRows.Clear();
         if (width < 56 || height < 18)
         {
-            canvas.Write(1, 1, "OhMyHarness CLI", p.Highlight);
+            canvas.Write(1, 1, BrandingAssets.DisplayName(settings.ApplicationName) + " CLI", p.Highlight);
             canvas.Write(1, 3, L("Agrandissez le terminal (56 × 18 minimum).", "Enlarge the terminal (56 × 18 minimum)."), p.Dim);
             canvas.Write(1, 5, "Ctrl+Q · " + L("Quitter", "Quit"), p.Dim); return canvas;
         }
@@ -104,15 +104,19 @@ public sealed partial class TerminalUi
     void Header(TerminalCanvas canvas, CliTheme appearance, int left, int width)
     {
         var p = appearance.Palette;
-        canvas.Write(left, 1, "◈", new(p.Accent, p.Background, true));
-        canvas.Write(left + 4, 1, "OhMyHarness CLI 1.9.0", p.Highlight, width - 4);
-        if (appearance.Crt) canvas.Write(left + 29, 1, appearance.Brand, p.Dim, width - 29);
+        TerminalLogo.Draw(canvas, left, 1, p.Background);
+        string title = BrandingAssets.DisplayName(FeatureSettings.Read(workspace?.State.FeaturesJson ?? "{}").ApplicationName) + " CLI 1.10.0";
+        int textLeft = left + TerminalLogo.Width + 2, textWidth = width - TerminalLogo.Width - 2;
+        canvas.Write(textLeft, 1, title, p.Highlight, textWidth);
+        int brandLeft = textLeft + TerminalText.Width(title) + 3;
+        if (appearance.Crt && brandLeft + TerminalText.Width(appearance.Brand) < left + width)
+            canvas.Write(brandLeft, 1, appearance.Brand, p.Dim, left + width - brandLeft);
         var thinking = workspace?.State.ThinkingLevel ?? "auto";
-        canvas.Write(left + 4, 2, (CurrentProvider == null ? L("Aucun fournisseur · /connect", "No provider · /connect") : CurrentProvider.Name + " · " + CurrentProvider.Model) + " (" + thinking + ")", p.Dim, width - 4);
-        canvas.Write(left + 4, 3, CurrentProject?.GetSourceFolders().FirstOrDefault() ?? Environment.CurrentDirectory, p.Dim, width - 4);
+        canvas.Write(textLeft, 2, (CurrentProvider == null ? L("Aucun fournisseur · /connect", "No provider · /connect") : CurrentProvider.Name + " · " + CurrentProvider.Model) + " (" + thinking + ")", p.Dim, textWidth);
+        canvas.Write(textLeft, 3, CurrentProject?.GetSourceFolders().FirstOrDefault() ?? Environment.CurrentDirectory, p.Dim, textWidth);
         int active = runs.Count(r => !r.Value.IsCompleted);
-        if (active > 0) canvas.Write(left + 4, 4, $"{active} " + L("conversation(s) active(s) · /chats", "active conversation(s) · /chats"), new(p.Green, p.Background), width - 4);
-        else if (availableUpdate != null) canvas.Write(left + 4, 4, L("Mise à jour ", "Update ") + availableUpdate.Version + " · /update", p.Highlight, width - 4);
+        if (active > 0) canvas.Write(textLeft, 4, $"{active} " + L("conversation(s) active(s) · /chats", "active conversation(s) · /chats"), new(p.Green, p.Background), textWidth);
+        else if (availableUpdate != null) canvas.Write(textLeft, 4, L("Mise à jour ", "Update ") + availableUpdate.Version + " · /update", p.Highlight, textWidth);
     }
 
     void DrawDialog(TerminalCanvas canvas, Palette p, UiDialog prompt, CliTheme appearance)

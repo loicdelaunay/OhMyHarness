@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.0 — 2026-09-25
+
+- Added the opt-in **Complete design / Conception complète** skill to both GUI and CLI. It guides projects from focused questions and ideas through technology and visual choices, a living checklist, optional subagent collaboration, implementation, tests and visual verification.
+- The workflow adapts to the request and available tools, respects Plan/Execution modes and permissions, and explicitly reports checks that could not be performed.
+- The CLI header now shows a compact terminal rendering of the application icon and uses the configured application name.
+
 ## 1.9.0 — 2026-09-25
 
 - Added a self-contained Linux x64 build for Fedora 44 in both GUI and CLI, with checksummed release archives. The Uno GUI uses X11; desktop-control tools require platform implementations and are unavailable on Linux.

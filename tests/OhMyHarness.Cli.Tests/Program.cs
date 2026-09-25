@@ -10,6 +10,8 @@ using OhMyHarness.Core.Hosting;
 
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("OK: " + name); passed++; }
+Check(Skills.All.Where(s => !CliClient.DesktopSkills.Contains(s.Id)).Any(s => s.Id == CompleteDesignSkill.Id),
+    "Complete design remains available in the CLI skill picker");
 await CliThemeChecks.Run(Check);
 await ConnectChecks.Run(Check);
 CompletionChecks.Run(Check);

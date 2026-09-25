@@ -96,6 +96,7 @@ The built-in skills and their tool implementations are written in **.NET / C# an
 
 | Skill | What it gives the agent |
 | --- | --- |
+| **Complete design** | Guide a project from discovery questions and ideas through technology/visual choices, optional subagents, implementation, tests and visual verification. |
 | **Source exploration** | List and read project files, including focused line ranges. |
 | **Source editing** | Create, write and edit files in attached sources. |
 | **Code search glob/grep** | Find files and text with line numbers. |

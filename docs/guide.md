@@ -21,6 +21,14 @@ The guides for [agents](agent-modes.md), [browser and RAG](browser-rag-agents.md
 
 ## Getting started
 
+### Complete design: from idea to verified delivery
+
+Enable **Complete design** (**Conception complète** in French) in **Settings → Skills**, the GUI's **+ → Skills** menu, or the CLI's `/skills` picker. Describe your idea or the outcome you want. The agent asks focused questions, suggests alternatives with tradeoffs, helps choose technologies and a visual direction, then maintains a checklist through implementation and verification. Simple requests keep a lightweight workflow.
+
+The skill uses existing capabilities: attach your project sources and enable the source/terminal tools you need. Plan mode stays read-only; switch to Execution for implementation. It can propose independent subagents, but delegation still requires enabled orchestration. The parent integrates their work and performs execution tests. Visual verification uses available browser, screenshot or vision tools; the CLI can use configured MCP tools. Missing capabilities and checks that could not be run must be reported, rather than presented as successful validation. Enabling this skill does not automatically enable other skills or grant permissions.
+
+### Connect a provider
+
 Launch `artifacts\GUI\OhMyHarness.App.exe`, then **Settings → Providers**. Each connection has its own card, key, URL and catalog. **Test connection** detects models, selects them all and automatically saves the provider. **Refresh models** preserves existing choices; manual edits are committed with **Save**. The chat picker groups checked models from all connections and automatically switches providers. Multiple connections of the same type stay independent. For APIs without `/models`, a model can be entered manually in the editor and selected in the card.
 
 **Scheduled tasks**, within a project, creates a CRON schedule with a picker, instruction, model, thinking, resources, skills and a choice of fresh conversation or continued history. Tasks run while the application is open; they do not wake the PC.

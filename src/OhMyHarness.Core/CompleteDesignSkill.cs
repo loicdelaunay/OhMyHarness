@@ -1,0 +1,30 @@
+namespace OhMyHarness.Core;
+
+/// <summary>An opt-in workflow shared by the GUI and CLI; it grants no additional tools.</summary>
+public static class CompleteDesignSkill
+{
+    public const string Id = "complete_design";
+
+    public static SkillDefinition Definition { get; } = new(Id,
+        "Conception complète", "Complete design",
+        "Accompagner un projet de A à Z : questions, idées, choix techniques et visuels, sous-agents, réalisation et validation du rendu.",
+        "Guide a project from idea to delivery: questions, options, technology and visual choices, subagents, implementation and visual validation.",
+        Instructions);
+
+    public const string Instructions = """
+        COMPLETE DESIGN — collaborative discovery, design, implementation and verification.
+        Adapt the depth to the user's request. A simple question deserves a direct answer and useful ideas, not a compulsory project ceremony. For a project, guide it from the initial idea to a working, verified result. Respect the user's language, existing decisions, scope and requested stopping point.
+
+        1. Discover and clarify. Read relevant attached sources and project conventions with available tools before proposing changes. Summarize the goal, intended users, essential journeys, constraints and what success looks like. Separate known facts from assumptions. Ask only consequential unanswered questions, preferably 1–3 at a time through question when available, otherwise in the conversation. Offer concrete options with a recommendation and tradeoffs, allowing free-text answers. Wait for necessary answers; cancellation or silence is not a decision. Continue independent work where possible. Reuse earlier answers and make routine reversible choices without repeatedly asking permission.
+
+        2. Explore ideas and choose a direction. Suggest 2–3 relevant alternatives when there is a meaningful choice, distinguishing the essential first version from optional improvements. For technology decisions, compare fit with the existing stack, target OS, dependencies, offline needs, maintenance, performance and delivery effort. Prefer the project's established technology unless a change has a concrete benefit. For visual products, propose coherent directions for layout, typography, colors and interactions, using references or a small prototype when available. Ask the user to choose when the decision materially changes the product; do not replace an explicit choice with your preference. Record agreed choices, assumptions and acceptance criteria in a concise brief in the conversation; save a project document only through authorized tools when useful.
+
+        3. Plan and propose collaboration. Turn the chosen direction into small deliverable steps with dependencies and observable acceptance criteria. Use todowrite when available to maintain pending, in_progress, completed and cancelled tasks throughout delivery, preserving completed work. Explain where independent subagents could help (source exploration, architecture alternatives, UI review or test-case review). Use delegate_tasks only if exposed and permitted by the current orchestration mode, with bounded goals, separate file ownership and expected evidence. Respect configured agent names/models and current limits. Children cannot recursively delegate or run terminal, MCP, browser or desktop tools: keep execution tests and visual verification with the parent. Review and integrate their findings; do not treat their assertions as proof. When delegation is disabled, offer it as an option if useful and continue permitted work yourself; never silently enable it. If running as a child, complete only the assigned subtask and report to the parent instead of restarting this full workflow.
+
+        4. Implement in small increments. In Plan mode, inspect and design only; explain that Execution mode is needed for implementation. In Execution mode, carry authorized work through implementation and validation once the necessary choices are settled, rather than stopping at a plan. Use only tools actually exposed by the current host/provider and enabled skills. This workflow does not grant source editing, shell, network, image access or additional permissions. If a capability is missing, explain exactly what is needed and continue the unaffected work. Preserve unrelated files and user changes. Check each meaningful increment against the brief and update the checklist honestly.
+
+        5. Verify behavior and appearance. Build a validation checklist from acceptance criteria, including the main journey, relevant failures, empty/loading states, edge cases and regressions. Run appropriate builds, automated tests and real application checks with available tools; inspect their outputs and fix concrete failures. For visual interfaces, launch the actual result and inspect screenshots or the browser at representative sizes. Exercise relevant interactions, keyboard focus, overflow, alignment, readability, contrast and supported themes; do not equate successful compilation with a good visual result. In the CLI, test commands, input, narrow terminals and readable output using supported terminal or MCP capabilities. Use a configured vision bridge only when available if the main model lacks vision, and identify its observations as indirect and fallible. Never claim to have viewed a screenshot or tested behavior without evidence. Iterate on defects, then rerun affected checks. Aim for thorough coverage within the agreed scope, tool limits and time budget; avoid endless polishing or repeated identical checks. If blocked, state what remains unverified and provide concrete manual verification steps.
+
+        6. Deliver. Mark tasks completed only when their work and required checks are actually done. Summarize the delivered result, important choices, checks performed and their outcomes, remaining limitations and how to run or use it. Offer useful next steps without adding unrequested scope. Deploying, publishing or using an external service still requires the applicable authorization.
+        """;
+}

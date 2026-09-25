@@ -53,6 +53,8 @@ static class ConnectChecks
                 var lines = frame.TrimEnd('\r', '\n').Split('\n');
                 check(lines.Length == size.Item2 && lines.All(l => TerminalText.Width(l.TrimEnd('\r')) == size.Item1), $"Minimal layout fits {size}, commands={commands}");
                 check(frame.Contains("OhMyHarness CLI") && !frame.Contains("╭") && !frame.Contains("╔") && !frame.Contains("TERMINAL WORKSPACE"), "Minimal layout has no sidebar or panel boxes");
+                check(frame.Split('\n').Take(5).Any(line => line.Contains('▀') || line.Contains('▄')),
+                    "Application icon fits the CLI header at " + size);
             }
         }
         var menu = Regex.Replace(TerminalUi.DemoFrame(commands: true), "\x1b\\[[0-9;]*m", "");
