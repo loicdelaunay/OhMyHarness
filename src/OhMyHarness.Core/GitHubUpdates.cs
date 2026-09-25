@@ -14,7 +14,7 @@ public sealed record GitHubUpdate(string Version, string Tag, string Page, strin
 
 public sealed class GitHubUpdates(HttpClient http)
 {
-    public const string CurrentVersion = "1.11.0";
+    public const string CurrentVersion = "1.12.0";
     public const string Repository = "https://github.com/loicdelaunay/OhMyHarness";
     public const string Api = "https://api.github.com/repos/loicdelaunay/OhMyHarness/releases";
     const long MaxBytes = 1024L * 1024 * 1024;

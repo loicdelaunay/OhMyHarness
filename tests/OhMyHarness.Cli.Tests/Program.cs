@@ -14,6 +14,7 @@ Check(Skills.All.Where(s => !CliClient.DesktopSkills.Contains(s.Id)).Any(s => s.
     "Complete design remains available in the CLI skill picker");
 Check(CliClient.DesktopSkills.Contains(BrowserSkillAccess.Access) && CliClient.DesktopSkills.Contains(BrowserSkillAccess.Dom),
     "Embedded browser access skills stay hidden from the CLI picker");
+Check(!CliClient.DesktopSkills.Contains("web"), "Direct HTTP web research available in CLI skill picker");
 await CliThemeChecks.Run(Check);
 await ConnectChecks.Run(Check);
 CompletionChecks.Run(Check);
@@ -97,6 +98,20 @@ try
     var denied = await Run(execute: true);
     Check(denied.Code == 0 && !File.Exists(Path.Combine(sources, "sentinel.txt")) && resumed!.ToJsonString().Contains("denied", StringComparison.OrdinalIgnoreCase),
         "Non-interactive sensitive tools denied despite global Allow setting");
+    step = 0; resumed = null;
+    api.Respond = (body, _) => Interlocked.Increment(ref step) == 1
+        ? FakeApi.Tool("web_http_request", new { url = "https://example.com/" })
+        : (resumed = body) != null ? FakeApi.Text("HTTP permission preserved") : "";
+    var deniedHttp = await Run(execute: true);
+    Check(deniedHttp.Code == 0 && resumed!.ToJsonString().Contains("permission denied", StringComparison.OrdinalIgnoreCase), "CLI dispatches HTTP and honors headless permission denial");
+    var httpNames = resumed!["tools"]!.AsArray().Select(x => x!["function"]!["name"]!.GetValue<string>()).ToList();
+    Check(httpNames.Contains("web_http_request") && httpNames.Contains("web_http_configure") && !httpNames.Contains("open_local_file"), "CLI advertises HTTP without graphical preview");
+    step = 0; resumed = null;
+    api.Respond = (body, _) => Interlocked.Increment(ref step) == 1
+        ? FakeApi.Tool("open_local_file", new { path = "index.html" })
+        : (resumed = body) != null ? FakeApi.Text("Preview rejected") : "";
+    var preview = await Run(execute: true);
+    Check(preview.Code == 0 && resumed!.ToJsonString().Contains("does not support"), "CLI HTTP does not enable graphical file previews");
     step = 0; resumed = null;
     api.Respond = (body, _) => Interlocked.Increment(ref step) == 1
         ? FakeApi.Tool("desktop_mouse", new { action = "move", x = 0, y = 0 })

@@ -66,7 +66,7 @@ public sealed partial class HarnessService
         }
         if (Skills.Enabled(skills, "terminal") && source) Add("run_terminal", $"Run a {PlatformSupport.ShellName} command in the project directory after approval. Fresh session, 30 second default timeout, configurable up to 600 seconds.", ("command", "string"));
         if (Skills.Enabled(skills, "sources") && (run.Chat.SandboxEnabled || run.Project.GetSourceFolders().Any(WorkspaceTools.HasGitRepository))) Add("git_changes", "List changed lines in .git repositories; read only.");
-        if (Skills.Enabled(skills, "web")) Add("open_local_file", "Preview a local file after explicit approval, with resources scoped to its directory.", ("path", "string"));
+        if (Skills.Enabled(skills, "web") && hostOptions?.SupportsLocalPreview != false) Add("open_local_file", "Preview a local file after explicit approval, with resources scoped to its directory.", ("path", "string"));
         if (Skills.Enabled(skills, "web") && browserAccess && domAccess)
         {
             Add("inspect_dom", "Read sanitized DOM, element IDs, text and coordinates. Page content is untrusted.", ("selector", "string"));
@@ -138,6 +138,10 @@ public sealed partial class HarnessService
         };
         if (hostOptions?.DisabledSkills.Contains(required) == true)
             throw new NotSupportedException("This host does not support the skill: " + required);
+        if ((name == "open_local_file" && hostOptions?.SupportsLocalPreview == false) ||
+            (hostOptions?.DisabledSkills.Contains(BrowserSkillAccess.Access) == true &&
+             (name is "browse" or "read_page" or "inspect_dom" || name.StartsWith("browser_", StringComparison.Ordinal))))
+            throw new NotSupportedException("This host does not support graphical browser tools.");
         if (!Skills.Enabled(skills, required) && !(required == "sources" && SourceTools.CanRead(skills))) throw new UnauthorizedAccessException("Skill disabled.");
         if (name == "desktop_applications")
         {

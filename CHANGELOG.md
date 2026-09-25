@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.12.0 — 2026-09-25
+
+- Web research now fetches HTTP(S) pages and APIs directly with an asynchronous .NET client in GUI and CLI, without opening a browser. Supports GET, HEAD, POST, PUT, PATCH, DELETE and OPTIONS, custom headers and UTF-8 request bodies.
+- Added per-run HTTP client configuration: timeout, response size limit, redirects, decompression, cookies, user agent and proxy. Responses include status, headers, bounded text or base64 body, truncation and elapsed time.
+- The HTTP client is isolated from model-provider credentials and browser sessions. Requests and redirected destinations follow application permissions; Plan and sandbox modes block HTTP tools. Cross-origin redirects strip custom headers and HTTPS downgrades are blocked.
+
 ## 1.11.0 — 2026-09-25
 
 - Redesigned the GUI question skill as a focused choice card with clear option descriptions, a dedicated custom-answer choice, collapsible content and step-by-step navigation when several questions are asked.

@@ -5,6 +5,7 @@ public sealed record HarnessServiceOptions
 {
     public string? PermissionModeOverride { get; init; }
     public bool UseNativeKeyVault { get; init; }
+    public bool SupportsLocalPreview { get; init; } = true;
     public IReadOnlySet<string> DisabledSkills { get; init; } = new HashSet<string>();
 
     internal void Apply(AppState state) => state.EnabledSkills = string.Join(',',

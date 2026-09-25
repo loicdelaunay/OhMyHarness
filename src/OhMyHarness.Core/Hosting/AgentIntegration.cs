@@ -16,7 +16,7 @@ public sealed partial class HarnessService
             return await engine.PromptAsync(run.Provider, secret, directory, session, wire.Last()?["content"]?.GetValue<string>() ?? "",
                 wire[0]?["content"]?.GetValue<string>() ?? "", [], _ => { }, ct, policy: new("plan", "disabled"), workflow: run.Workflow?.ForChild());
         },
-        (scope, diff, ct) => Approve(scope, run.Chat.Title + (scope.StartsWith("memory|") ? " · Mémoire / Memory" : " · Sous-agent · Patch"), diff, ct),
+        (scope, diff, ct) => Approve(scope, run.Chat.Title + (scope.StartsWith("web-http|") ? " · HTTP .NET" : scope.StartsWith("memory|") ? " · Mémoire / Memory" : " · Sous-agent · Patch"), diff, ct),
         text => emit(new { @event = "status", chatId = run.Chat.Id, text }),
         async ct => { await using var db = Db(); return await db.States.Select(x => x.EnabledSkills).SingleAsync(ct); },
         child => emit(new { @event="subagent", chatId=run.Chat.Id, child }),

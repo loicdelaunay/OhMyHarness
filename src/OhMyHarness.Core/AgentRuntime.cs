@@ -29,6 +29,8 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
                 ["required"] = new JsonArray(required.Select(x => (JsonNode?)JsonValue.Create(x)).ToArray()) } } });
     public void AddDefinitions(JsonArray definitions, bool child = false)
     {
+        if (!child && !run.Chat.SandboxEnabled && !AgentPolicy.ReadOnly(run.Chat.ExecutionMode))
+            WebHttpTools.AddDefinitions(definitions, run.Options.EnabledSkills);
         MemoryTools.AddDefinitions(definitions, run.Options.EnabledSkills);
         SkillAuthoring.AddDefinitions(definitions, run.Options.EnabledSkills);
         if (run.Workflow != null) WorkflowTools.AddDefinitions(definitions, child);
@@ -42,11 +44,13 @@ public sealed class AgentRuntime(ConversationSession run, CustomSkills skills,
             new() { ["tasks"] = new JsonObject { ["type"] = "array", ["minItems"] = 1, ["maxItems"] = 3, ["items"] = new JsonObject { ["type"] = "object", ["properties"] = new JsonObject {
                 ["name"] = new JsonObject { ["type"] = "string" }, ["prompt"] = new JsonObject { ["type"] = "string" } }, ["required"] = new JsonArray("name", "prompt"), ["additionalProperties"] = false } } }, "tasks");
     }
-    public static bool Handles(string name) => MemoryTools.Handles(name) || SkillAuthoring.Handles(name) || WorkflowTools.Handles(name) || name is "load_skill" or "read_skill_resource" or "delegate_tasks";
+    public static bool Handles(string name) => WebHttpTools.Handles(name) || MemoryTools.Handles(name) || SkillAuthoring.Handles(name) || WorkflowTools.Handles(name) || name is "load_skill" or "read_skill_resource" or "delegate_tasks";
     public async Task<string> CallAsync(string name, JsonObject args, CancellationToken ct)
     {
         AgentPolicy.Demand(run.Chat.ExecutionMode, name);
         SandboxWorkspace.Demand(run.Chat.SandboxEnabled, name);
+        if (WebHttpTools.Handles(name)) return await run.WebHttp.CallAsync(name, args,
+            liveSkills ?? (_ => Task.FromResult(run.Options.EnabledSkills)), approve, ct);
         if (SkillAuthoring.Handles(name))
         {
             var enabledSkills = liveSkills == null ? run.Options.EnabledSkills : await liveSkills(ct);

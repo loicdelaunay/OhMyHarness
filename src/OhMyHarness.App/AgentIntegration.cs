@@ -15,7 +15,7 @@ public sealed partial class MainWindow
             return await openCodeEngine.PromptAsync(run.Provider, secret, directory, session, wire.Last()?["content"]?.GetValue<string>() ?? "",
                 wire[0]?["content"]?.GetValue<string>() ?? "", [], _ => { }, ct, policy: new("plan", "disabled"), workflow: run.Workflow?.ForChild());
         },
-        (scope, diff, ct) => RequestAccessAsync(scope, scope.StartsWith("memory|") ? "Mémoire / Memory" : "Sous-agent · Patch", diff, scope.StartsWith("memory|") ? "Mémoire / Memory" : "Patch des sources", ct),
+        (scope, diff, ct) => RequestAccessAsync(scope, scope.StartsWith("web-http|") ? "Recherche web · Requête HTTP" : scope.StartsWith("memory|") ? "Mémoire / Memory" : "Sous-agent · Patch", diff, scope.StartsWith("web-http|") ? "HTTP .NET" : scope.StartsWith("memory|") ? "Mémoire / Memory" : "Patch des sources", ct),
         text => { SetRunStatus(run, text); return Task.CompletedTask; },
         _ => Task.FromResult(RunSkills(run)), child => { UpdateSubagent(run,child); return Task.CompletedTask; },
         async (target,wire,definitions,ct)=> {

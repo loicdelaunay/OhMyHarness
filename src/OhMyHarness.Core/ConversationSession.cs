@@ -13,6 +13,7 @@ public class ConversationSession : IDisposable
     public volatile ConversationExport.Progress? ExportProgress;
     public WorkflowTools? Workflow { get; set; }
     public VisionBridge? Vision { get; set; }
+    public WebHttpTools WebHttp { get; } = new();
     public ToolLoopGuard LoopGuard { get; } = new();
     public SandboxWorkspace? Sandbox { get; private set; }
     public string? SandboxEngine { get; private set; }
@@ -61,6 +62,7 @@ public class ConversationSession : IDisposable
 
     public void Dispose()
     {
+        WebHttp.Dispose();
         Sandbox?.Dispose();
         Cancellation.Dispose();
         Db.Dispose();
