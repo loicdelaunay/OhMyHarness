@@ -93,7 +93,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
   t.after(async()=>{child.stdin.end();await new Promise(resolve=>{if(child.exitCode!=null)return resolve();child.once('exit',resolve);setTimeout(()=>child.kill(),5000).unref();});server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});});
   await ready;
   const initial=await rpc('snapshot');assert.equal(initial.state.permissionMode,'ask');assert.equal(initial.providers.length,2);assert.ok(!('protectedKey' in initial.providers[0]));
-  assert.equal(initial.appearanceThemes.length,6);assert.equal(initial.appearanceThemes.filter(x=>x.dark).length,3);
+  assert.equal(initial.appearanceThemes.length,10);assert.equal(initial.appearanceThemes.filter(x=>x.dark).length,5);
   const mcpFile=await rpc('mcp.json.get');assert.equal(mcpFile.path,path.join(directory,'MCP.json'));
   const godot=JSON.stringify({mcpServers:{godot:{command:'npx',args:['@coding-solo/godot-mcp'],env:{GODOT_PATH:'/path/to/godot',DEBUG:'true'},enabled:false}}});
   await rpc('mcp.json.save',{content:godot,expected:mcpFile.content});

@@ -102,8 +102,9 @@ public sealed class SandboxWorkspace : IDisposable
             throw new UnauthorizedAccessException("Sandbox : chemin non portable ou dangereux / Unsafe path: " + name);
         return name;
     }
-    static bool Included(string name, byte[] bytes) => !name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase)) &&
-        !Path.GetFileName(name).StartsWith("database.sqlite", StringComparison.OrdinalIgnoreCase) &&
+    static bool IncludedPath(string name) => !name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase)) &&
+        !Path.GetFileName(name).StartsWith("database.sqlite", StringComparison.OrdinalIgnoreCase);
+    static bool Included(string name, byte[] bytes) => IncludedPath(name) &&
         (ImageExtensions.Contains(Path.GetExtension(name)) || SourceText.TryDecode(bytes, out _));
     internal static async Task<Dictionary<string, byte[]>> ReadFilesAsync(string root, CancellationToken ct)
     {
@@ -118,7 +119,7 @@ public sealed class SandboxWorkspace : IDisposable
                 if (++visited > 50000) throw new IOException("Sandbox : trop de fichiers / Too many files.");
                 var name = Path.GetRelativePath(root, path).Replace('\\', '/');
                 var attributes = File.GetAttributes(path);
-                if ((attributes & FileAttributes.ReparsePoint) != 0 || name.Split('/').Any(p => Excluded.Contains(p) || p.StartsWith(".env", StringComparison.OrdinalIgnoreCase))) continue;
+                if ((attributes & FileAttributes.ReparsePoint) != 0 || !IncludedPath(name)) continue;
                 ValidateName(name);
                 if ((attributes & FileAttributes.Directory) != 0) { pending.Push(path); continue; }
                 var length = new FileInfo(path).Length;

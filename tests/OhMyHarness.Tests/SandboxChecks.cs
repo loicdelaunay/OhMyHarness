@@ -25,6 +25,8 @@ static class SandboxChecks
             await File.WriteAllTextAsync(Path.Combine(project, "delete.txt"), "remove me\n");
             await File.WriteAllTextAsync(Path.Combine(project, ".env"), "secret");
             await File.WriteAllTextAsync(Path.Combine(project, "database.sqlite"), "sqlite secret");
+            // Excluded databases must never be opened, including while SQLite holds a lock.
+            using var lockedDatabase = File.Open(Path.Combine(project, "database.sqlite"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             Directory.CreateDirectory(Path.Combine(project, ".git"));
             await File.WriteAllTextAsync(Path.Combine(project, ".git", "config"), "private config");
             var database = Path.Combine(root, "database.sqlite");

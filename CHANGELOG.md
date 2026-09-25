@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.1 — 2026-09-25
+
+- Restored local RAG support on Intel Macs by pinning ONNX Runtime to 1.23.2, which includes native libraries for both Intel and Apple Silicon Macs, as well as Windows.
+- Fixed sandbox creation on Windows when a source folder contains an open application database. Excluded SQLite files are now filtered before reading their contents.
+- Fixed GitHub Actions downloading only the Git LFS pointer instead of the bundled MiniLM weights. Builds now verify the model checksum before embedding it and explain how to retrieve missing or invalid weights.
+- Fixed macOS CI tests failing on symbolic-link ancestors in system temporary paths by using the runner's physical temporary directory; sandbox link restrictions remain enforced. Updated the desktop service test to match the ten available themes.
+
 ## 1.8.0 — 2026-09-24
 
 - Added a shared response-style preference in GUI General settings and CLI `/settings`: DEFAULT leaves prompts unchanged; SHORT, PRAGMATIC, DETAILED and FUN guide the length and tone of subsequent answers, including OpenCode sessions.
