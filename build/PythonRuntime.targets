@@ -2,6 +2,8 @@
   <!-- Pin both release and SHA256. Download only on the build machine, never at runtime. -->
   <PropertyGroup>
     <PythonRuntimeRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</PythonRuntimeRid>
+    <!-- Fedora's implicit SDK RID is fedora.44-x64; the bundled glibc archive uses linux-x64. -->
+    <PythonRuntimeRid Condition="'$(PythonRuntimeRid)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">linux-x64</PythonRuntimeRid>
     <PythonRuntimeRid Condition="'$(PythonRuntimeRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</PythonRuntimeRid>
     <PythonRuntimeVersion>3.13.15</PythonRuntimeVersion>
     <PythonRuntimeRelease>20260901</PythonRuntimeRelease>
