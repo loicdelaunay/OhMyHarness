@@ -13,4 +13,14 @@
     <PackageReference Include="Markdig" Version="0.40.0" />
   </ItemGroup>
   <ItemGroup><EmbeddedResource Include="Models/minilm_multilingual/*" /></ItemGroup>
+  <Target Name="ValidateBundledEmbeddingModel" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)' != 'true'">
+    <!-- Match the pinned weights in Models/minilm_multilingual/README.md before embedding them. -->
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/Models/minilm_multilingual/model.onnx')"
+           Text="The bundled MiniLM model is missing. Install Git LFS and run 'git lfs pull' before building." />
+    <GetFileHash Files="$(MSBuildProjectDirectory)/Models/minilm_multilingual/model.onnx" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="_BundledEmbeddingModelHash" />
+    </GetFileHash>
+    <Error Condition="'$(_BundledEmbeddingModelHash)' != '66FC00F5F29AFCAFF34092E1BDD20008CA3918265A82FB9695A551E510CC4EBC'"
+           Text="The bundled MiniLM model is incomplete or corrupt (possibly a Git LFS pointer). Run 'git lfs pull'; CI checkout must enable 'lfs: true'." />
+  </Target>
 </Project>

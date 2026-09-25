@@ -18,6 +18,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Use a physical temporary directory on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # /var and /tmp can be symlinks on macOS; sandbox fixtures reject linked ancestors.
+          physical_temp="$(cd "$RUNNER_TEMP" && pwd -P)"
+          printf 'TMPDIR=%s/\n' "$physical_temp" >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
