@@ -52,7 +52,7 @@ public sealed class CliOptions
     }
 
     public const string HelpText = """
-    OhMyHarness CLI 1.8.0
+    OhMyHarness CLI 1.8.1
     Your portable AI workspace, in the terminal.
 
       omh [project-folder]                       Interactive terminal interface
