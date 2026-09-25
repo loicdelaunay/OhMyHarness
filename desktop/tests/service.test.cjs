@@ -94,6 +94,7 @@ test('desktop service: SQLite, providers, skills, permissions and simultaneous c
       initialStreams.push(finish);
       if(initialStreams.length===2){holdInitialStreams=false;for(const complete of initialStreams.splice(0))complete();}
     }else if(body.model==='queue-model'&&last.role==='user'&&last.content==='first')releaseQueueStream=finish;
+    else if(body.model==='queue-model'&&last.role==='user'&&last.content==='stop with queue')res.once('close',()=>{active--;});
     else setTimeout(finish,250);
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
